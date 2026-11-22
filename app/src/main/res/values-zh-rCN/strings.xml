@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FileHub</string>
+
+    <string name="tab_servers">服务器</string>
+    <string name="tab_browse">浏览</string>
+    <string name="tab_my">我的</string>
+
+    <string name="servers_empty_title">还没有服务器</string>
+    <string name="servers_empty_body">添加你的第一个 FileHub 实例，之后可以在多个服务器之间切换。</string>
+    <string name="servers_add">添加服务器</string>
+
+    <string name="browse_no_server_title">先添加服务器</string>
+    <string name="browse_no_server_body">连接成功后，这里会显示该服务器上的目录和远程目录。</string>
+
+    <string name="my_version">FileHub Android 0.1.0</string>
+    <string name="my_version_body">M0 骨架：下一步接入登录、设备 Token 和 roots。</string>
+
+    <string name="login_title">连接 FileHub</string>
+    <string name="login_url_label">服务器地址</string>
+    <string name="login_url_hint">https://nas.example.com</string>
+    <string name="login_username">用户名</string>
+    <string name="login_password">密码</string>
+    <string name="login_connect">连接</string>
+    <string name="login_connecting">正在连接…</string>
+    <string name="login_http_warning">HTTP 连接未加密，仅建议在可信局域网使用。</string>
+    <string name="login_setup_required">服务器尚未初始化。请先在浏览器打开 %1$s 完成初始化。</string>
+    <string name="login_error_url">请输入服务器地址</string>
+    <string name="login_error_credentials">请输入用户名和密码</string>
+    <string name="login_error_bad_credentials">用户名或密码错误</string>
+    <string name="login_error_rate_limited">尝试过于频繁，请稍后再试</string>
+    <string name="login_error_network">无法连接服务器，请检查地址、网络或证书</string>
+    <string name="login_error_generic">登录失败</string>
+    <string name="login_device_token_note">密码只用于换取设备 Token，不会保存。</string>
+
+    <string name="servers_active">当前使用</string>
+    <string name="servers_remove">移除服务器</string>
+    <string name="servers_remove_title">移除服务器？</string>
+    <string name="servers_remove_body">将删除本地配置，并在服务器上撤销该设备的 Token。</string>
+    <string name="servers_needs_login">设备授权已过期，请重新登录。</string>
+
+    <string name="browse_locations">位置</string>
+    <string name="browse_loading">正在加载位置…</string>
+    <string name="browse_retry">重试</string>
+    <string name="browse_root_remote">远程</string>
+    <string name="browse_root_read_only">只读</string>
+    <string name="browse_no_roots">该账号还没有分配目录。</string>
+
+    <string name="my_account">账号</string>
+    <string name="my_server">服务器</string>
+    <string name="my_logout">退出登录</string>
+    <string name="my_token_expiry">设备 Token 到期</string>
+    <string name="my_security_note">设备 Token 使用 Android Keystore 加密保存。</string>
+    <string name="my_token_valid">设备 Token 有效</string>
+
+    <string name="common_cancel">取消</string>
+    <string name="common_remove">移除</string>
+    <string name="common_retry">重试</string>
+    <string name="common_back">返回</string>
+    <string name="common_refresh">刷新</string>
+    <string name="browse_root_placeholder">文件列表正在接入</string>
+    <string name="my_version_format">FileHub Android %1$s</string>
+</resources>
+

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FileHub</string>
+
+    <string name="tab_servers">Servers</string>
+    <string name="tab_browse">Browse</string>
+    <string name="tab_my">Me</string>
+
+    <string name="servers_empty_title">No servers yet</string>
+    <string name="servers_empty_body">Add your first FileHub instance, then switch between servers from here.</string>
+    <string name="servers_add">Add server</string>
+
+    <string name="browse_no_server_title">Add a server first</string>
+    <string name="browse_no_server_body">Once connected, this tab shows the directories and remote mounts on the selected server.</string>
+
+    <string name="my_version">FileHub Android 0.1.0</string>
+    <string name="my_version_body">M0 skeleton. Next: sign-in, device token, roots.</string>
+
+    <string name="login_title">Connect to FileHub</string>
+    <string name="login_url_label">Server address</string>
+    <string name="login_url_hint">https://nas.example.com</string>
+    <string name="login_username">Username</string>
+    <string name="login_password">Password</string>
+    <string name="login_connect">Connect</string>
+    <string name="login_connecting">Connecting…</string>
+    <string name="login_http_warning">HTTP is unencrypted. Use it only on a trusted LAN.</string>
+    <string name="login_setup_required">Server is not initialized. Open %1$s in a browser and complete setup first.</string>
+    <string name="login_error_url">Enter a server address</string>
+    <string name="login_error_credentials">Enter username and password</string>
+    <string name="login_error_bad_credentials">Wrong username or password</string>
+    <string name="login_error_rate_limited">Too many attempts. Try again later.</string>
+    <string name="login_error_network">Cannot reach the server. Check the address, network, or certificate.</string>
+    <string name="login_error_generic">Sign-in failed</string>
+    <string name="login_device_token_note">Your password is used once to create a device token. It is not stored.</string>
+
+    <string name="servers_active">Active</string>
+    <string name="servers_remove">Remove server</string>
+    <string name="servers_remove_title">Remove server?</string>
+    <string name="servers_remove_body">This removes the local profile and revokes its device token on the server.</string>
+    <string name="servers_needs_login">Device token expired. Sign in again.</string>
+
+    <string name="browse_locations">Locations</string>
+    <string name="browse_loading">Loading locations…</string>
+    <string name="browse_retry">Retry</string>
+    <string name="browse_root_remote">Remote</string>
+    <string name="browse_root_read_only">Read-only</string>
+    <string name="browse_no_roots">No directories are assigned to this account.</string>
+
+    <string name="my_account">Account</string>
+    <string name="my_server">Server</string>
+    <string name="my_logout">Sign out</string>
+    <string name="my_token_expiry">Device token expires</string>
+    <string name="my_security_note">The device token is encrypted with the Android Keystore.</string>
+    <string name="my_token_valid">Device token valid</string>
+
+    <string name="common_cancel">Cancel</string>
+    <string name="common_remove">Remove</string>
+    <string name="common_retry">Retry</string>
+    <string name="common_back">Back</string>
+    <string name="common_refresh">Refresh</string>
+    <string name="browse_root_placeholder">File browser is coming next.</string>
+    <string name="my_version_format">FileHub Android %1$s</string>
+</resources>
+
