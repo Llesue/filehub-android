@@ -2,6 +2,7 @@ package filehub.android.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -31,10 +33,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import coil3.ImageLoader
+import coil3.compose.AsyncImage
 import filehub.android.BuildConfig
 import filehub.android.R
 import filehub.android.data.SessionState
@@ -44,6 +51,7 @@ import java.util.Date
 @Composable
 fun MyScreen(
     state: SessionState,
+    imageLoader: ImageLoader?,
     onLogout: () -> Unit,
     onRemove: () -> Unit,
     onRefresh: () -> Unit,
@@ -53,9 +61,14 @@ fun MyScreen(
     onShares: () -> Unit,
     theme: String,
     onThemeChange: (String) -> Unit,
+    language: String,
+    onLanguageChange: (String) -> Unit,
 ) {
     val profile = state.active
     var confirmRemove by remember { mutableStateOf(false) }
+    val avatarUrl = profile?.avatarVersion?.takeIf { it > 0 }?.let { version ->
+        "${profile.baseUrl.trimEnd('/')}/api/v1/me/avatar?v=$version"
+    }
 
     if (profile == null) {
         Column(
@@ -83,8 +96,8 @@ fun MyScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
             text = stringResource(R.string.my_account),
@@ -99,11 +112,12 @@ fun MyScreen(
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         ) {
-            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(14.dp)),
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -112,6 +126,17 @@ fun MyScreen(
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold,
                     )
+                    if (avatarUrl != null && imageLoader != null) {
+                        AsyncImage(
+                            model = avatarUrl,
+                            imageLoader = imageLoader,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape),
+                        )
+                    }
                 }
                 Spacer(Modifier.size(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -155,10 +180,20 @@ fun MyScreen(
 
         InfoCard(title = stringResource(R.string.my_server)) {
             InfoRow(stringResource(R.string.my_token_expiry), formatExpiry(profile.tokenExpiresAt))
+            Text(
+                text = stringResource(R.string.my_token_expiry_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             InfoRow(stringResource(R.string.my_security_note), "")
         }
 
-        ThemeCard(theme = theme, onChange = onThemeChange)
+        AppearanceCard(
+            theme = theme,
+            onThemeChange = onThemeChange,
+            language = language,
+            onLanguageChange = onLanguageChange,
+        )
         InfoCard(title = stringResource(R.string.my_version_format, BuildConfig.VERSION_NAME)) {
             Text(
                 text = stringResource(R.string.my_version_body),
@@ -240,26 +275,47 @@ fun MyScreen(
 }
 
 @Composable
-private fun ThemeCard(theme: String, onChange: (String) -> Unit) {
-    var menu by remember { mutableStateOf(false) }
-    InfoCard(title = stringResource(R.string.appearance)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource(R.string.theme),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            Box {
-                TextButton(onClick = { menu = true }) {
-                    Text(themeLabel(theme))
+private fun AppearanceCard(
+    theme: String,
+    onThemeChange: (String) -> Unit,
+    language: String,
+    onLanguageChange: (String) -> Unit,
+) {
+    var themeMenu by remember { mutableStateOf(false) }
+    var languageMenu by remember { mutableStateOf(false) }
+    InfoCard(title = stringResource(R.string.appearance), spacing = 4.dp) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(modifier = Modifier.weight(1f)) {
+                SettingTile(
+                    label = stringResource(R.string.language),
+                    value = languageLabel(language),
+                    onClick = { languageMenu = true },
+                )
+                DropdownMenu(expanded = languageMenu, onDismissRequest = { languageMenu = false }) {
+                    listOf("system", "zh", "en").forEach { value ->
+                        DropdownMenuItem(
+                            text = { Text(languageLabel(value)) },
+                            onClick = {
+                                onLanguageChange(value)
+                                languageMenu = false
+                            },
+                        )
+                    }
                 }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            }
+            Box(modifier = Modifier.weight(1f)) {
+                SettingTile(
+                    label = stringResource(R.string.theme),
+                    value = themeLabel(theme),
+                    onClick = { themeMenu = true },
+                )
+                DropdownMenu(expanded = themeMenu, onDismissRequest = { themeMenu = false }) {
                     listOf("system", "light", "dark").forEach { value ->
                         DropdownMenuItem(
                             text = { Text(themeLabel(value)) },
                             onClick = {
-                                onChange(value)
-                                menu = false
+                                onThemeChange(value)
+                                themeMenu = false
                             },
                         )
                     }
@@ -267,6 +323,43 @@ private fun ThemeCard(theme: String, onChange: (String) -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun SettingTile(
+    label: String,
+    value: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun languageLabel(value: String): String = when (value) {
+    "zh" -> stringResource(R.string.language_zh)
+    "en" -> stringResource(R.string.language_en)
+    else -> stringResource(R.string.language_system)
 }
 
 @Composable
@@ -279,6 +372,7 @@ private fun themeLabel(value: String): String = when (value) {
 @Composable
 private fun InfoCard(
     title: String,
+    spacing: Dp = 8.dp,
     content: @Composable () -> Unit,
 ) {
     Surface(

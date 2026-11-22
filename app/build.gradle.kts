@@ -19,8 +19,8 @@ android {
         applicationId = "filehub.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         vectorDrawables.useSupportLibrary = true
     }
@@ -73,6 +73,7 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.appcompat)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
@@ -83,6 +84,10 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.zxing.core)
     implementation(libs.markwon.core)
+    implementation(libs.markwon.tables)
+    implementation(libs.markwon.tasklist)
+    implementation(libs.markwon.strikethrough)
+    implementation(libs.markwon.linkify)
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.compose.ui)

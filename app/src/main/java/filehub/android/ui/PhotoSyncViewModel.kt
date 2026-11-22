@@ -71,10 +71,12 @@ class PhotoSyncViewModel(
         remotePath: String,
         albums: Set<Long>?,
         includeVideos: Boolean,
-        wifiOnly: Boolean,
+        photosWifiOnly: Boolean,
+        videosWifiOnly: Boolean,
         chargingOnly: Boolean,
         albumSubfolders: Boolean,
         schedule: String,
+        resetEntries: Boolean = false,
     ) {
         if (_state.value.saving) return
         _state.value = _state.value.copy(saving = true, error = null, saved = false)
@@ -90,11 +92,14 @@ class PhotoSyncViewModel(
                         remotePath = remotePath.trim('/'),
                         albumsJson = repository.encodeAlbums(albums),
                         includeVideos = includeVideos,
-                        wifiOnly = wifiOnly,
+                        wifiOnly = photosWifiOnly && videosWifiOnly,
+                        photosWifiOnly = photosWifiOnly,
+                        videosWifiOnly = videosWifiOnly,
                         chargingOnly = chargingOnly,
                         albumSubfolders = albumSubfolders,
                         schedule = schedule,
                     ),
+                    resetEntries = resetEntries,
                 )
             }.onSuccess {
                 _state.value = _state.value.copy(saving = false, saved = true)

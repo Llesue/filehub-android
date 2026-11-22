@@ -8,6 +8,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "photo_sync_config")
@@ -21,6 +23,8 @@ data class PhotoSyncConfigEntity(
     val albumsJson: String? = null,
     val includeVideos: Boolean = true,
     val wifiOnly: Boolean = true,
+    val photosWifiOnly: Boolean = true,
+    val videosWifiOnly: Boolean = true,
     val chargingOnly: Boolean = false,
     val albumSubfolders: Boolean = true,
     val schedule: String = "daily",
@@ -92,6 +96,46 @@ data class FolderSyncEntryEntity(
     val conflict: String? = null,
     val updatedAt: Long = 0,
 )
+
+@Entity(tableName = "directory_cache", primaryKeys = ["profileId", "rootId", "path", "sort", "order"])
+data class DirectoryCacheEntity(
+    val profileId: String,
+    val rootId: Long,
+    val path: String,
+    val sort: String,
+    val order: String,
+    val entriesJson: String,
+    val readOnly: Boolean,
+    val readOnlyReason: String?,
+    val fetchedAt: Long,
+)
+
+@Dao
+interface DirectoryCacheDao {
+    @Query(
+        "SELECT * FROM directory_cache WHERE profileId = :profileId AND rootId = :rootId " +
+            "AND path = :path AND sort = :sort AND \"order\" = :order",
+    )
+    suspend fun get(
+        profileId: String,
+        rootId: Long,
+        path: String,
+        sort: String,
+        order: String,
+    ): DirectoryCacheEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(entry: DirectoryCacheEntity)
+
+    @Query(
+        "DELETE FROM directory_cache WHERE rowid NOT IN " +
+            "(SELECT rowid FROM directory_cache ORDER BY fetchedAt DESC LIMIT :keep)",
+    )
+    suspend fun prune(keep: Int)
+
+    @Query("DELETE FROM directory_cache WHERE profileId = :profileId")
+    suspend fun clearForProfile(profileId: String)
+}
 
 @Dao
 interface FolderSyncDao {
@@ -210,11 +254,46 @@ interface PhotoSyncDao {
         PhotoSyncEntryEntity::class,
         FolderSyncConfigEntity::class,
         FolderSyncEntryEntity::class,
+        DirectoryCacheEntity::class,
     ],
-    version = 3,
+    version = 5,
     exportSchema = false,
 )
 abstract class SyncDatabase : RoomDatabase() {
     abstract fun photoSyncDao(): PhotoSyncDao
     abstract fun folderSyncDao(): FolderSyncDao
+    abstract fun directoryCacheDao(): DirectoryCacheDao
+
+    companion object {
+        /** Splits the old global Wi-Fi switch into separate photo/video policies. */
+        val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photo_sync_config ADD COLUMN photosWifiOnly INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE photo_sync_config ADD COLUMN videosWifiOnly INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("UPDATE photo_sync_config SET photosWifiOnly = wifiOnly, videosWifiOnly = wifiOnly")
+            }
+        }
+
+        /** Adds the directory metadata cache without touching sync checkpoints. */
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `directory_cache` (
+                        `profileId` TEXT NOT NULL,
+                        `rootId` INTEGER NOT NULL,
+                        `path` TEXT NOT NULL,
+                        `sort` TEXT NOT NULL,
+                        `order` TEXT NOT NULL,
+                        `entriesJson` TEXT NOT NULL,
+                        `readOnly` INTEGER NOT NULL,
+                        `readOnlyReason` TEXT,
+                        `fetchedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`profileId`, `rootId`, `path`, `sort`, `order`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+    }
 }

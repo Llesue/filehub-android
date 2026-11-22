@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import filehub.android.FileHubApplication
+import filehub.android.R
 import filehub.android.core.model.FileEntry
 import filehub.android.core.model.FileKind
 import filehub.android.core.model.FileProperties
@@ -17,6 +18,7 @@ import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.ServerProfile
 import filehub.android.core.model.SortOrder
+import filehub.android.data.DirectoryCacheRepository
 import filehub.android.data.FilesRepository
 import filehub.android.data.ShareRepository
 import filehub.android.core.model.ShareCreated
@@ -58,6 +60,7 @@ data class FileBrowserState(
     val operationLoading: Boolean = false,
     val operationError: String? = null,
     val previewEntry: FileEntry? = null,
+    val previewImages: List<FileEntry> = emptyList(),
     val textPreview: TextFileDto? = null,
     val pdfPreviewFile: File? = null,
     val previewLoading: Boolean = false,
@@ -76,12 +79,14 @@ data class FileBrowserState(
 }
 
 class FilesViewModel(
+    private val application: Application,
     private val repository: FilesRepository,
     private val thumbnailLoaderFactory: ThumbnailLoaderFactory,
     private val mediaPlayerFactory: MediaPlayerFactory,
     private val previewDownloader: PreviewDownloader,
     private val transferRepository: TransferRepository,
     private val shareRepository: ShareRepository,
+    private val directoryCache: DirectoryCacheRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileBrowserState())
@@ -95,11 +100,12 @@ class FilesViewModel(
     private var loadJob: Job? = null
 
     fun open(profile: ServerProfile, root: FileRoot, path: String = "") {
+        val normalized = normalizePath(path)
         loadJob?.cancel()
         _state.value = FileBrowserState(
             profile = profile,
             root = root,
-            path = path,
+            path = normalized,
             loading = true,
         )
         viewModelScope.launch {
@@ -108,7 +114,7 @@ class FilesViewModel(
                 _imageLoader.value = thumbnailLoaderFactory.get(profile.id, token)
             }
         }
-        load(path = path, append = false)
+        load(path = normalized, append = false)
     }
 
     fun refresh() {
@@ -174,7 +180,7 @@ class FilesViewModel(
                 }
                 .onFailure { error ->
                     _state.update {
-                        it.copy(propertiesLoading = false, propertiesError = error.toUserMessage())
+                        it.copy(propertiesLoading = false, propertiesError = error.toUserMessage(application))
                     }
                 }
         }
@@ -213,7 +219,7 @@ class FilesViewModel(
                 }
                 .onFailure { error ->
                     _state.update {
-                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                        it.copy(operationLoading = false, operationError = error.toUserMessage(application))
                     }
                 }
         }
@@ -239,7 +245,7 @@ class FilesViewModel(
                 }
                 .onFailure { error ->
                     _state.update {
-                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                        it.copy(operationLoading = false, operationError = error.toUserMessage(application))
                     }
                 }
         }
@@ -275,9 +281,16 @@ class FilesViewModel(
         val needsText = entry.kind == FileKind.Text || entry.kind == FileKind.Code
         val needsPdf = entry.kind == FileKind.Pdf
         val needsMedia = entry.kind == FileKind.Video || entry.kind == FileKind.Audio
+        val images = if (entry.kind == FileKind.Image) {
+            current.entries.filter { it.kind == FileKind.Image }
+                .ifEmpty { listOf(entry) }
+        } else {
+            emptyList()
+        }
         _state.update {
             it.copy(
                 previewEntry = entry,
+                previewImages = images,
                 textPreview = null,
                 pdfPreviewFile = null,
                 previewLoading = needsText || needsPdf || needsMedia,
@@ -294,7 +307,7 @@ class FilesViewModel(
                     }
                     .onFailure { error ->
                         _state.update {
-                            it.copy(previewLoading = false, previewError = error.toUserMessage())
+                            it.copy(previewLoading = false, previewError = error.toUserMessage(application))
                         }
                     }
             }
@@ -302,7 +315,7 @@ class FilesViewModel(
                 val token = ensureToken(profile)
                 val url = downloadUrl(entry)
                 if (token == null || url == null) {
-                    _state.update { it.copy(previewLoading = false, previewError = "设备授权已失效") }
+                    _state.update { it.copy(previewLoading = false, previewError = application.getString(R.string.error_unauthorized)) }
                     return@launch
                 }
                 runCatching { previewDownloader.download(url, token, entry.name) }
@@ -311,14 +324,14 @@ class FilesViewModel(
                     }
                     .onFailure { error ->
                         _state.update {
-                            it.copy(previewLoading = false, previewError = error.toUserMessage())
+                            it.copy(previewLoading = false, previewError = error.toUserMessage(application))
                         }
                     }
             }
             needsMedia -> viewModelScope.launch {
                 val token = ensureToken(profile)
                 if (token == null) {
-                    _state.update { it.copy(previewLoading = false, previewError = "设备授权已失效") }
+                    _state.update { it.copy(previewLoading = false, previewError = application.getString(R.string.error_unauthorized)) }
                 } else {
                     _state.update {
                         it.copy(previewLoading = false, previewMediaReady = it.previewMediaReady + 1)
@@ -326,6 +339,10 @@ class FilesViewModel(
                 }
             }
         }
+    }
+
+    fun previewPage(entry: FileEntry) {
+        _state.update { it.copy(previewEntry = entry) }
     }
 
     private suspend fun ensureToken(profile: ServerProfile): String? {
@@ -337,6 +354,7 @@ class FilesViewModel(
         _state.update {
             it.copy(
                 previewEntry = null,
+                previewImages = emptyList(),
                 textPreview = null,
                 pdfPreviewFile = null,
                 previewError = null,
@@ -427,7 +445,7 @@ class FilesViewModel(
                 }
             }.onFailure { error ->
                 _state.update {
-                    it.copy(shareLoading = false, shareError = error.toUserMessage())
+                    it.copy(shareLoading = false, shareError = error.toUserMessage(application))
                 }
             }
         }
@@ -476,7 +494,7 @@ class FilesViewModel(
                 }
                 .onFailure { error ->
                     _state.update {
-                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                        it.copy(operationLoading = false, operationError = error.toUserMessage(application))
                     }
                 }
         }
@@ -493,7 +511,7 @@ class FilesViewModel(
                 .onSuccess { _state.update { it.copy(operationLoading = false) } }
                 .onFailure { error ->
                     _state.update {
-                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                        it.copy(operationLoading = false, operationError = error.toUserMessage(application))
                     }
                 }
         }
@@ -522,7 +540,7 @@ class FilesViewModel(
                 refresh()
             }.onFailure { error ->
                 _state.update {
-                    it.copy(operationLoading = false, operationError = error.toUserMessage())
+                    it.copy(operationLoading = false, operationError = error.toUserMessage(application))
                 }
             }
         }
@@ -580,6 +598,23 @@ class FilesViewModel(
             .toString()
     }
 
+    fun previewImageUrl(entry: FileEntry): String? {
+        val current = _state.value
+        val profile = current.profile ?: return null
+        val root = current.root ?: return null
+        val base = profile.baseUrl.toHttpUrlOrNull() ?: return null
+        val remotePath = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        return base.newBuilder()
+            .addPathSegments("api/v1/thumb")
+            .addQueryParameter("root", root.id.toString())
+            .addQueryParameter("path", remotePath)
+            .addQueryParameter("edge", "2048")
+            .addQueryParameter("wait", "1")
+            .addQueryParameter("v", entry.modified.toString())
+            .build()
+            .toString()
+    }
+
     fun thumbnailUrl(entry: FileEntry, width: Int = 128): String? {
         if (!entry.hasPreview) return null
         val current = _state.value
@@ -625,7 +660,7 @@ class FilesViewModel(
                 }
                 .onFailure { error ->
                     _state.update {
-                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                        it.copy(operationLoading = false, operationError = error.toUserMessage(application))
                     }
                 }
         }
@@ -641,6 +676,23 @@ class FilesViewModel(
             _state.update { it.copy(loading = it.entries.isEmpty(), error = null, loginRequired = false) }
         }
         loadJob = viewModelScope.launch {
+            if (!append && cursor == null) {
+                directoryCache.get(profile.id, root.id, path, current.sort, current.order)?.let { cached ->
+                    if (cached.listing.entries.isNotEmpty()) {
+                        _state.update {
+                            it.copy(
+                                path = path,
+                                entries = cached.listing.entries,
+                                readOnly = cached.listing.readOnly,
+                                readOnlyReason = cached.listing.readOnlyReason,
+                                loading = false,
+                                stale = true,
+                                error = null,
+                            )
+                        }
+                    }
+                }
+            }
             runCatching {
                 repository.list(
                     profile = profile,
@@ -649,9 +701,32 @@ class FilesViewModel(
                     sort = current.sort,
                     order = current.order,
                     cursor = cursor,
+                    includeSizes = true,
                 )
             }.onSuccess { listing ->
+                if (!append && cursor == null) {
+                    directoryCache.put(
+                        profile.id, root.id, path, current.sort, current.order, listing,
+                    )
+                }
                 _state.update {
+                    val previewEntry = it.previewEntry
+                    val previewImages = if (
+                        !append && cursor == null &&
+                        previewEntry?.kind == FileKind.Image && it.previewImages.size <= 1
+                    ) {
+                        val images = listing.entries.filter { entry -> entry.kind == FileKind.Image }
+                        if (images.any { entry ->
+                                entry.name == previewEntry.name && entry.modified == previewEntry.modified
+                            }
+                        ) {
+                            images
+                        } else {
+                            it.previewImages
+                        }
+                    } else {
+                        it.previewImages
+                    }
                     it.copy(
                         path = path,
                         entries = if (append) it.entries + listing.entries else listing.entries,
@@ -663,6 +738,7 @@ class FilesViewModel(
                         loadingMore = false,
                         loginRequired = false,
                         error = null,
+                        previewImages = previewImages,
                     )
                 }
             }.onFailure { error ->
@@ -672,7 +748,7 @@ class FilesViewModel(
                         loading = false,
                         loadingMore = false,
                         loginRequired = needsLogin,
-                        error = if (needsLogin) null else error.toUserMessage(),
+                        error = if (needsLogin) null else error.toUserMessage(application),
                     )
                 }
             }
@@ -687,12 +763,14 @@ class FilesViewModel(
             initializer {
                 val app = application as FileHubApplication
                 FilesViewModel(
+                    app,
                     app.container.filesRepository,
                     app.container.thumbnailLoaderFactory,
                     app.container.mediaPlayerFactory,
                     app.container.previewDownloader,
                     app.container.transferRepository,
                     app.container.shareRepository,
+                    app.container.directoryCacheRepository,
                 )
             }
         }

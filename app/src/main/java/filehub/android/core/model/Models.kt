@@ -14,6 +14,7 @@ data class ServerProfile(
     val createdAt: Long,
     val addresses: List<String> = emptyList(),
     val iconUrl: String? = null,
+    val avatarVersion: Long? = null,
     val lastRootId: Long? = null,
     val lastPath: String = "",
 )
@@ -60,11 +61,13 @@ enum class FileKind {
     Document,
     Sheet,
     Slide,
+    Database,
     Archive,
     Code,
     File,
 }
 
+@Serializable
 data class FileEntry(
     val name: String,
     val isDir: Boolean,
@@ -170,18 +173,22 @@ data class PublicShareMeta(
     val collection: Boolean,
 )
 
-private fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKind {
+internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKind {
     if (isDir) return FileKind.Folder
     val mime = mimeType.lowercase()
     val ext = name.substringAfterLast('.', "").lowercase()
     return when {
         mime.startsWith("image/") -> FileKind.Image
+        ext in setOf("jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "heic", "heif", "jxl") -> FileKind.Image
         mime.startsWith("video/") -> FileKind.Video
+        ext in setOf("mp4", "mov", "mkv", "webm", "avi", "m4v", "mpg", "mpeg", "3gp", "wmv", "flv") -> FileKind.Video
         mime.startsWith("audio/") -> FileKind.Audio
+        ext in setOf("mp3", "wav", "flac", "aac", "ogg", "m4a", "opus", "oga", "wma", "aiff", "amr") -> FileKind.Audio
         mime == "application/pdf" || ext == "pdf" -> FileKind.Pdf
         ext in setOf("doc", "docx", "rtf", "odt", "docm", "dotm", "dotx", "wps", "caj") -> FileKind.Document
         ext in setOf("xls", "xlsx", "xlsb", "xlsm", "csv", "tsv", "ods", "et") -> FileKind.Sheet
         ext in setOf("ppt", "pptx", "pptm", "potm", "potx", "ppsx", "odp", "dps", "key") -> FileKind.Slide
+        ext in setOf("db", "sqlite", "sqlite3", "mdb", "accdb") -> FileKind.Database
         mime.startsWith("application/msword") -> FileKind.Document
         mime.startsWith("application/vnd.openxmlformats-officedocument.wordprocessingml") -> FileKind.Document
         mime.startsWith("application/vnd.ms-excel") -> FileKind.Sheet
@@ -192,7 +199,8 @@ private fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKind
         ext in setOf(
             "kt", "kts", "java", "rs", "go", "py", "js", "ts", "tsx", "jsx",
             "c", "h", "cpp", "hpp", "cs", "rb", "php", "sh", "zsh", "sql",
-            "json", "yaml", "yml", "toml", "xml",
+            "json", "yaml", "yml", "toml", "xml", "ini", "conf", "cfg",
+            "properties", "env",
         ) -> FileKind.Code
         mime.startsWith("text/") -> FileKind.Text
         ext in setOf("md", "markdown", "txt", "log", "csv") -> FileKind.Text

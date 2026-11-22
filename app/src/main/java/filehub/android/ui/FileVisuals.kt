@@ -27,6 +27,7 @@ fun fileIconRes(kind: FileKind): Int = when (kind) {
     FileKind.Document -> R.drawable.ic_file_document
     FileKind.Sheet -> R.drawable.ic_file_sheet
     FileKind.Slide -> R.drawable.ic_file_slide
+    FileKind.Database -> R.drawable.ic_file_database
     FileKind.Archive -> R.drawable.ic_file_archive
     FileKind.Code -> R.drawable.ic_file_code
     FileKind.Text, FileKind.File -> R.drawable.ic_file_document
@@ -42,6 +43,7 @@ fun fileIconColor(kind: FileKind): Color = when (kind) {
     FileKind.Document -> FileHubFileDoc
     FileKind.Sheet -> FileHubFileSheet
     FileKind.Slide -> FileHubFileSlide
+    FileKind.Database -> FileHubFileSheet
     FileKind.Archive -> FileHubFileBrown
     FileKind.Code -> FileHubFileCyan
     FileKind.Text, FileKind.File -> MaterialTheme.colorScheme.onSurfaceVariant

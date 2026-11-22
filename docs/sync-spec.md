@@ -1,6 +1,6 @@
 # FileHub Android 同步设计
 
-> 状态：草案 v0.1（2026-11-22）｜对应 `PLAN.md §3.5`、`docs/ui-spec.md §7`
+> 状态：v0.2（2026-11-22）｜对应 `PLAN.md §3.5`、`docs/ui-spec.md §7`
 > 范围：相册同步（单向）+ 目录同步（上传/下载/双向）
 
 ---
@@ -51,7 +51,7 @@ mode: upload | download | two_way
 options: {
   includeVideos, albumSubfolders,
   ignoreHidden, ignorePatterns,
-  deleteSync, wifiOnly, chargingOnly,
+  deleteSync, photosWifiOnly, videosWifiOnly, chargingOnly,
   schedule: manual | 15m | hourly | daily | weekly,
   maxFileBytes?
 }
@@ -258,7 +258,8 @@ uploadId?, lastSyncedAt, error?, conflict?
 | 系统重启 | WorkManager 恢复持久任务；App 启动时再做一次过期检查 |
 
 - 不使用精确闹钟；不启动常驻前台服务；不承诺"拍照后立刻上传"（App 在后台被冻结时做不到）。
-- 用户手动"立即同步"时可以临时覆盖"仅 Wi-Fi"（弹确认）。
+- 用户手动"立即同步"同样遵守 Wi-Fi/充电约束；不提供静默绕过。
+- 计费网络下被跳过的照片或视频保持 pending，并排一个仅 Wi-Fi 的一次性补跑任务。
 
 ### 10.2 运行预算与分批
 
@@ -346,7 +347,8 @@ uploadId?, lastSyncedAt, error?, conflict?
 - 本地扫描：5000 张照片元数据 <10s；10 万文件目录需分批/可暂停（P1 优化）。
 - Room：批量 upsert；每 200 条一个事务；进度更新节流 500ms。
 - 上传/下载：单 chunk 8MiB；内存峰值 <20MB。
-- 首轮 5000 张照片：显示预计时长；默认仅 Wi-Fi；失败可续。
+- 首轮 5000 张照片：显示预计时长；默认照片/视频都仅 Wi-Fi；失败可续。
+- 远程目录已存在时先探测再 mkdir，兼容旧服务端对 EEXIST 返回 500 的行为。
 - 服务端 rate limit：遇到 429 自动降速；不并行轰炸。
 
 ---

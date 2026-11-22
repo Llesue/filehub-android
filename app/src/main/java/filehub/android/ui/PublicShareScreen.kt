@@ -43,6 +43,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,41 +68,22 @@ fun PublicShareScreen(
         if (state.path.isEmpty()) onBack() else viewModel.goUp()
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(
-                onClick = {
-                    if (state.path.isEmpty()) onBack() else viewModel.goUp()
-                },
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back),
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = state.meta?.name ?: "Share",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (state.meta?.readOnly == true) {
-                    Text(
-                        text = stringResource(R.string.public_share_read_only),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-
+    DetailScaffold(
+        title = state.meta?.name ?: stringResource(R.string.public_share_title),
+        subtitle = if (state.meta?.readOnly == true) {
+            stringResource(R.string.public_share_read_only)
+        } else {
+            null
+        },
+        onBack = {
+            if (state.path.isEmpty()) onBack() else viewModel.goUp()
+        },
+    ) { padding ->
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding),
+    ) {
         when {
             state.loading && state.meta == null -> Box(
                 modifier = Modifier.fillMaxSize(),
@@ -126,6 +109,10 @@ fun PublicShareScreen(
                     label = { Text(stringResource(R.string.public_share_password)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = clearFocusOnDone {
+                        if (password.isNotBlank() && !state.loading) viewModel.unlock(password)
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.size(12.dp))
@@ -157,7 +144,7 @@ fun PublicShareScreen(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
-                val meta = state.meta!!
+                val meta = state.meta ?: return@Column
                 if (meta.entries.isEmpty()) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -203,6 +190,7 @@ fun PublicShareScreen(
                 }
             }
         }
+    }
     }
 }
 

@@ -1,12 +1,23 @@
 package filehub.android.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
@@ -27,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import android.net.Uri
@@ -34,6 +46,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -41,6 +55,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import filehub.android.FileHubApplication
 import filehub.android.R
+import filehub.android.data.ServerConnectionStatus
 import filehub.android.data.api.PublicLink
 import filehub.android.data.transfer.TransferStatus
 
@@ -92,10 +107,28 @@ fun FileHubApp(viewModel: AppViewModel) {
     val transferViewModel: TransferViewModel = viewModel(factory = TransferViewModel.factory(application))
     val photoSyncViewModel: PhotoSyncViewModel = viewModel(factory = PhotoSyncViewModel.factory(application))
     val folderSyncViewModel: FolderSyncViewModel = viewModel(factory = FolderSyncViewModel.factory(application))
+    val remoteFolderPickerViewModel: RemoteFolderPickerViewModel = viewModel(
+        factory = RemoteFolderPickerViewModel.factory(application),
+    )
     val shareViewModel: ShareViewModel = viewModel(factory = ShareViewModel.factory(application))
     var tab by rememberSaveable { mutableStateOf(MainTab.Servers) }
     val session by viewModel.session.collectAsStateWithLifecycle()
+    val connection by viewModel.connection.collectAsStateWithLifecycle()
     val theme by viewModel.theme.collectAsStateWithLifecycle()
+    val language = when {
+        AppCompatDelegate.getApplicationLocales().isEmpty -> "system"
+        AppCompatDelegate.getApplicationLocales().toLanguageTags().startsWith("zh") -> "zh"
+        else -> "en"
+    }
+    val onLanguageChange: (String) -> Unit = { value ->
+        AppCompatDelegate.setApplicationLocales(
+            when (value) {
+                "zh" -> LocaleListCompat.forLanguageTags("zh-CN")
+                "en" -> LocaleListCompat.forLanguageTags("en")
+                else -> LocaleListCompat.getEmptyLocaleList()
+            },
+        )
+    }
     val transfers by transferViewModel.items.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
@@ -105,7 +138,36 @@ fun FileHubApp(viewModel: AppViewModel) {
         viewModel.clearSessionError()
     }
 
-    NavHost(navController = navController, startDestination = "main") {
+    LaunchedEffect(connection?.status, connection?.profileId) {
+        val current = connection ?: return@LaunchedEffect
+        if (current.status != ServerConnectionStatus.Success) return@LaunchedEffect
+        delay(450)
+        if (viewModel.connection.value?.profileId == current.profileId) {
+            tab = MainTab.Browse
+            viewModel.clearConnection()
+        }
+    }
+
+    NavHost(
+        navController = navController,
+        startDestination = "main",
+        enterTransition = {
+            slideInHorizontally(tween(240, easing = FastOutSlowInEasing)) { it / 5 } +
+                fadeIn(tween(200, easing = FastOutSlowInEasing))
+        },
+        exitTransition = {
+            slideOutHorizontally(tween(240, easing = FastOutSlowInEasing)) { -it / 12 } +
+                fadeOut(tween(160))
+        },
+        popEnterTransition = {
+            slideInHorizontally(tween(240, easing = FastOutSlowInEasing)) { -it / 12 } +
+                fadeIn(tween(200, easing = FastOutSlowInEasing))
+        },
+        popExitTransition = {
+            slideOutHorizontally(tween(240, easing = FastOutSlowInEasing)) { it / 5 } +
+                fadeOut(tween(160))
+        },
+    ) {
         composable("main") {
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
@@ -121,13 +183,30 @@ fun FileHubApp(viewModel: AppViewModel) {
                                 onClick = { navController.navigate("transfers") },
                             )
                         }
-                        NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                        NavigationBar(
+                            modifier = Modifier
+                                .navigationBarsPadding()
+                                .height(60.dp),
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            windowInsets = WindowInsets(0, 0, 0, 0),
+                        ) {
                             MainTab.entries.forEach { item ->
                                 NavigationBarItem(
                                     selected = tab == item,
                                     onClick = { tab = item },
-                                    icon = { Icon(item.icon, contentDescription = null) },
-                                    label = { Text(stringResource(item.labelRes)) },
+                                    icon = {
+                                        Icon(
+                                            item.icon,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                    },
+                                    label = {
+                                        Text(
+                                            text = stringResource(item.labelRes),
+                                            style = MaterialTheme.typography.labelSmall,
+                                        )
+                                    },
                                 )
                             }
                         }
@@ -139,14 +218,30 @@ fun FileHubApp(viewModel: AppViewModel) {
                         .fillMaxSize()
                         .padding(innerPadding),
                 ) {
-                    when (tab) {
+                    AnimatedContent(
+                        targetState = tab,
+                        transitionSpec = {
+                            val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                            (slideInHorizontally(
+                                tween(200, easing = FastOutSlowInEasing),
+                            ) { direction * it / 12 } +
+                                fadeIn(tween(180, easing = FastOutSlowInEasing)))
+                                .togetherWith(
+                                    slideOutHorizontally(
+                                        tween(160, easing = FastOutSlowInEasing),
+                                    ) { -direction * it / 24 } +
+                                        fadeOut(tween(140, easing = FastOutSlowInEasing)),
+                                )
+                        },
+                        label = "main-tab",
+                        modifier = Modifier.fillMaxSize(),
+                    ) { currentTab ->
+                    when (currentTab) {
                         MainTab.Servers -> ServersScreen(
                             state = session,
+                            connection = connection,
                             onAddServer = { navController.navigate("addServer") },
-                            onSelect = { id ->
-                                viewModel.selectProfile(id)
-                                tab = MainTab.Browse
-                            },
+                            onSelect = viewModel::connectProfile,
                             onRemove = viewModel::removeProfile,
                             onEdit = { id -> navController.navigate("editServer/$id") },
                         )
@@ -159,6 +254,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                         )
                         MainTab.My -> MyScreen(
                             state = session,
+                            imageLoader = viewModel.imageLoader.collectAsStateWithLifecycle().value,
                             onLogout = viewModel::logout,
                             onRemove = { session.active?.let { viewModel.removeProfile(it.id) } },
                             onRefresh = viewModel::refreshRoots,
@@ -168,7 +264,10 @@ fun FileHubApp(viewModel: AppViewModel) {
                             onShares = { navController.navigate("shares") },
                             theme = theme,
                             onThemeChange = viewModel::setTheme,
+                            language = language,
+                            onLanguageChange = onLanguageChange,
                         )
+                    }
                     }
                 }
             }
@@ -219,7 +318,10 @@ fun FileHubApp(viewModel: AppViewModel) {
             val token = entry.arguments?.getString("token")
             if (base != null && token != null) {
                 val publicViewModel: PublicShareViewModel = viewModel(
-                    factory = PublicShareViewModel.factory(PublicLink(base, token)),
+                    factory = PublicShareViewModel.factory(
+                        LocalContext.current.applicationContext as android.app.Application,
+                        PublicLink(base, token),
+                    ),
                 )
                 PublicShareScreen(
                     viewModel = publicViewModel,
@@ -230,6 +332,7 @@ fun FileHubApp(viewModel: AppViewModel) {
         composable("folderSync") {
             FolderSyncScreen(
                 viewModel = folderSyncViewModel,
+                remoteFolderPicker = remoteFolderPickerViewModel,
                 session = session,
                 onBack = { navController.popBackStack() },
             )
@@ -237,6 +340,7 @@ fun FileHubApp(viewModel: AppViewModel) {
         composable("photoSync") {
             PhotoSyncScreen(
                 viewModel = photoSyncViewModel,
+                folderPicker = remoteFolderPickerViewModel,
                 session = session,
                 onBack = { navController.popBackStack() },
             )

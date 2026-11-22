@@ -22,6 +22,8 @@ object FolderSyncNotifications {
     private const val CHANNEL_ID = "filehub_folder_sync"
     private const val ID = 5401
 
+    fun idFor(profileId: String): Int = ID + (profileId.hashCode() and 0x0FFFFF)
+
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < 26) return
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -39,9 +41,10 @@ object FolderSyncNotifications {
         total: Int,
         current: String,
         id: Int = ID,
+        serverName: String = "",
     ): ForegroundInfo {
         ensureChannel(context)
-        val notification = notification(context, done, total, current)
+        val notification = notification(context, done, total, current, serverName)
         return if (Build.VERSION.SDK_INT >= 29) {
             ForegroundInfo(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
@@ -50,20 +53,35 @@ object FolderSyncNotifications {
     }
 
     @SuppressLint("MissingPermission")
-    fun update(context: Context, done: Int, total: Int, current: String, id: Int = ID) {
+    fun update(
+        context: Context,
+        done: Int,
+        total: Int,
+        current: String,
+        id: Int = ID,
+        serverName: String = "",
+    ) {
         if (!canNotify(context)) return
         runCatching {
-            NotificationManagerCompat.from(context).notify(id, notification(context, done, total, current))
+            NotificationManagerCompat.from(context).notify(
+                id,
+                notification(context, done, total, current, serverName),
+            )
         }
     }
 
     @SuppressLint("MissingPermission")
-    fun finished(context: Context, message: String, id: Int = ID) {
+    fun finished(
+        context: Context,
+        message: String,
+        id: Int = ID,
+        serverName: String = "",
+    ) {
         if (!canNotify(context)) return
         ensureChannel(context)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentTitle(context.getString(R.string.folder_sync_channel))
+            .setContentTitle(title(context, serverName))
             .setContentText(message)
             .setContentIntent(intent(context))
             .setAutoCancel(true)
@@ -71,10 +89,21 @@ object FolderSyncNotifications {
         runCatching { NotificationManagerCompat.from(context).notify(id + 1, notification) }
     }
 
-    private fun notification(context: Context, done: Int, total: Int, current: String): Notification {
+    private fun title(context: Context, serverName: String): String {
+        val channel = context.getString(R.string.folder_sync_channel)
+        return if (serverName.isBlank()) channel else "$channel · $serverName"
+    }
+
+    private fun notification(
+        context: Context,
+        done: Int,
+        total: Int,
+        current: String,
+        serverName: String,
+    ): Notification {
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setContentTitle(context.getString(R.string.folder_sync_channel))
+            .setContentTitle(title(context, serverName))
             .setContentText(if (total > 0) "$done / $total · $current" else current)
             .setContentIntent(intent(context))
             .setOnlyAlertOnce(true)

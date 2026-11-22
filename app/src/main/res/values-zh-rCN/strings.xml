@@ -14,7 +14,7 @@
     <string name="browse_no_server_body">连接成功后，这里会显示该服务器上的目录和远程目录。</string>
 
     <string name="my_version">FileHub Android 0.1.0</string>
-    <string name="my_version_body">M0 骨架：下一步接入登录、设备 Token 和 roots。</string>
+    <string name="my_version_body">FileHub 的原生 Android 客户端。</string>
 
     <string name="login_title">连接 FileHub</string>
     <string name="login_url_label">服务器地址</string>
@@ -49,8 +49,8 @@
     <string name="my_account">账号</string>
     <string name="my_server">服务器</string>
     <string name="my_logout">退出登录</string>
-    <string name="my_token_expiry">设备 Token 到期</string>
-    <string name="my_security_note">设备 Token 使用 Android Keystore 加密保存。</string>
+    <string name="my_token_expiry">登录有效期</string>
+    <string name="my_security_note">设备令牌使用 Android Keystore 加密保存。</string>
     <string name="my_token_valid">设备 Token 有效</string>
 
     <string name="common_cancel">取消</string>
@@ -112,7 +112,7 @@
     <string name="search_title">搜索</string>
     <string name="search_hint">搜索文件名…</string>
     <string name="search_all">全部位置</string>
-    <string name="search_current">当前 root</string>
+    <string name="search_current">当前范围</string>
     <string name="search_kind_all">全部</string>
     <string name="search_kind_image">图片</string>
     <string name="search_kind_video">视频</string>
@@ -151,7 +151,7 @@
     <string name="photo_sync_permission">需要相册访问权限</string>
     <string name="photo_sync_result">已同步 %1$d / %2$d</string>
     <string name="photo_sync_screen">相册同步</string>
-    <string name="photo_sync_target_root">目标 root</string>
+    <string name="photo_sync_target_root">存储位置</string>
     <string name="photo_sync_target_path">目标文件夹</string>
     <string name="photo_sync_albums">相册</string>
     <string name="photo_sync_include_videos">包含视频</string>
@@ -233,7 +233,7 @@
     <string name="public_share_downloading">已开始下载</string>
     <string name="move_to">移动到</string>
     <string name="copy_to">复制到</string>
-    <string name="target_root">目标 root</string>
+    <string name="target_root">目标位置</string>
     <string name="target_path">目标文件夹</string>
     <string name="zip_create">创建 ZIP</string>
     <string name="zip_name">ZIP 名称</string>
@@ -255,5 +255,48 @@
     <string name="server_save">保存</string>
     <string name="server_address">地址</string>
     <string name="server_addresses_hint">从上到下依次尝试，直到有一个可用</string>
+    <string name="preview_rotate">旋转</string>
+    <string name="error_server_setup_required">服务器尚未初始化，请先在浏览器中完成初始化</string>
+    <string name="error_unauthorized">设备授权已失效，请重新登录</string>
+    <string name="error_invalid_url">服务器地址无效</string>
+    <string name="error_invalid_response">服务器返回了无法解析的数据</string>
+    <string name="error_not_found">内容不存在</string>
+    <string name="error_forbidden">没有权限</string>
+    <string name="error_network">网络错误</string>
+    <string name="server_unreachable">无法连接该服务器的任何地址</string>
+    <string name="server_address_required">至少保留一个服务器地址</string>
+    <string name="server_missing">服务器配置不存在</string>
+    <string name="folder_sync_error_no_local">请选择本地文件夹</string>
+    <string name="transfer_error_resume_expired">下载断点失效，请重试</string>
+    <string name="transfer_error_download_failed">下载失败</string>
+    <string name="transfer_saved_to">已保存到 %1$s</string>
+    <string name="transfer_open_folder">打开位置</string>
+    <plurals name="sync_failed_count">
+        <item quantity="other">%1$d 个文件失败</item>
+    </plurals>
+    <string name="language">语言</string>
+    <string name="language_system">跟随系统</string>
+    <string name="language_zh">简体中文</string>
+    <string name="language_en">English</string>
+    <string name="photo_sync_enable">相册同步</string>
+    <string name="photo_sync_enable_body">按所选相册在后台自动上传</string>
+    <string name="folder_sync_enable">文件夹同步</string>
+    <string name="folder_sync_enable_body">按所选方式在后台保持本地文件夹与服务器同步</string>
+    <string name="public_share_title">分享链接</string>
+    <string name="server_connecting_progress">正在连接 %1$d/%2$d</string>
+    <string name="server_connected">连接成功</string>
+    <string name="server_connect_failed">连接失败</string>
+    <string name="my_token_expiry_hint">到期后需要重新登录，不会自动续期。</string>
+    <string name="folder_picker_title">选择文件夹</string>
+    <string name="folder_picker_select">选择此文件夹</string>
+    <string name="folder_picker_empty">没有子文件夹</string>
+    <string name="folder_picker_up">上一级</string>
+    <string name="photo_sync_photos_wifi">照片仅 Wi-Fi</string>
+    <string name="photo_sync_videos_wifi">视频仅 Wi-Fi</string>
+    <string name="photo_sync_target_change_title">更改目标文件夹？</string>
+    <string name="photo_sync_target_change_body">已同步的照片记录会被清除，所有选中照片会重新上传到新目录；旧目录里的文件不会删除。</string>
+    <string name="sync_waiting_wifi">%1$d 项等待 Wi-Fi</string>
+        <string name="folder_sync_conflicts_count">%1$d 个冲突</string>
+    <string name="folder_picker_load_more">加载更多</string>
 </resources>
 

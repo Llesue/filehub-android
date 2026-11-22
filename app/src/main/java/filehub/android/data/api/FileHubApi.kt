@@ -338,6 +338,16 @@ internal data class PropertiesDto(
 )
 
 @Serializable
+internal data class PreferencesResponseDto(
+    val preferences: PreferencesDto? = null,
+)
+
+@Serializable
+internal data class PreferencesDto(
+    @SerialName("avatar_version") val avatarVersion: Long = 0,
+)
+
+@Serializable
 internal data class ErrorEnvelope(
     val error: ErrorDto? = null,
 )
@@ -395,6 +405,7 @@ class FileHubApi(
         order: SortOrder = SortOrder.Asc,
         cursor: String? = null,
         limit: Int = 200,
+        includeSizes: Boolean = true,
     ): DirectoryListing {
         val query = buildMap {
             put("root", rootId.toString())
@@ -402,6 +413,7 @@ class FileHubApi(
             put("sort", sort.apiValue)
             put("order", order.apiValue)
             put("limit", limit.toString())
+            put("sizes", includeSizes.toString())
             cursor?.takeIf { it.isNotBlank() }?.let { put("cursor", it) }
         }
         val response = getJson(
@@ -670,6 +682,11 @@ class FileHubApi(
                 )
             },
         )
+    }
+
+    suspend fun avatarVersion(): Long? {
+        val response = getJson("me/preferences", PreferencesResponseDto.serializer())
+        return response.preferences?.avatarVersion
     }
 
     suspend fun deleteToken(tokenId: Long) {
@@ -946,6 +963,7 @@ class FileHubApi(
             val tokenApi = FileHubApi(normalized, tokenResponse.token)
             val me = tokenApi.me()
             val roots = tokenApi.roots()
+            val avatarVersion = runCatching { tokenApi.avatarVersion() }.getOrNull()
             val host = normalized.toHttpUrlOrNull()?.host ?: normalized
             val displayName = branding?.name?.takeIf { it.isNotBlank() } ?: host
             val iconUrl = branding?.iconUrl?.let { raw ->
@@ -963,6 +981,7 @@ class FileHubApi(
                 createdAt = System.currentTimeMillis() / 1000,
                 addresses = listOf(normalized),
                 iconUrl = iconUrl,
+                avatarVersion = avatarVersion,
             )
             return LoginResult(profile = profile, token = tokenResponse.token, roots = roots)
         }

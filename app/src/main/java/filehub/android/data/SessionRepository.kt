@@ -1,5 +1,7 @@
 package filehub.android.data
 
+import android.content.Context
+import filehub.android.R
 import filehub.android.core.model.Branding
 import filehub.android.core.model.FileRoot
 import filehub.android.core.model.ServerProfile
@@ -8,10 +10,22 @@ import filehub.android.data.api.FileHubApiException
 import filehub.android.data.local.ProfileStore
 import filehub.android.data.local.TokenVault
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+
+enum class ServerConnectionStatus { Connecting, Success, Failed }
+
+data class ServerConnection(
+    val profileId: String,
+    val attempt: Int,
+    val total: Int,
+    val status: ServerConnectionStatus,
+    val message: String? = null,
+)
 
 data class SessionState(
     val loading: Boolean = true,
@@ -24,11 +38,21 @@ data class SessionState(
 )
 
 class SessionRepository(
+    private val context: Context,
     private val store: ProfileStore,
     private val vault: TokenVault,
 ) {
     private val _state = MutableStateFlow(SessionState())
     val state: StateFlow<SessionState> = _state.asStateFlow()
+
+    private val _connection = MutableStateFlow<ServerConnection?>(null)
+    val connection: StateFlow<ServerConnection?> = _connection.asStateFlow()
+
+    private val probeClient = OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .callTimeout(6, TimeUnit.SECONDS)
+        .build()
 
     suspend fun load() {
         val stored = store.read()
@@ -45,44 +69,135 @@ class SessionRepository(
         }
     }
 
-    suspend fun login(baseUrl: String, username: String, password: String): Result<ServerProfile> =
+    suspend fun login(addresses: List<String>, username: String, password: String): Result<ServerProfile> =
         runCatching {
-            val result = FileHubApi.loginAndCreateToken(
-                baseUrl = baseUrl,
-                username = username,
-                password = password,
+            val normalized = addresses
+                .map { FileHubApi.normalizeBaseUrl(it) }
+                .distinct()
+            require(normalized.isNotEmpty()) { context.getString(R.string.login_error_url) }
+            var lastError: Throwable? = null
+            var result: filehub.android.core.model.LoginResult? = null
+            var workingAddress: String? = null
+            for (address in normalized) {
+                try {
+                    result = FileHubApi.loginAndCreateToken(
+                        baseUrl = address,
+                        username = username,
+                        password = password,
+                    )
+                    workingAddress = address
+                    break
+                } catch (error: Throwable) {
+                    lastError = error
+                }
+            }
+            val login = result ?: throw lastError ?: error(context.getString(R.string.login_error_generic))
+            val profile = login.profile.copy(
+                baseUrl = workingAddress ?: normalized.first(),
+                addresses = normalized,
             )
-            val encrypted = vault.encrypt(result.token)
-            store.saveToken(result.profile.id, encrypted)
+            val encrypted = vault.encrypt(login.token)
+            store.saveToken(profile.id, encrypted)
 
             val profiles = _state.value.profiles
                 .filterNot {
-                    it.baseUrl == result.profile.baseUrl && it.username == result.profile.username
-                } + result.profile
+                    it.baseUrl == profile.baseUrl && it.username == profile.username
+                } + profile
             store.saveProfiles(profiles)
-            store.setActive(result.profile.id)
+            store.setActive(profile.id)
 
             _state.update {
                 it.copy(
                     loading = false,
                     profiles = profiles,
-                    active = result.profile,
-                    roots = result.roots,
+                    active = profile,
+                    roots = login.roots,
                     rootsLoading = false,
                     needsLogin = false,
                     error = null,
                 )
             }
-            result.profile
+            profile
         }
 
-    suspend fun select(profileId: String) {
-        val profile = _state.value.profiles.firstOrNull { it.id == profileId } ?: return
-        store.setActive(profileId)
-        _state.update {
-            it.copy(active = profile, roots = emptyList(), error = null, needsLogin = false)
+    /**
+     * Activates a profile only after one of its addresses answers. The current
+     * address is tried first; the rest are fallbacks. This keeps the server
+     * page visible and shows per-address progress instead of blocking Browse.
+     */
+    suspend fun connect(profileId: String): Result<Unit> = runCatching {
+        val profile = _state.value.profiles.firstOrNull { it.id == profileId }
+            ?: error(context.getString(R.string.server_missing))
+        val token = store.readToken(profile.id)?.let(vault::decrypt)
+        if (token == null) {
+            val message = context.getString(R.string.error_unauthorized)
+            _connection.value = ServerConnection(
+                profileId, 0, 0, ServerConnectionStatus.Failed, message,
+            )
+            _state.update { it.copy(needsLogin = true, error = message) }
+            error(message)
         }
-        refreshRoots(profile)
+
+        val addresses = orderedAddresses(profile)
+        var lastError: Throwable? = null
+        for ((index, address) in addresses.withIndex()) {
+            _connection.value = ServerConnection(
+                profile.id, index + 1, addresses.size, ServerConnectionStatus.Connecting,
+            )
+            val api = FileHubApi(address, token, probeClient)
+            val roots = try {
+                api.roots()
+            } catch (error: FileHubApiException) {
+                if (error.statusCode == 401) {
+                    val message = context.getString(R.string.error_unauthorized)
+                    _connection.value = ServerConnection(
+                        profile.id, index + 1, addresses.size,
+                        ServerConnectionStatus.Failed, message,
+                    )
+                    _state.update { it.copy(needsLogin = true, error = message) }
+                    throw error
+                }
+                lastError = error
+                null
+            } catch (error: Throwable) {
+                lastError = error
+                null
+            }
+            if (roots != null) {
+                val updated = profile.copy(baseUrl = address, addresses = addresses)
+                val profiles = _state.value.profiles.map {
+                    if (it.id == profile.id) updated else it
+                }
+                store.saveProfiles(profiles)
+                store.setActive(profile.id)
+                _state.update {
+                    it.copy(
+                        profiles = profiles,
+                        active = updated,
+                        roots = roots,
+                        rootsLoading = false,
+                        needsLogin = false,
+                        error = null,
+                    )
+                }
+                _connection.value = ServerConnection(
+                    profile.id, index + 1, addresses.size, ServerConnectionStatus.Success,
+                )
+                return@runCatching
+            }
+        }
+        val message = lastError?.toUserMessage(context)
+            ?: context.getString(R.string.server_unreachable)
+        _connection.value = ServerConnection(
+            profile.id, addresses.size, addresses.size,
+            ServerConnectionStatus.Failed, message,
+        )
+        _state.update { it.copy(error = message) }
+        throw lastError ?: IllegalStateException(message)
+    }
+
+    fun clearConnection() {
+        _connection.value = null
     }
 
     suspend fun updateProfile(
@@ -91,11 +206,11 @@ class SessionRepository(
         addresses: List<String>,
     ): Result<ServerProfile> = runCatching {
         val current = _state.value.profiles.firstOrNull { it.id == profileId }
-            ?: error("服务器不存在")
+            ?: error(context.getString(R.string.server_missing))
         val normalized = addresses
             .mapNotNull { raw -> runCatching { FileHubApi.normalizeBaseUrl(raw) }.getOrNull() }
             .distinct()
-        require(normalized.isNotEmpty()) { "至少保留一个服务器地址" }
+        require(normalized.isNotEmpty()) { context.getString(R.string.server_address_required) }
         val base = current.baseUrl.takeIf { it in normalized } ?: normalized.first()
         val updated = current.copy(
             displayName = displayName.trim().ifEmpty { current.displayName },
@@ -129,7 +244,7 @@ class SessionRepository(
         val reachable = probe(profile, token)
         if (reachable == null) {
             _state.update {
-                it.copy(rootsLoading = false, error = "无法连接该服务器的任何地址")
+                it.copy(rootsLoading = false, error = context.getString(R.string.server_unreachable))
             }
             return
         }
@@ -139,7 +254,7 @@ class SessionRepository(
         }
         val working = reachable.working ?: run {
             _state.update {
-                it.copy(rootsLoading = false, error = reachable.error?.toUserMessage() ?: "连接失败")
+                it.copy(rootsLoading = false, error = reachable.error?.toUserMessage(context) ?: context.getString(R.string.error_network))
             }
             return
         }
@@ -149,6 +264,7 @@ class SessionRepository(
             baseUrl = working.address,
             addresses = addresses,
             iconUrl = iconUrl ?: profile.iconUrl,
+            avatarVersion = reachable.avatarVersion ?: profile.avatarVersion,
         )
         val profiles = _state.value.profiles.map { if (it.id == profile.id) updated else it }
         store.saveProfiles(profiles)
@@ -172,6 +288,7 @@ class SessionRepository(
     private data class ProbeResult(
         val working: WorkingAddress?,
         val branding: Branding?,
+        val avatarVersion: Long?,
         val unauthorized: Boolean,
         val error: Throwable?,
     )
@@ -179,28 +296,34 @@ class SessionRepository(
     private suspend fun probe(profile: ServerProfile, token: String): ProbeResult? {
         var lastError: Throwable? = null
         var unauthorized = false
-        for (address in normalizedAddresses(profile)) {
-            val api = FileHubApi(address, token)
+        for (address in orderedAddresses(profile)) {
+            val api = FileHubApi(address, token, probeClient)
             val roots = runCatching { api.roots() }.getOrElse { error ->
                 lastError = error
                 if (error is FileHubApiException && error.statusCode == 401) unauthorized = true
                 null
             } ?: continue
             val branding = runCatching { api.branding() }.getOrNull()?.let { Branding(it.name, it.iconUrl) }
+            val avatarVersion = runCatching { api.avatarVersion() }.getOrNull()
             return ProbeResult(
                 working = WorkingAddress(address, roots),
                 branding = branding,
+                avatarVersion = avatarVersion,
                 unauthorized = false,
                 error = null,
             )
         }
-        return ProbeResult(null, null, unauthorized, lastError)
+        return ProbeResult(null, null, null, unauthorized, lastError)
     }
 
     private fun normalizedAddresses(profile: ServerProfile): List<String> =
         (profile.addresses.ifEmpty { listOf(profile.baseUrl) })
             .mapNotNull { raw -> runCatching { FileHubApi.normalizeBaseUrl(raw) }.getOrNull() }
             .distinct()
+
+    /** Tries the last known working address before falling back to the rest. */
+    private fun orderedAddresses(profile: ServerProfile): List<String> =
+        (listOf(profile.baseUrl) + normalizedAddresses(profile)).distinct()
 
     private fun resolveIcon(baseUrl: String, raw: String?): String? {
         if (raw.isNullOrBlank()) {
@@ -256,13 +379,17 @@ class SessionRepository(
         store.readToken(profile.id)?.let(vault::decrypt)
 }
 
-fun Throwable.toUserMessage(): String = when (this) {
+fun Throwable.toUserMessage(context: Context): String = when (this) {
     is FileHubApiException -> when (code) {
-        "SETUP_REQUIRED" -> "服务器尚未初始化，请先在浏览器中完成初始化"
-        "UNAUTHORIZED" -> "用户名或密码错误"
-        "RATE_LIMITED" -> "尝试过于频繁，请稍后再试"
-        "NETWORK_ERROR" -> "无法连接服务器，请检查地址、网络或证书"
-        else -> message.ifBlank { "操作失败" }
+        "SETUP_REQUIRED" -> context.getString(R.string.error_server_setup_required)
+        "UNAUTHORIZED" -> context.getString(R.string.error_unauthorized)
+        "RATE_LIMITED" -> context.getString(R.string.login_error_rate_limited)
+        "NETWORK_ERROR" -> context.getString(R.string.login_error_network)
+        "INVALID_URL" -> context.getString(R.string.error_invalid_url)
+        "INVALID_RESPONSE" -> context.getString(R.string.error_invalid_response)
+        "NOT_FOUND" -> context.getString(R.string.error_not_found)
+        "FORBIDDEN" -> context.getString(R.string.error_forbidden)
+        else -> message.ifBlank { context.getString(R.string.operation_error) }
     }
-    else -> message?.takeIf { it.isNotBlank() } ?: "操作失败"
+    else -> message?.takeIf { it.isNotBlank() } ?: context.getString(R.string.operation_error)
 }

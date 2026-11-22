@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -41,10 +42,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,12 +63,16 @@ import java.util.Date
 @Composable
 fun FolderSyncScreen(
     viewModel: FolderSyncViewModel,
+    remoteFolderPicker: RemoteFolderPickerViewModel,
     session: SessionState,
     onBack: () -> Unit,
 ) {
+    val folderPickerState by remoteFolderPicker.state.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val active = session.active
 
     var rootId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -75,6 +85,7 @@ fun FolderSyncScreen(
     var chargingOnly by rememberSaveable { mutableStateOf(false) }
     var schedule by rememberSaveable { mutableStateOf("daily") }
     var initialized by rememberSaveable { mutableStateOf(false) }
+    var masterEnabled by rememberSaveable { mutableStateOf(false) }
     var rootMenu by remember { mutableStateOf(false) }
     var modeMenu by remember { mutableStateOf(false) }
     var scheduleMenu by remember { mutableStateOf(false) }
@@ -106,8 +117,13 @@ fun FolderSyncScreen(
             wifiOnly = existing.wifiOnly
             chargingOnly = existing.chargingOnly
             schedule = existing.schedule
+            masterEnabled = existing.enabled
             initialized = true
         }
+    }
+
+    LaunchedEffect(config?.enabled) {
+        masterEnabled = config?.enabled ?: masterEnabled
     }
 
     LaunchedEffect(config) {
@@ -117,30 +133,16 @@ fun FolderSyncScreen(
     val roots = session.roots
     val root = roots.firstOrNull { it.id == rootId } ?: roots.firstOrNull()
 
+    DetailScaffold(
+        title = stringResource(R.string.folder_sync_screen),
+        onBack = onBack,
+    ) { padding ->
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(padding)
             .verticalScroll(rememberScrollState()),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back),
-                )
-            }
-            Text(
-                text = stringResource(R.string.folder_sync_screen),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-
         Column(
             modifier = Modifier.padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -150,16 +152,52 @@ fun FolderSyncScreen(
                 return@Column
             }
 
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.folder_sync_enable),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = stringResource(R.string.folder_sync_enable_body),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = masterEnabled,
+                        onCheckedChange = { value ->
+                            masterEnabled = value
+                            if (config != null) viewModel.setEnabled(value)
+                        },
+                    )
+                }
+            }
+
             config?.let { existing ->
                 FolderStatusCard(
                     config = existing,
                     pending = state.pending,
                     conflicts = state.conflicts,
                     onSyncNow = viewModel::syncNow,
-                    onToggle = { viewModel.setEnabled(!existing.enabled) },
+                    syncEnabled = masterEnabled,
                 )
             }
 
+            Column(
+                modifier = Modifier.alpha(if (masterEnabled) 1f else 0.45f),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
             Text(
                 text = stringResource(R.string.folder_sync_local),
                 style = MaterialTheme.typography.labelLarge,
@@ -167,6 +205,7 @@ fun FolderSyncScreen(
             )
             OutlinedButton(
                 onClick = { folderPicker.launch(null) },
+                enabled = masterEnabled,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(localName.ifBlank { stringResource(R.string.folder_sync_choose) })
@@ -180,13 +219,14 @@ fun FolderSyncScreen(
             Box {
                 OutlinedButton(
                     onClick = { rootMenu = true },
+                    enabled = masterEnabled,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(root?.alias ?: "—")
                 }
                 DropdownMenu(expanded = rootMenu, onDismissRequest = { rootMenu = false }) {
                     roots.forEach { item ->
-                        DropdownMenuItem(
+                        CompactDropdownMenuItem(
                             text = { Text(item.alias) },
                             onClick = {
                                 rootId = item.id
@@ -199,10 +239,28 @@ fun FolderSyncScreen(
             OutlinedTextField(
                 value = remotePath,
                 onValueChange = { remotePath = it },
+                enabled = masterEnabled,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.photo_sync_target_path)) },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = clearFocusOnDone(),
                 shape = RoundedCornerShape(12.dp),
+                trailingIcon = {
+                    IconButton(
+                        onClick = {
+                            focusManager.clearFocus()
+                            keyboard?.hide()
+                            if (root != null) remoteFolderPicker.open(root, remotePath)
+                        },
+                        enabled = masterEnabled && root != null,
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_file_folder),
+                            contentDescription = stringResource(R.string.folder_picker_title),
+                        )
+                    }
+                },
             )
 
             Row(
@@ -215,12 +273,12 @@ fun FolderSyncScreen(
                     modifier = Modifier.weight(1f),
                 )
                 Box {
-                    OutlinedButton(onClick = { modeMenu = true }) {
+                    OutlinedButton(onClick = { modeMenu = true }, enabled = masterEnabled) {
                         Text(modeLabel(mode))
                     }
                     DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
                         listOf("upload", "download", "two_way").forEach { value ->
-                            DropdownMenuItem(
+                            CompactDropdownMenuItem(
                                 text = { Text(modeLabel(value)) },
                                 onClick = {
                                     mode = value
@@ -232,9 +290,9 @@ fun FolderSyncScreen(
                 }
             }
 
-            FolderSwitch(stringResource(R.string.folder_sync_delete), deleteSync) { deleteSync = it }
-            FolderSwitch(stringResource(R.string.photo_sync_wifi_only), wifiOnly) { wifiOnly = it }
-            FolderSwitch(stringResource(R.string.photo_sync_charging_only), chargingOnly) { chargingOnly = it }
+            FolderSwitch(stringResource(R.string.folder_sync_delete), deleteSync, masterEnabled) { deleteSync = it }
+            FolderSwitch(stringResource(R.string.photo_sync_wifi_only), wifiOnly, masterEnabled) { wifiOnly = it }
+            FolderSwitch(stringResource(R.string.photo_sync_charging_only), chargingOnly, masterEnabled) { chargingOnly = it }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -247,12 +305,12 @@ fun FolderSyncScreen(
                     modifier = Modifier.weight(1f),
                 )
                 Box {
-                    OutlinedButton(onClick = { scheduleMenu = true }) {
+                    OutlinedButton(onClick = { scheduleMenu = true }, enabled = masterEnabled) {
                         Text(folderScheduleLabel(schedule))
                     }
                     DropdownMenu(expanded = scheduleMenu, onDismissRequest = { scheduleMenu = false }) {
                         listOf("manual", "15m", "hourly", "daily", "weekly").forEach { value ->
-                            DropdownMenuItem(
+                            CompactDropdownMenuItem(
                                 text = { Text(folderScheduleLabel(value)) },
                                 onClick = {
                                     schedule = value
@@ -264,6 +322,7 @@ fun FolderSyncScreen(
                 }
             }
 
+            }
             if (state.conflicts > 0) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -307,7 +366,7 @@ fun FolderSyncScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                enabled = !state.saving && root != null && localTreeUri.isNotBlank(),
+                enabled = masterEnabled && !state.saving && root != null && localTreeUri.isNotBlank(),
                 shape = RoundedCornerShape(12.dp),
             ) {
                 if (state.saving) {
@@ -330,6 +389,23 @@ fun FolderSyncScreen(
             Spacer(Modifier.height(24.dp))
         }
     }
+    }
+
+    if (folderPickerState.visible) {
+        RemoteFolderPickerDialog(
+            state = folderPickerState,
+            onNavigate = remoteFolderPicker::navigate,
+            onUp = remoteFolderPicker::up,
+            onLoadMore = remoteFolderPicker::loadMore,
+            onDismiss = remoteFolderPicker::close,
+            onConfirm = { selected ->
+                remotePath = selected
+                remoteFolderPicker.close()
+                focusManager.clearFocus()
+                keyboard?.hide()
+            },
+        )
+    }
 }
 
 @Composable
@@ -338,7 +414,7 @@ private fun FolderStatusCard(
     pending: Int,
     conflicts: Int,
     onSyncNow: () -> Unit,
-    onToggle: () -> Unit,
+    syncEnabled: Boolean,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -358,13 +434,6 @@ private fun FolderStatusCard(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onToggle) {
-                    Text(
-                        stringResource(
-                            if (config.enabled) R.string.folder_sync_off else R.string.photo_sync_save,
-                        ),
-                    )
-                }
             }
             Text(
                 text = stringResource(R.string.folder_sync_last_run) + ": " +
@@ -386,7 +455,7 @@ private fun FolderStatusCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TextButton(onClick = onSyncNow, enabled = config.enabled) {
+            TextButton(onClick = onSyncNow, enabled = syncEnabled && config.enabled) {
                 Text(stringResource(R.string.folder_sync_now))
             }
         }
@@ -394,7 +463,12 @@ private fun FolderStatusCard(
 }
 
 @Composable
-private fun FolderSwitch(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun FolderSwitch(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -404,7 +478,7 @@ private fun FolderSwitch(label: String, checked: Boolean, onChange: (Boolean) ->
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
         )
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 

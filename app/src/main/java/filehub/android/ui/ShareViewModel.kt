@@ -51,7 +51,7 @@ class ShareViewModel(
                 .onFailure { error ->
                     _state.value = _state.value.copy(
                         loading = false,
-                        error = error.toUserMessage(),
+                        error = error.toUserMessage(application),
                     )
                 }
         }
@@ -74,7 +74,7 @@ class ShareViewModel(
                 .onFailure { error ->
                     _state.value = _state.value.copy(
                         loading = false,
-                        error = error.toUserMessage(),
+                        error = error.toUserMessage(application),
                     )
                 }
         }
@@ -89,7 +89,7 @@ class ShareViewModel(
                     _state.value = _state.value.copy(actionLink = absolute, actionError = null)
                 }
                 .onFailure { error ->
-                    _state.value = _state.value.copy(actionError = error.toUserMessage())
+                    _state.value = _state.value.copy(actionError = error.toUserMessage(application))
                 }
         }
     }
@@ -103,7 +103,7 @@ class ShareViewModel(
                     _state.value = _state.value.copy(actionError = null)
                 }
                 .onFailure { error ->
-                    _state.value = _state.value.copy(actionError = error.toUserMessage())
+                    _state.value = _state.value.copy(actionError = error.toUserMessage(application))
                 }
         }
     }
@@ -114,7 +114,7 @@ class ShareViewModel(
             runCatching { shareRepository.revoke(profile, share.id) }
                 .onSuccess { load() }
                 .onFailure { error ->
-                    _state.value = _state.value.copy(actionError = error.toUserMessage())
+                    _state.value = _state.value.copy(actionError = error.toUserMessage(application))
                 }
         }
     }

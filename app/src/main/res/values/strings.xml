@@ -14,7 +14,7 @@
     <string name="browse_no_server_body">Once connected, this tab shows the directories and remote mounts on the selected server.</string>
 
     <string name="my_version">FileHub Android 0.1.0</string>
-    <string name="my_version_body">M0 skeleton. Next: sign-in, device token, roots.</string>
+    <string name="my_version_body">Native Android client for FileHub.</string>
 
     <string name="login_title">Connect to FileHub</string>
     <string name="login_url_label">Server address</string>
@@ -49,7 +49,7 @@
     <string name="my_account">Account</string>
     <string name="my_server">Server</string>
     <string name="my_logout">Sign out</string>
-    <string name="my_token_expiry">Device token expires</string>
+    <string name="my_token_expiry">Sign-in validity</string>
     <string name="my_security_note">The device token is encrypted with the Android Keystore.</string>
     <string name="my_token_valid">Device token valid</string>
 
@@ -112,7 +112,7 @@
     <string name="search_title">Search</string>
     <string name="search_hint">Search filenames…</string>
     <string name="search_all">All locations</string>
-    <string name="search_current">This root</string>
+    <string name="search_current">Current scope</string>
     <string name="search_kind_all">All</string>
     <string name="search_kind_image">Images</string>
     <string name="search_kind_video">Videos</string>
@@ -151,7 +151,7 @@
     <string name="photo_sync_permission">Photo library permission is required</string>
     <string name="photo_sync_result">Synced %1$d / %2$d</string>
     <string name="photo_sync_screen">Photo sync</string>
-    <string name="photo_sync_target_root">Target root</string>
+    <string name="photo_sync_target_root">Location</string>
     <string name="photo_sync_target_path">Target folder</string>
     <string name="photo_sync_albums">Albums</string>
     <string name="photo_sync_include_videos">Include videos</string>
@@ -233,7 +233,7 @@
     <string name="public_share_downloading">Download started</string>
     <string name="move_to">Move to</string>
     <string name="copy_to">Copy to</string>
-    <string name="target_root">Target root</string>
+    <string name="target_root">Target location</string>
     <string name="target_path">Target folder</string>
     <string name="zip_create">Create ZIP</string>
     <string name="zip_name">ZIP name</string>
@@ -255,5 +255,49 @@
     <string name="server_save">Save</string>
     <string name="server_address">Address</string>
     <string name="server_addresses_hint">Tried from top to bottom until one responds</string>
+    <string name="preview_rotate">Rotate</string>
+    <string name="error_server_setup_required">Server is not initialized. Complete setup in a browser first.</string>
+    <string name="error_unauthorized">Device token expired. Sign in again.</string>
+    <string name="error_invalid_url">Invalid server address</string>
+    <string name="error_invalid_response">Unexpected response from the server</string>
+    <string name="error_not_found">Not found</string>
+    <string name="error_forbidden">Permission denied</string>
+    <string name="error_network">Network error</string>
+    <string name="server_unreachable">Cannot reach any address of this server</string>
+    <string name="server_address_required">Keep at least one server address</string>
+    <string name="server_missing">Server profile not found</string>
+    <string name="folder_sync_error_no_local">Choose a local folder</string>
+    <string name="transfer_error_resume_expired">Download resume expired. Try again.</string>
+    <string name="transfer_error_download_failed">Download failed</string>
+    <string name="transfer_saved_to">Saved to %1$s</string>
+    <string name="transfer_open_folder">Open folder</string>
+    <plurals name="sync_failed_count">
+        <item quantity="one">%1$d file failed</item>
+        <item quantity="other">%1$d files failed</item>
+    </plurals>
+    <string name="language">Language</string>
+    <string name="language_system">Follow system</string>
+    <string name="language_zh">简体中文</string>
+    <string name="language_en">English</string>
+    <string name="photo_sync_enable">Photo sync</string>
+    <string name="photo_sync_enable_body">Automatically upload selected albums in the background</string>
+    <string name="folder_sync_enable">Folder sync</string>
+    <string name="folder_sync_enable_body">Keep a local folder and the server in sync in the background</string>
+    <string name="public_share_title">Shared link</string>
+    <string name="server_connecting_progress">Connecting %1$d/%2$d</string>
+    <string name="server_connected">Connected</string>
+    <string name="server_connect_failed">Connection failed</string>
+    <string name="my_token_expiry_hint">You will need to sign in again after this date. It does not renew automatically.</string>
+    <string name="folder_picker_title">Choose folder</string>
+    <string name="folder_picker_select">Use this folder</string>
+    <string name="folder_picker_empty">No subfolders</string>
+    <string name="folder_picker_up">Up one level</string>
+    <string name="photo_sync_photos_wifi">Photos on Wi-Fi only</string>
+    <string name="photo_sync_videos_wifi">Videos on Wi-Fi only</string>
+    <string name="photo_sync_target_change_title">Change target folder?</string>
+    <string name="photo_sync_target_change_body">Synced photo records will be cleared and all selected photos will be uploaded again to the new folder. Files in the old folder are not deleted.</string>
+    <string name="sync_waiting_wifi">%1$d items waiting for Wi-Fi</string>
+        <string name="folder_sync_conflicts_count">%1$d conflicts</string>
+    <string name="folder_picker_load_more">Load more</string>
 </resources>
 

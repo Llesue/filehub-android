@@ -1,5 +1,7 @@
 package filehub.android.data
 
+import android.content.Context
+import filehub.android.R
 import filehub.android.core.model.ShareCreated
 import filehub.android.core.model.ShareInfo
 import filehub.android.core.model.ServerProfile
@@ -7,6 +9,7 @@ import filehub.android.data.api.FileHubApi
 import filehub.android.data.api.FileHubApiException
 
 class ShareRepository(
+    private val context: Context,
     private val session: SessionRepository,
 ) {
     suspend fun list(profile: ServerProfile, cursor: String? = null): Pair<List<ShareInfo>, String?> =
@@ -29,7 +32,7 @@ class ShareRepository(
 
     private suspend fun api(profile: ServerProfile): FileHubApi {
         val token = session.tokenFor(profile)
-            ?: throw FileHubApiException(401, "UNAUTHORIZED", "设备授权已失效，请重新登录")
+            ?: throw FileHubApiException(401, "UNAUTHORIZED", context.getString(R.string.error_unauthorized))
         return FileHubApi(profile.baseUrl, token)
     }
 }

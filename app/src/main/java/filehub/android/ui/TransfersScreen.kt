@@ -3,6 +3,7 @@ package filehub.android.ui
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.text.format.Formatter
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -49,6 +50,8 @@ import filehub.android.R
 import filehub.android.data.transfer.TransferItem
 import filehub.android.data.transfer.TransferKind
 import filehub.android.data.transfer.TransferStatus
+import filehub.android.core.model.FileKind
+import filehub.android.core.model.detectKind
 import java.io.File
 
 @Composable
@@ -60,30 +63,20 @@ fun TransfersScreen(
     var confirmClear by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back),
-                )
-            }
-            Text(
-                text = stringResource(R.string.transfers_title),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
+    DetailScaffold(
+        title = stringResource(R.string.transfers_title),
+        onBack = onBack,
+        actions = {
             TextButton(onClick = { confirmClear = true }) {
                 Text(stringResource(R.string.transfers_clear))
             }
-        }
-
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
         if (items.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -103,7 +96,7 @@ fun TransfersScreen(
                     top = 4.dp,
                     bottom = 24.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(items, key = { it.id }) { item ->
                     TransferCard(
@@ -117,6 +110,7 @@ fun TransfersScreen(
                     )
                 }
             }
+        }
         }
     }
 
@@ -159,7 +153,7 @@ private fun TransferCard(
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
@@ -212,6 +206,28 @@ private fun TransferCard(
                     Text(stringResource(R.string.common_remove))
                 }
             }
+            if (item.status == TransferStatus.COMPLETED &&
+                item.kind == TransferKind.DOWNLOAD &&
+                item.localFile != null
+            ) {
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(
+                            R.string.transfer_saved_to,
+                            downloadLocation(context, item) + "/" + item.name,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { openDownloadFolder(context, item) }) {
+                        Text(stringResource(R.string.transfer_open_folder))
+                    }
+                }
+            }
             if (item.status == TransferStatus.RUNNING || item.status == TransferStatus.QUEUED) {
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
@@ -240,6 +256,53 @@ private fun statusLabel(status: TransferStatus): String = when (status) {
     TransferStatus.COMPLETED -> stringResource(R.string.transfer_status_completed)
     TransferStatus.FAILED -> stringResource(R.string.transfer_status_failed)
     TransferStatus.CANCELLED -> stringResource(R.string.transfer_status_cancelled)
+}
+
+private fun downloadLocation(context: android.content.Context, item: TransferItem): String {
+    val uri = Uri.parse(item.localFile.orEmpty())
+    if (uri.scheme == "file") {
+        return uri.path?.substringBeforeLast('/') ?: uri.path.orEmpty()
+    }
+    val kind = detectKind(item.name, item.mimeType, isDir = false)
+    return if (kind == FileKind.Image || kind == FileKind.Video) {
+        "DCIM/FileHub"
+    } else {
+        "Download/FileHub"
+    }
+}
+
+private fun openDownloadFolder(context: android.content.Context, item: TransferItem) {
+    val uri = Uri.parse(item.localFile.orEmpty())
+    if (uri.scheme == "file") {
+        openTransfer(context, item)
+        return
+    }
+    val kind = detectKind(item.name, item.mimeType, isDir = false)
+    val folderPath = if (kind == FileKind.Image || kind == FileKind.Video) {
+        "primary:DCIM/FileHub"
+    } else {
+        "primary:Download/FileHub"
+    }
+    val folder = DocumentsContract.buildDocumentUri(
+        "com.android.externalstorage.documents",
+        folderPath,
+    )
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(folder, DocumentsContract.Document.MIME_TYPE_DIR)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(
+            context,
+            context.getString(
+                R.string.transfer_saved_to,
+                downloadLocation(context, item) + "/" + item.name,
+            ),
+            Toast.LENGTH_LONG,
+        ).show()
+    }
 }
 
 private fun openTransfer(context: android.content.Context, item: TransferItem) {

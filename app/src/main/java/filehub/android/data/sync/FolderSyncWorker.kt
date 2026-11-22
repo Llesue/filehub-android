@@ -1,5 +1,6 @@
 package filehub.android.data.sync
 
+import filehub.android.R
 import android.content.Context
 import android.net.Uri
 import androidx.work.CoroutineWorker
@@ -24,24 +25,50 @@ class FolderSyncWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
 
-    override suspend fun getForegroundInfo(): ForegroundInfo =
-        FolderSyncNotifications.foregroundInfo(applicationContext, 0, 0, "")
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val profileId = inputData.getString("profileId").orEmpty()
+        val config = (applicationContext as FileHubApplication)
+            .container.folderSyncRepository.config(profileId)
+        return FolderSyncNotifications.foregroundInfo(
+            applicationContext,
+            0,
+            0,
+            "",
+            FolderSyncNotifications.idFor(profileId),
+            config?.serverName.orEmpty(),
+        )
+    }
 
     override suspend fun doWork(): Result {
+        val profileId = inputData.getString("profileId") ?: return Result.success()
+        val lock = SyncLocks.folder(profileId)
+        if (!lock.tryLock()) return Result.success()
+        return try {
+            runSync(profileId)
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    private suspend fun runSync(profileId: String): Result {
         val app = applicationContext as FileHubApplication
         val repo = app.container.folderSyncRepository
-        val profileId = inputData.getString("profileId") ?: return Result.success()
         val config = repo.config(profileId) ?: return Result.success()
         if (!config.enabled) return Result.success()
         if (config.localTreeUri.isBlank()) {
-            repo.updateConfig(config.copy(lastError = "请选择本地文件夹", lastRunAt = now()))
+            repo.updateConfig(config.copy(lastError = applicationContext.getString(R.string.folder_sync_error_no_local), lastRunAt = now()))
             return Result.success()
         }
 
         try {
             setForeground(
                 FolderSyncNotifications.foregroundInfo(
-                    applicationContext, 0, 0, "", notificationId(profileId),
+                    applicationContext,
+                    0,
+                    0,
+                    "",
+                    FolderSyncNotifications.idFor(profileId),
+                    config.serverName,
                 ),
             )
         } catch (error: CancellationException) {
@@ -51,21 +78,22 @@ class FolderSyncWorker(
         }
 
         val (profile, token) = app.container.profileAndToken(config.profileId)
-            ?: return fail(repo, config, "设备授权已失效，请重新登录")
+            ?: return failPermanently(repo, config, applicationContext.getString(R.string.error_unauthorized))
         val api = FileHubApi(profile.baseUrl, token)
-        ensureRemoteDir(api, config.rootId, config.remotePath)
+        val remoteDirs = RemoteDirEnsurer(api, config.rootId)
+        remoteDirs.ensure(config.remotePath)
 
         val localResult = withContext(Dispatchers.IO) {
             SafScanner.scan(applicationContext, Uri.parse(config.localTreeUri))
         }
         val localNodes = localResult.getOrElse { error ->
-            repo.updateConfig(config.copy(lastError = error.toUserMessage(), lastRunAt = now()))
+            repo.updateConfig(config.copy(lastError = error.toUserMessage(applicationContext), lastRunAt = now()))
             return Result.success()
         }
         val localFiles = localNodes.filterNot { it.isDir }.associateBy { it.relativePath }
         val remoteNodes = runCatching { scanRemote(api, config.rootId, config.remotePath) }
             .getOrElse { error ->
-                return fail(repo, config, error.toUserMessage())
+                return fail(repo, config, error.toUserMessage(applicationContext))
             }
         val remoteFiles = remoteNodes.filterNot { it.value.isDir }.mapValues { it.value }
         val entries = repo.entries(profileId).associateBy { it.relativePath }.toMutableMap()
@@ -125,7 +153,7 @@ class FolderSyncWorker(
                     }
                     Action.UPLOAD -> {
                         if (local == null) continue
-                        uploadFile(api, profileId, config, local, entry, repo)
+                        uploadFile(api, profileId, config, local, entry, repo, remoteDirs)
                         entries[path] = local.toEntry(profileId, config, remote)
                         done += 1
                     }
@@ -156,26 +184,35 @@ class FolderSyncWorker(
                 repo.saveEntry(
                     (entry ?: blankEntry(profileId, path)).copy(
                         status = "error",
-                        error = error.toUserMessage(),
+                        error = error.toUserMessage(applicationContext),
                         updatedAt = now(),
                     ),
                 )
                 if (error.statusCode == 401 || error.statusCode == 403 || error.code == "QUOTA_EXCEEDED") {
                     finish(repo, config, done, paths.size, conflicts, failed)
-                    return if (error.statusCode == 401) Result.failure() else Result.success()
+                    if (error.statusCode == 401) {
+                        repo.setEnabled(config.profileId, false)
+                        return Result.failure()
+                    }
+                    return Result.success()
                 }
             } catch (error: Exception) {
                 failed += 1
                 repo.saveEntry(
                     (entry ?: blankEntry(profileId, path)).copy(
                         status = "error",
-                        error = error.toUserMessage(),
+                        error = error.toUserMessage(applicationContext),
                         updatedAt = now(),
                     ),
                 )
             }
             FolderSyncNotifications.update(
-                applicationContext, done + failed + conflicts, paths.size, path, notificationId(profileId),
+                applicationContext,
+                done + failed + conflicts,
+                paths.size,
+                path,
+                FolderSyncNotifications.idFor(profileId),
+                config.serverName,
             )
         }
 
@@ -190,9 +227,10 @@ class FolderSyncWorker(
         local: LocalNode,
         existing: FolderSyncEntryEntity?,
         repo: FolderSyncRepository,
+        remoteDirs: RemoteDirEnsurer,
     ) {
         val parent = remoteParent(config, local.relativePath)
-        ensureRemoteDir(api, config.rootId, parent)
+        remoteDirs.ensure(parent)
         var uploadId = existing?.uploadId
         var chunkSize = existing?.let { 4L * 1024 * 1024 } ?: UPLOAD_CHUNK
         if (uploadId != null) {
@@ -285,8 +323,8 @@ class FolderSyncWorker(
             remote.mimeType,
         ).getOrThrow()
         val (profile, token) = (applicationContext as FileHubApplication).container
-            .profileAndToken(config.profileId) ?: error("设备授权已失效")
-        val base = profile.baseUrl.toHttpUrlOrNull() ?: error("服务器地址无效")
+            .profileAndToken(config.profileId) ?: error(applicationContext.getString(R.string.error_unauthorized))
+        val base = profile.baseUrl.toHttpUrlOrNull() ?: error(applicationContext.getString(R.string.error_invalid_url))
         val url = base.newBuilder()
             .addPathSegments("api/v1/download")
             .addQueryParameter("root", config.rootId.toString())
@@ -377,16 +415,6 @@ class FolderSyncWorker(
         return result
     }
 
-    private suspend fun ensureRemoteDir(api: FileHubApi, rootId: Long, dir: String) {
-        var parent = ""
-        for (segment in dir.split('/').filter { it.isNotEmpty() }) {
-            runCatching { api.mkdir(rootId, parent, segment) }
-                .onFailure { error ->
-                    if (error is FileHubApiException && error.statusCode !in listOf(409, 403)) throw error
-                }
-            parent = if (parent.isEmpty()) segment else "$parent/$segment"
-        }
-    }
 
     private suspend fun readLocalChunk(uri: String, offset: Long, length: Long): ByteArray =
         withContext(Dispatchers.IO) {
@@ -561,16 +589,27 @@ class FolderSyncWorker(
         conflicts: Int,
         failed: Int,
     ) {
-        val result = "done $done / $total" + if (conflicts > 0) ", conflicts $conflicts" else ""
+        val result = buildString {
+            append(applicationContext.getString(R.string.folder_sync_result, done, total))
+            if (conflicts > 0) {
+                append(" · ")
+                append(applicationContext.getString(R.string.folder_sync_conflicts_count, conflicts))
+            }
+        }
         repo.updateConfig(
             config.copy(
                 lastRunAt = now(),
                 lastResult = result,
-                lastError = if (failed > 0) "$failed failed" else null,
+                lastError = if (failed > 0) applicationContext.resources.getQuantityString(R.plurals.sync_failed_count, failed, failed) else null,
                 pendingCount = repo.pendingCount(config.profileId),
             ),
         )
-        FolderSyncNotifications.finished(applicationContext, result, notificationId(config.profileId))
+        FolderSyncNotifications.finished(
+            applicationContext,
+            result,
+            FolderSyncNotifications.idFor(config.profileId),
+            config.serverName,
+        )
     }
 
     private suspend fun fail(
@@ -579,12 +618,32 @@ class FolderSyncWorker(
         message: String,
     ): Result {
         repo.updateConfig(config.copy(lastError = message, lastRunAt = now()))
-        FolderSyncNotifications.finished(applicationContext, message, notificationId(config.profileId))
+        FolderSyncNotifications.finished(
+            applicationContext,
+            message,
+            FolderSyncNotifications.idFor(config.profileId),
+            config.serverName,
+        )
         return Result.retry()
     }
 
-    private fun notificationId(profileId: String): Int =
-        5401 + (profileId.hashCode() and 0x0FFFFF)
+    private suspend fun failPermanently(
+        repo: FolderSyncRepository,
+        config: FolderSyncConfigEntity,
+        message: String,
+    ): Result {
+        repo.updateConfig(
+            config.copy(enabled = false, lastError = message, lastRunAt = now()),
+        )
+        FolderSyncScheduler.cancelAll(applicationContext, config.profileId)
+        FolderSyncNotifications.finished(
+            applicationContext,
+            message,
+            FolderSyncNotifications.idFor(config.profileId),
+            config.serverName,
+        )
+        return Result.failure()
+    }
 
     private fun now(): Long = System.currentTimeMillis() / 1000
 

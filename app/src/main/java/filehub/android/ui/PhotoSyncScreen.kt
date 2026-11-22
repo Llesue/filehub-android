@@ -20,9 +20,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,10 +47,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -61,23 +68,30 @@ import java.util.Date
 @Composable
 fun PhotoSyncScreen(
     viewModel: PhotoSyncViewModel,
+    folderPicker: RemoteFolderPickerViewModel,
     session: SessionState,
     onBack: () -> Unit,
 ) {
+    val folderPickerState by folderPicker.state.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val active = session.active
 
     var selectedRootId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var remotePath by rememberSaveable { mutableStateOf("Photos/Phone") }
+    var remotePath by rememberSaveable { mutableStateOf("Phone/Photos") }
     var includeVideos by rememberSaveable { mutableStateOf(true) }
-    var wifiOnly by rememberSaveable { mutableStateOf(true) }
+    var photosWifiOnly by rememberSaveable { mutableStateOf(true) }
+    var videosWifiOnly by rememberSaveable { mutableStateOf(true) }
     var chargingOnly by rememberSaveable { mutableStateOf(false) }
     var albumSubfolders by rememberSaveable { mutableStateOf(true) }
     var schedule by rememberSaveable { mutableStateOf("daily") }
     var initialized by rememberSaveable { mutableStateOf(false) }
     var albumsInitialized by rememberSaveable { mutableStateOf(false) }
+    var masterEnabled by rememberSaveable { mutableStateOf(false) }
+    var confirmTargetChange by remember { mutableStateOf(false) }
     var selectedAlbums by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var rootMenu by remember { mutableStateOf(false) }
     var scheduleMenu by remember { mutableStateOf(false) }
@@ -112,12 +126,18 @@ fun PhotoSyncScreen(
             selectedRootId = existing.rootId
             remotePath = existing.remotePath
             includeVideos = existing.includeVideos
-            wifiOnly = existing.wifiOnly
+            photosWifiOnly = existing.photosWifiOnly
+            videosWifiOnly = existing.videosWifiOnly
             chargingOnly = existing.chargingOnly
             albumSubfolders = existing.albumSubfolders
             schedule = existing.schedule
+            masterEnabled = existing.enabled
             initialized = true
         }
+    }
+
+    LaunchedEffect(config?.enabled) {
+        masterEnabled = config?.enabled ?: masterEnabled
     }
 
     LaunchedEffect(hasPermission, includeVideos) {
@@ -139,30 +159,33 @@ fun PhotoSyncScreen(
     val roots = session.roots
     val root = roots.firstOrNull { it.id == selectedRootId } ?: roots.firstOrNull()
 
+    fun persist(resetEntries: Boolean) {
+        if (root == null) return
+        viewModel.save(
+            profile = active ?: return,
+            root = root,
+            remotePath = remotePath,
+            albums = selectedAlbums,
+            includeVideos = includeVideos,
+            photosWifiOnly = photosWifiOnly,
+            videosWifiOnly = videosWifiOnly,
+            chargingOnly = chargingOnly,
+            albumSubfolders = albumSubfolders,
+            schedule = schedule,
+            resetEntries = resetEntries,
+        )
+    }
+
+    DetailScaffold(
+        title = stringResource(R.string.photo_sync_screen),
+        onBack = onBack,
+    ) { padding ->
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(padding)
             .verticalScroll(rememberScrollState()),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back),
-                )
-            }
-            Text(
-                text = stringResource(R.string.photo_sync_screen),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-
         Column(
             modifier = Modifier.padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -172,11 +195,43 @@ fun PhotoSyncScreen(
                 return@Column
             }
 
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.photo_sync_enable),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = stringResource(R.string.photo_sync_enable_body),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = masterEnabled,
+                        onCheckedChange = { value ->
+                            masterEnabled = value
+                            if (config != null) viewModel.setEnabled(value)
+                        },
+                    )
+                }
+            }
+
             config?.let { existing ->
                 SyncStatusCard(
                     config = existing,
                     onSyncNow = viewModel::syncNow,
-                    onToggle = { viewModel.setEnabled(!existing.enabled) },
+                    syncEnabled = masterEnabled,
                 )
             }
 
@@ -199,6 +254,10 @@ fun PhotoSyncScreen(
                 }
             }
 
+            Column(
+                modifier = Modifier.alpha(if (masterEnabled) 1f else 0.45f),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
             Text(
                 text = stringResource(R.string.photo_sync_target_root),
                 style = MaterialTheme.typography.labelLarge,
@@ -207,13 +266,14 @@ fun PhotoSyncScreen(
             Box {
                 OutlinedButton(
                     onClick = { rootMenu = true },
+                    enabled = masterEnabled,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(root?.alias ?: "—")
                 }
                 DropdownMenu(expanded = rootMenu, onDismissRequest = { rootMenu = false }) {
                     roots.forEach { item ->
-                        DropdownMenuItem(
+                        CompactDropdownMenuItem(
                             text = { Text(item.alias) },
                             onClick = {
                                 selectedRootId = item.id
@@ -227,18 +287,43 @@ fun PhotoSyncScreen(
             OutlinedTextField(
                 value = remotePath,
                 onValueChange = { remotePath = it },
+                enabled = masterEnabled,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.photo_sync_target_path)) },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = clearFocusOnDone(),
                 shape = RoundedCornerShape(12.dp),
+                trailingIcon = {
+                    IconButton(
+                        onClick = {
+                            focusManager.clearFocus()
+                            keyboard?.hide()
+                            if (root != null) folderPicker.open(root, remotePath)
+                        },
+                        enabled = masterEnabled && root != null,
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_file_folder),
+                            contentDescription = stringResource(R.string.folder_picker_title),
+                        )
+                    }
+                },
             )
 
-            SwitchRow(stringResource(R.string.photo_sync_include_videos), includeVideos) {
+            SwitchRow(stringResource(R.string.photo_sync_include_videos), includeVideos, masterEnabled) {
                 includeVideos = it
             }
-            SwitchRow(stringResource(R.string.photo_sync_wifi_only), wifiOnly) { wifiOnly = it }
-            SwitchRow(stringResource(R.string.photo_sync_charging_only), chargingOnly) { chargingOnly = it }
-            SwitchRow(stringResource(R.string.photo_sync_album_folders), albumSubfolders) { albumSubfolders = it }
+            SwitchRow(stringResource(R.string.photo_sync_photos_wifi), photosWifiOnly, masterEnabled) {
+                photosWifiOnly = it
+            }
+            SwitchRow(
+                stringResource(R.string.photo_sync_videos_wifi),
+                videosWifiOnly,
+                masterEnabled && includeVideos,
+            ) { videosWifiOnly = it }
+            SwitchRow(stringResource(R.string.photo_sync_charging_only), chargingOnly, masterEnabled) { chargingOnly = it }
+            SwitchRow(stringResource(R.string.photo_sync_album_folders), albumSubfolders, masterEnabled) { albumSubfolders = it }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -251,12 +336,12 @@ fun PhotoSyncScreen(
                     modifier = Modifier.weight(1f),
                 )
                 Box {
-                    OutlinedButton(onClick = { scheduleMenu = true }) {
+                    OutlinedButton(onClick = { scheduleMenu = true }, enabled = masterEnabled) {
                         Text(scheduleLabel(schedule))
                     }
                     DropdownMenu(expanded = scheduleMenu, onDismissRequest = { scheduleMenu = false }) {
                         listOf("manual", "15m", "hourly", "daily", "weekly").forEach { value ->
-                            DropdownMenuItem(
+                            CompactDropdownMenuItem(
                                 text = { Text(scheduleLabel(value)) },
                                 onClick = {
                                     schedule = value
@@ -279,6 +364,7 @@ fun PhotoSyncScreen(
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
+                    enabled = masterEnabled,
                     onClick = {
                         selectedAlbums = if (selectedAlbums.size == state.buckets.size) {
                             emptySet()
@@ -309,7 +395,7 @@ fun PhotoSyncScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
+                                .clickable(enabled = masterEnabled) {
                                     selectedAlbums = if (bucket.id in selectedAlbums) {
                                         selectedAlbums - bucket.id
                                     } else {
@@ -321,6 +407,7 @@ fun PhotoSyncScreen(
                         ) {
                             Checkbox(
                                 checked = bucket.id in selectedAlbums,
+                                enabled = masterEnabled,
                                 onCheckedChange = {
                                     selectedAlbums = if (it) {
                                         selectedAlbums + bucket.id
@@ -344,6 +431,7 @@ fun PhotoSyncScreen(
                 }
             }
 
+            }
             state.error?.let { error ->
                 Text(
                     text = error,
@@ -354,24 +442,21 @@ fun PhotoSyncScreen(
 
             Button(
                 onClick = {
-                    if (root != null) {
-                        viewModel.save(
-                            profile = active,
-                            root = root,
-                            remotePath = remotePath,
-                            albums = selectedAlbums,
-                            includeVideos = includeVideos,
-                            wifiOnly = wifiOnly,
-                            chargingOnly = chargingOnly,
-                            albumSubfolders = albumSubfolders,
-                            schedule = schedule,
-                        )
+                    if (root == null) return@Button
+                    val path = remotePath.trim('/')
+                    val targetChanged = config?.let {
+                        it.rootId != root.id || it.remotePath != path
+                    } == true
+                    if (targetChanged) {
+                        confirmTargetChange = true
+                    } else {
+                        persist(resetEntries = false)
                     }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                enabled = !state.saving && root != null && hasPermission && selectedAlbums.isNotEmpty(),
+                enabled = masterEnabled && !state.saving && root != null && hasPermission && selectedAlbums.isNotEmpty(),
                 shape = RoundedCornerShape(12.dp),
             ) {
                 if (state.saving) {
@@ -394,13 +479,52 @@ fun PhotoSyncScreen(
             Spacer(Modifier.height(24.dp))
         }
     }
+    }
+
+    if (folderPickerState.visible) {
+        RemoteFolderPickerDialog(
+            state = folderPickerState,
+            onNavigate = folderPicker::navigate,
+            onUp = folderPicker::up,
+            onLoadMore = folderPicker::loadMore,
+            onDismiss = folderPicker::close,
+            onConfirm = { selected ->
+                remotePath = selected
+                folderPicker.close()
+                focusManager.clearFocus()
+                keyboard?.hide()
+            },
+        )
+    }
+    if (confirmTargetChange) {
+        AlertDialog(
+            onDismissRequest = { confirmTargetChange = false },
+            title = { Text(stringResource(R.string.photo_sync_target_change_title)) },
+            text = { Text(stringResource(R.string.photo_sync_target_change_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmTargetChange = false
+                        persist(resetEntries = true)
+                    },
+                ) {
+                    Text(stringResource(R.string.dialog_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmTargetChange = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
 private fun SyncStatusCard(
     config: PhotoSyncConfigEntity,
     onSyncNow: () -> Unit,
-    onToggle: () -> Unit,
+    syncEnabled: Boolean,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -420,13 +544,6 @@ private fun SyncStatusCard(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onToggle) {
-                    Text(
-                        stringResource(
-                            if (config.enabled) R.string.photo_sync_disable else R.string.photo_sync_save,
-                        ),
-                    )
-                }
             }
             Text(
                 text = stringResource(R.string.photo_sync_last_run) + ": " +
@@ -444,7 +561,7 @@ private fun SyncStatusCard(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            TextButton(onClick = onSyncNow, enabled = config.enabled) {
+            TextButton(onClick = onSyncNow, enabled = syncEnabled && config.enabled) {
                 Text(stringResource(R.string.photo_sync_now))
             }
         }
@@ -452,7 +569,12 @@ private fun SyncStatusCard(
 }
 
 @Composable
-private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SwitchRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -462,7 +584,7 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
         )
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 

@@ -27,6 +27,7 @@ data class PublicShareState(
 )
 
 class PublicShareViewModel(
+    private val application: Application,
     private val link: PublicLink,
 ) : ViewModel() {
     private val api = PublicShareApi(link.baseUrl)
@@ -55,7 +56,7 @@ class PublicShareViewModel(
                 _state.value = _state.value.copy(
                     loading = false,
                     needsPassword = needsPassword,
-                    error = if (needsPassword) null else error.toUserMessage(),
+                    error = if (needsPassword) null else error.toUserMessage(application),
                 )
             }
         }
@@ -73,7 +74,7 @@ class PublicShareViewModel(
                 .onFailure { error ->
                     _state.value = _state.value.copy(
                         loading = false,
-                        error = error.toUserMessage(),
+                        error = error.toUserMessage(application),
                     )
                 }
         }
@@ -101,11 +102,8 @@ class PublicShareViewModel(
     }
 
     companion object {
-        fun factory(link: PublicLink): ViewModelProvider.Factory = viewModelFactory {
-            initializer { PublicShareViewModel(link) }
+        fun factory(application: Application, link: PublicLink): ViewModelProvider.Factory = viewModelFactory {
+            initializer { PublicShareViewModel(application, link) }
         }
-
-        @Suppress("unused")
-        fun unused(application: Application) = application
     }
 }

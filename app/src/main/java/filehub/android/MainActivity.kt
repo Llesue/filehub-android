@@ -1,7 +1,7 @@
 package filehub.android
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -12,7 +12,7 @@ import filehub.android.ui.AppViewModel
 import filehub.android.ui.FileHubApp
 import filehub.android.ui.theme.FileHubTheme
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     private val viewModel: AppViewModel by viewModels {
         AppViewModel.factory(application)
     }

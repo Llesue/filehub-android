@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0 - Unreleased
+## v0.2.0 - Unreleased
 
 ### Added
 
@@ -18,8 +18,29 @@
 - Server favicons (branding icon with favicon fallback), editable server profiles, multi-address failover with per-server background sync.
 - FileHub-matched colored file icons (yellow folders), 8dp card rhythm, theme-aware text preview and Markdown rendering.
 - Image long-press/more menu with properties, EXIF metadata and download.
+- Compact file rows with folder sizes and a persistent directory metadata cache (Room, max 200 directories).
+- Path pill with automatic scroll to the current directory.
+- Separate photo/video Wi-Fi policies and one-time Wi-Fi catch-up after a metered run.
+- Remote folder picker for photo and directory sync targets; typed paths remain supported.
+- Shared remote-directory ensurer that handles existing folders on both new and older FileHub servers.
+- Sync locking per profile, per-profile notifications with server name, and cleanup on logout/remove.
+- Catch-up sync when the app opens after a missed schedule; token failures disable the affected sync.
+- Search result paths are normalized before opening.
+- Adaptive launcher icon and in-app brand mark generated from the supplied SVG.
+- Markdown tables, task lists, strikethrough and links.
+- Double-tap image zoom and a persistent blurred image backdrop.
+- All editable fields dismiss the keyboard/focus on Done; Save/Connect actions still submit.
+
+### Fixed
+
+- Photo sync failed after the first file when the remote directory already existed (HTTP 500 from legacy servers).
+- Folder sync could upload the same file twice per decision pass.
+- Sync notifications from multiple servers overwrote each other.
+- Manual sync ignored Wi-Fi/charging constraints.
+- Changing the photo sync target folder now asks before clearing completed records.
 
 ### Notes
 
 - Release APK is not published until the user signs off.
 - FileHub 0.2.1 is required for preserving photo timestamps; older servers degrade with a warning.
+- Periodic WorkManager runs are best-effort; OEM battery policies and force-stop can delay or cancel them.

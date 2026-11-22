@@ -30,6 +30,7 @@ data class SearchState(
 )
 
 class SearchViewModel(
+    private val application: Application,
     private val filesRepository: FilesRepository,
     private val sessionRepository: SessionRepository,
 ) : ViewModel() {
@@ -95,7 +96,7 @@ class SearchViewModel(
                 }
             }.onFailure { error ->
                 _state.update {
-                    it.copy(loading = false, error = error.toUserMessage())
+                    it.copy(loading = false, error = error.toUserMessage(application))
                 }
             }
         }
@@ -124,7 +125,7 @@ class SearchViewModel(
                     )
                 }
             }.onFailure { error ->
-                _state.update { it.copy(loading = false, error = error.toUserMessage()) }
+                _state.update { it.copy(loading = false, error = error.toUserMessage(application)) }
             }
         }
     }
@@ -155,7 +156,7 @@ class SearchViewModel(
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = application as FileHubApplication
-                SearchViewModel(app.container.filesRepository, app.container.sessionRepository)
+                SearchViewModel(app, app.container.filesRepository, app.container.sessionRepository)
             }
         }
     }

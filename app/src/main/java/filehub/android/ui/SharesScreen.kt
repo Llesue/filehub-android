@@ -74,30 +74,20 @@ fun SharesScreen(
 
     LaunchedEffect(Unit) { viewModel.load() }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back),
-                )
-            }
-            Text(
-                text = stringResource(R.string.shares_title),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
+    DetailScaffold(
+        title = stringResource(R.string.shares_title),
+        onBack = onBack,
+        actions = {
             TextButton(onClick = { openDialog = true }) {
                 Text(stringResource(R.string.shares_open))
             }
-        }
-
+        },
+    ) { padding ->
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding),
+    ) {
         if (state.loading && state.shares.isEmpty()) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
@@ -157,6 +147,7 @@ fun SharesScreen(
                 }
             }
         }
+    }
     }
 
     LaunchedEffect(state.actionLink) {
@@ -254,14 +245,14 @@ private fun ShareCard(
                         Icon(Icons.Filled.MoreVert, contentDescription = null)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
+                        CompactDropdownMenuItem(
                             text = { Text(stringResource(R.string.share_rotate)) },
                             onClick = {
                                 menuOpen = false
                                 onRotate()
                             },
                         )
-                        DropdownMenuItem(
+                        CompactDropdownMenuItem(
                             text = {
                                 Text(
                                     stringResource(R.string.share_revoke),
@@ -296,6 +287,15 @@ private fun OpenShareDialog(
 ) {
     var value by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    val invalidLink = stringResource(R.string.share_link_invalid)
+    val submit = {
+        val link = PublicShareApi.parseLink(value)
+        if (link == null) {
+            error = invalidLink
+        } else {
+            onOpen(link)
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.share_open_title)) },
@@ -310,6 +310,7 @@ private fun OpenShareDialog(
                     placeholder = { Text(stringResource(R.string.share_open_hint)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = clearFocusOnDone { submit() },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 error?.let {
@@ -319,14 +320,7 @@ private fun OpenShareDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = {
-                    val link = PublicShareApi.parseLink(value)
-                    if (link == null) {
-                        error = "Invalid share link"
-                    } else {
-                        onOpen(link)
-                    }
-                },
+                onClick = { submit() },
             ) {
                 Text(stringResource(R.string.share_open_button))
             }

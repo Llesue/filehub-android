@@ -24,13 +24,34 @@ class PhotoSyncWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
 
-    override suspend fun getForegroundInfo(): ForegroundInfo =
-        PhotoSyncNotifications.foregroundInfo(applicationContext, 0, 0, "")
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val profileId = inputData.getString("profileId").orEmpty()
+        val config = (applicationContext as FileHubApplication)
+            .container.photoSyncRepository.config(profileId)
+        return PhotoSyncNotifications.foregroundInfo(
+            applicationContext,
+            0,
+            0,
+            "",
+            PhotoSyncNotifications.idFor(profileId),
+            config?.serverName.orEmpty(),
+        )
+    }
 
     override suspend fun doWork(): Result {
+        val profileId = inputData.getString("profileId") ?: return Result.success()
+        val lock = SyncLocks.photo(profileId)
+        if (!lock.tryLock()) return Result.success()
+        return try {
+            runSync(profileId)
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    private suspend fun runSync(profileId: String): Result {
         val app = applicationContext as FileHubApplication
         val repo = app.container.photoSyncRepository
-        val profileId = inputData.getString("profileId") ?: return Result.success()
         val config = repo.config(profileId) ?: return Result.success()
         if (!config.enabled) return Result.success()
 
@@ -47,7 +68,12 @@ class PhotoSyncWorker(
         try {
             setForeground(
                 PhotoSyncNotifications.foregroundInfo(
-                    applicationContext, 0, 0, "", notificationId(profileId),
+                    applicationContext,
+                    0,
+                    0,
+                    "",
+                    PhotoSyncNotifications.idFor(profileId),
+                    config.serverName,
                 ),
             )
         } catch (error: CancellationException) {
@@ -57,11 +83,22 @@ class PhotoSyncWorker(
         }
 
         val (profile, token) = app.container.profileAndToken(config.profileId)
-            ?: return fail(repo, config, "设备授权已失效，请重新登录")
+            ?: return failPermanently(repo, config, applicationContext.getString(R.string.error_unauthorized))
         val api = FileHubApi(profile.baseUrl, token)
+        val remoteDirs = RemoteDirEnsurer(api, config.rootId)
         val albums = repo.selectedAlbums(config)
-        val photos = withContext(Dispatchers.IO) {
+        val allPhotos = withContext(Dispatchers.IO) {
             MediaScanner.photos(applicationContext, albums, config.includeVideos)
+        }
+        val metered = NetworkStatus.isMetered(applicationContext)
+        val photosAllowed = !config.photosWifiOnly || !metered
+        val videosAllowed = config.includeVideos && (!config.videosWifiOnly || !metered)
+        val photos = allPhotos.filter { photo ->
+            if (photo.isVideo) videosAllowed else photosAllowed
+        }
+        val skipped = allPhotos.size - photos.size
+        if (skipped > 0 && metered) {
+            PhotoSyncScheduler.enqueueWifiCatchUp(applicationContext, config)
         }
         val entries = repo.entries(profileId).associateBy { it.signature }
         val remoteNames = mutableMapOf<String, MutableMap<String, Long>>()
@@ -70,17 +107,13 @@ class PhotoSyncWorker(
 
         for ((index, photo) in photos.withIndex()) {
             if (isStopped) {
-                finish(repo, config, done, photos.size)
+                finish(repo, config, done, photos.size, skipped = skipped)
                 return Result.success()
             }
             val existing = entries[photo.signature]
-            if (existing?.status == STATUS_DONE && existing.size == photo.size) {
-                done += 1
-                continue
-            }
             try {
                 val remoteDir = remoteDir(config, photo)
-                ensureRemoteDir(api, config.rootId, remoteDir)
+                remoteDirs.ensure(remoteDir)
                 val target = selectRemoteTarget(
                     api = api,
                     rootId = config.rootId,
@@ -117,13 +150,17 @@ class PhotoSyncWorker(
                         remoteDir = remoteDir(config, photo),
                         remoteName = existing?.remotePath?.substringAfterLast('/') ?: photo.name,
                         status = STATUS_ERROR,
-                        error = error.toUserMessage(),
+                        error = error.toUserMessage(applicationContext),
                         bytesDone = existing?.bytesDone ?: 0,
                     ),
                 )
                 if (error.statusCode == 401 || error.statusCode == 403 || error.code == "QUOTA_EXCEEDED") {
-                    finish(repo, config, done, photos.size, failed)
-                    return if (error.statusCode == 401) Result.failure() else Result.success()
+                    finish(repo, config, done, photos.size, failed, skipped)
+                    if (error.statusCode == 401) {
+                        repo.setEnabled(config.profileId, false)
+                        return Result.failure()
+                    }
+                    return Result.success()
                 }
             } catch (error: Exception) {
                 failed += 1
@@ -134,7 +171,7 @@ class PhotoSyncWorker(
                         remoteDir = remoteDir(config, photo),
                         remoteName = existing?.remotePath?.substringAfterLast('/') ?: photo.name,
                         status = STATUS_ERROR,
-                        error = error.toUserMessage(),
+                        error = error.toUserMessage(applicationContext),
                         bytesDone = existing?.bytesDone ?: 0,
                     ),
                 )
@@ -144,11 +181,12 @@ class PhotoSyncWorker(
                 done + failed,
                 photos.size,
                 photos.getOrNull(index)?.name.orEmpty(),
-                notificationId(profileId),
+                PhotoSyncNotifications.idFor(profileId),
+                config.serverName,
             )
         }
 
-        finish(repo, config, done, photos.size, failed)
+        finish(repo, config, done, photos.size, failed, skipped)
         return Result.success()
     }
 
@@ -225,16 +263,6 @@ class PhotoSyncWorker(
         return complete.path
     }
 
-    private suspend fun ensureRemoteDir(api: FileHubApi, rootId: Long, dir: String) {
-        var parent = ""
-        for (segment in dir.split('/').filter { it.isNotEmpty() }) {
-            runCatching { api.mkdir(rootId, parent, segment) }
-                .onFailure { error ->
-                    if (error is FileHubApiException && error.statusCode !in listOf(409, 403)) throw error
-                }
-            parent = if (parent.isEmpty()) segment else "$parent/$segment"
-        }
-    }
 
     private suspend fun selectRemoteTarget(
         api: FileHubApi,
@@ -244,11 +272,22 @@ class PhotoSyncWorker(
         photo: MediaPhoto,
     ): RemoteTarget {
         val names = cache.getOrPut(remoteDir) {
-            runCatching {
-                api.list(rootId, remoteDir, limit = 1000).entries
-                    .associate { it.name to it.size }
-                    .toMutableMap()
-            }.getOrDefault(mutableMapOf())
+            val result = mutableMapOf<String, Long>()
+            var cursor: String? = null
+            var pages = 0
+            do {
+                val listing = api.list(
+                    rootId = rootId,
+                    path = remoteDir,
+                    cursor = cursor,
+                    limit = 1000,
+                    includeSizes = false,
+                )
+                listing.entries.filterNot { it.isDir }.forEach { result[it.name] = it.size }
+                cursor = listing.nextCursor
+                pages += 1
+            } while (cursor != null && pages < 20)
+            result.toMutableMap()
         }
         if (names[photo.name] == photo.size) {
             return RemoteTarget(photo.name, alreadyExists = true)
@@ -336,17 +375,29 @@ class PhotoSyncWorker(
         done: Int,
         total: Int,
         failed: Int = 0,
+        skipped: Int = 0,
     ) {
-        val result = applicationContext.getString(R.string.photo_sync_result, done, total)
+        val result = buildString {
+            append(applicationContext.getString(R.string.photo_sync_result, done, total))
+            if (skipped > 0) {
+                append(" · ")
+                append(applicationContext.getString(R.string.sync_waiting_wifi, skipped))
+            }
+        }
         repo.updateConfig(
             config.copy(
                 lastRunAt = now(),
                 lastResult = result,
-                lastError = if (failed > 0) "$failed failed" else null,
+                lastError = if (failed > 0) applicationContext.resources.getQuantityString(R.plurals.sync_failed_count, failed, failed) else null,
                 pendingCount = repo.pendingCount(config.profileId),
             ),
         )
-        PhotoSyncNotifications.finished(applicationContext, result, notificationId(config.profileId))
+        PhotoSyncNotifications.finished(
+            applicationContext,
+            result,
+            PhotoSyncNotifications.idFor(config.profileId),
+            config.serverName,
+        )
     }
 
     private suspend fun fail(
@@ -355,8 +406,31 @@ class PhotoSyncWorker(
         message: String,
     ): Result {
         repo.updateConfig(config.copy(lastError = message, lastRunAt = now()))
-        PhotoSyncNotifications.finished(applicationContext, message, notificationId(config.profileId))
+        PhotoSyncNotifications.finished(
+            applicationContext,
+            message,
+            PhotoSyncNotifications.idFor(config.profileId),
+            config.serverName,
+        )
         return Result.retry()
+    }
+
+    private suspend fun failPermanently(
+        repo: PhotoSyncRepository,
+        config: PhotoSyncConfigEntity,
+        message: String,
+    ): Result {
+        repo.updateConfig(
+            config.copy(enabled = false, lastError = message, lastRunAt = now()),
+        )
+        PhotoSyncScheduler.cancelAll(applicationContext, config.profileId)
+        PhotoSyncNotifications.finished(
+            applicationContext,
+            message,
+            PhotoSyncNotifications.idFor(config.profileId),
+            config.serverName,
+        )
+        return Result.failure()
     }
 
     private fun hasPhotoPermission(config: PhotoSyncConfigEntity): Boolean {
@@ -381,8 +455,6 @@ class PhotoSyncWorker(
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun notificationId(profileId: String): Int =
-        5301 + (profileId.hashCode() and 0x0FFFFF)
 
     private fun now(): Long = System.currentTimeMillis() / 1000
 

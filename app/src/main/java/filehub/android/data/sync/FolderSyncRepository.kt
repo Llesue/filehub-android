@@ -34,9 +34,24 @@ class FolderSyncRepository(
     suspend fun setEnabled(profileId: String, enabled: Boolean) {
         val current = dao.config(profileId) ?: return
         save(current.copy(enabled = enabled))
+        if (!enabled) FolderSyncScheduler.cancelAll(context, profileId)
     }
 
-    suspend fun syncNow(profileId: String) = FolderSyncScheduler.enqueueNow(context, profileId)
+    suspend fun syncNow(profileId: String) {
+        val config = dao.config(profileId) ?: return
+        FolderSyncScheduler.enqueueNow(context, config)
+    }
+
+    suspend fun catchUp(profileId: String) {
+        val config = dao.config(profileId) ?: return
+        if (config.enabled) FolderSyncScheduler.enqueueCatchUp(context, config)
+    }
+
+    suspend fun disableAndCancel(profileId: String) {
+        val current = dao.config(profileId)
+        if (current != null) save(current.copy(enabled = false))
+        FolderSyncScheduler.cancelAll(context, profileId)
+    }
 
     suspend fun cancel(profileId: String) = FolderSyncScheduler.cancelAll(context, profileId)
 
@@ -99,6 +114,7 @@ class FolderSyncRepository(
 object FolderSyncScheduler {
     private fun periodicName(profileId: String) = "folder-sync-periodic-$profileId"
     private fun nowName(profileId: String) = "folder-sync-now-$profileId"
+    private fun catchUpName(profileId: String) = "folder-sync-catchup-$profileId"
 
     fun schedulePeriodic(context: Context, config: FolderSyncConfigEntity) {
         val interval = when (config.schedule) {
@@ -107,12 +123,8 @@ object FolderSyncScheduler {
             "weekly" -> 7L * 24 * 60
             else -> 24L * 60
         }
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(if (config.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
-            .setRequiresCharging(config.chargingOnly)
-            .build()
         val request = PeriodicWorkRequestBuilder<FolderSyncWorker>(interval, TimeUnit.MINUTES)
-            .setConstraints(constraints)
+            .setConstraints(constraints(config))
             .setInputData(workDataOf("profileId" to config.profileId))
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
@@ -122,14 +134,26 @@ object FolderSyncScheduler {
         )
     }
 
-    fun enqueueNow(context: Context, profileId: String) {
+    fun enqueueNow(context: Context, config: FolderSyncConfigEntity) {
         val request = OneTimeWorkRequestBuilder<FolderSyncWorker>()
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-            .setInputData(workDataOf("profileId" to profileId))
+            .setConstraints(constraints(config))
+            .setInputData(workDataOf("profileId" to config.profileId))
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
-            nowName(profileId),
+            nowName(config.profileId),
             ExistingWorkPolicy.REPLACE,
+            request,
+        )
+    }
+
+    fun enqueueCatchUp(context: Context, config: FolderSyncConfigEntity) {
+        val request = OneTimeWorkRequestBuilder<FolderSyncWorker>()
+            .setConstraints(constraints(config))
+            .setInputData(workDataOf("profileId" to config.profileId))
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            catchUpName(config.profileId),
+            ExistingWorkPolicy.KEEP,
             request,
         )
     }
@@ -141,5 +165,12 @@ object FolderSyncScheduler {
     fun cancelAll(context: Context, profileId: String) {
         WorkManager.getInstance(context).cancelUniqueWork(periodicName(profileId))
         WorkManager.getInstance(context).cancelUniqueWork(nowName(profileId))
+        WorkManager.getInstance(context).cancelUniqueWork(catchUpName(profileId))
     }
+
+    private fun constraints(config: FolderSyncConfigEntity): Constraints =
+        Constraints.Builder()
+            .setRequiredNetworkType(if (config.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+            .setRequiresCharging(config.chargingOnly)
+            .build()
 }

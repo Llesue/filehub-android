@@ -1,6 +1,7 @@
 package filehub.android.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -39,16 +40,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
 import coil3.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import filehub.android.R
 import filehub.android.core.model.ServerProfile
+import filehub.android.data.ServerConnection
+import filehub.android.data.ServerConnectionStatus
 import filehub.android.data.SessionState
 
 @Composable
 fun ServersScreen(
     state: SessionState,
+    connection: ServerConnection?,
     onAddServer: () -> Unit,
     onSelect: (String) -> Unit,
     onRemove: (String) -> Unit,
@@ -112,13 +119,14 @@ fun ServersScreen(
                     top = 4.dp,
                     bottom = 24.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.profiles, key = { it.id }) { profile ->
                     ServerCard(
                         profile = profile,
                         active = state.active?.id == profile.id,
                         needsLogin = state.active?.id == profile.id && state.needsLogin,
+                        connection = connection?.takeIf { it.profileId == profile.id },
                         onClick = { onSelect(profile.id) },
                         onRemove = { pendingRemoval = profile },
                         onEdit = { onEdit(profile.id) },
@@ -162,6 +170,7 @@ private fun ServerCard(
     profile: ServerProfile,
     active: Boolean,
     needsLogin: Boolean,
+    connection: ServerConnection?,
     onClick: () -> Unit,
     onRemove: () -> Unit,
     onEdit: () -> Unit,
@@ -186,13 +195,14 @@ private fun ServerCard(
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primary),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = profile.displayName.take(1).uppercase().ifBlank { "F" },
                     style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onPrimary,
                     fontWeight = FontWeight.SemiBold,
                 )
                 profile.iconUrl?.let { icon ->
@@ -200,7 +210,9 @@ private fun ServerCard(
                         model = icon,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(10.dp)),
                     )
                 }
             }
@@ -213,8 +225,9 @@ private fun ServerCard(
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
-                    if (active) {
+                    if (active && connection == null) {
                         Spacer(Modifier.size(8.dp))
                         Surface(
                             color = MaterialTheme.colorScheme.primaryContainer,
@@ -224,6 +237,41 @@ private fun ServerCard(
                                 text = stringResource(R.string.servers_active),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                    connection?.let { status ->
+                        Spacer(Modifier.size(8.dp))
+                        val label = when (status.status) {
+                            ServerConnectionStatus.Connecting -> stringResource(
+                                R.string.server_connecting_progress,
+                                status.attempt,
+                                status.total,
+                            )
+                            ServerConnectionStatus.Success -> stringResource(R.string.server_connected)
+                            ServerConnectionStatus.Failed -> stringResource(R.string.server_connect_failed)
+                        }
+                        Surface(
+                            color = when (status.status) {
+                                ServerConnectionStatus.Connecting -> MaterialTheme.colorScheme.secondaryContainer
+                                ServerConnectionStatus.Success -> MaterialTheme.colorScheme.primaryContainer
+                                ServerConnectionStatus.Failed -> MaterialTheme.colorScheme.errorContainer
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = when (status.status) {
+                                    ServerConnectionStatus.Connecting -> MaterialTheme.colorScheme.onSecondaryContainer
+                                    ServerConnectionStatus.Success -> MaterialTheme.colorScheme.primary
+                                    ServerConnectionStatus.Failed -> MaterialTheme.colorScheme.onErrorContainer
+                                },
+                                maxLines = 1,
+                                softWrap = false,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             )
                         }
@@ -254,14 +302,14 @@ private fun ServerCard(
                     Icon(Icons.Filled.MoreVert, contentDescription = null)
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.server_edit)) },
                         onClick = {
                             menuOpen = false
                             onEdit()
                         },
                     )
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.servers_remove)) },
                         onClick = {
                             menuOpen = false
@@ -279,14 +327,13 @@ private fun BrandMark() {
     Box(
         modifier = Modifier
             .size(72.dp)
-            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(20.dp)),
+            .background(colorResource(R.color.filehub_blue), RoundedCornerShape(20.dp)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = "F",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
+        Image(
+            painter = painterResource(R.drawable.ic_logo_mark),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }

@@ -1,11 +1,15 @@
 package filehub.android.data.transfer
 
+import filehub.android.R
+import filehub.android.core.model.FileKind
+import filehub.android.core.model.detectKind
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.webkit.MimeTypeMap
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
@@ -71,7 +75,7 @@ class UploadWorker(
         }
 
         val (profile, token) = app.container.profileAndToken(item.profileId)
-            ?: return fail(store, id, "设备授权已失效，请重新登录", retry = false)
+            ?: return fail(store, id, applicationContext.getString(R.string.error_unauthorized), retry = false)
         val api = FileHubApi(profile.baseUrl, token)
 
         return try {
@@ -161,9 +165,9 @@ class UploadWorker(
             throw error
         } catch (error: FileHubApiException) {
             val retry = error.code == "NETWORK_ERROR" || error.statusCode == 0
-            fail(store, id, error.toUserMessage(), retry)
+            fail(store, id, error.toUserMessage(applicationContext), retry)
         } catch (error: Exception) {
-            fail(store, id, error.toUserMessage(), retry = false)
+            fail(store, id, error.toUserMessage(applicationContext), retry = false)
         }
     }
 
@@ -260,9 +264,9 @@ class DownloadWorker(
         }
 
         val (_, token) = app.container.profileAndToken(item.profileId)
-            ?: return fail(store, id, "设备授权已失效，请重新登录", retry = false)
+            ?: return fail(store, id, applicationContext.getString(R.string.error_unauthorized), retry = false)
         val base = item.baseUrl.toHttpUrlOrNull()
-            ?: return fail(store, id, "服务器地址无效", retry = false)
+            ?: return fail(store, id, applicationContext.getString(R.string.error_invalid_url), retry = false)
         val url = base.newBuilder()
             .addPathSegments("api/v1/download")
             .addQueryParameter("root", item.rootId.toString())
@@ -293,7 +297,7 @@ class DownloadWorker(
                 if (response.code == 416) {
                     part.delete()
                     done = 0
-                    return fail(store, id, "下载断点失效，请重试", retry = true)
+                    return fail(store, id, applicationContext.getString(R.string.transfer_error_resume_expired), retry = true)
                 }
                 if (!response.isSuccessful) {
                     return fail(store, id, "HTTP ${response.code}", retry = response.code >= 500)
@@ -351,33 +355,55 @@ class DownloadWorker(
         } catch (error: CancellationException) {
             throw error
         } catch (error: IOException) {
-            fail(store, id, error.message ?: "网络错误", retry = true)
+            fail(store, id, error.message ?: applicationContext.getString(R.string.error_network), retry = true)
         } catch (error: Exception) {
-            fail(store, id, error.message ?: "下载失败", retry = false)
+            fail(store, id, error.message ?: applicationContext.getString(R.string.transfer_error_download_failed), retry = false)
         }
     }
 
     private suspend fun saveCompleted(item: TransferItem, part: File): String = withContext(Dispatchers.IO) {
+        val kind = detectKind(item.name, item.mimeType, isDir = false)
+        val visual = kind == FileKind.Image || kind == FileKind.Video
+        val mime = item.mimeType.ifBlank {
+            MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(item.name.substringAfterLast('.', "").lowercase())
+                ?: when (kind) {
+                    FileKind.Image -> "image/*"
+                    FileKind.Video -> "video/*"
+                    else -> "application/octet-stream"
+                }
+        }
         if (Build.VERSION.SDK_INT >= 29) {
+            val collection = when (kind) {
+                FileKind.Image -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                FileKind.Video -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                else -> MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            }
+            val relativePath = if (visual) {
+                Environment.DIRECTORY_DCIM + "/FileHub"
+            } else {
+                Environment.DIRECTORY_DOWNLOADS + "/FileHub"
+            }
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, item.name)
-                put(MediaStore.Downloads.MIME_TYPE, item.mimeType.ifBlank { "application/octet-stream" })
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FileHub")
-                put(MediaStore.Downloads.IS_PENDING, 1)
+                put(MediaStore.MediaColumns.DISPLAY_NAME, item.name)
+                put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             val resolver = applicationContext.contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            val uri = resolver.insert(collection, values)
                 ?: error("cannot create download entry")
             resolver.openOutputStream(uri)?.use { output ->
                 part.inputStream().use { input -> input.copyTo(output) }
             } ?: error("cannot open download entry")
             values.clear()
-            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
             part.delete()
             uri.toString()
         } else {
-            val dir = File(applicationContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "FileHub")
+            val baseDir = if (visual) Environment.DIRECTORY_DCIM else Environment.DIRECTORY_DOWNLOADS
+            val dir = File(applicationContext.getExternalFilesDir(baseDir), "FileHub")
                 .apply { mkdirs() }
             val target = File(dir, item.name)
             part.inputStream().use { input ->

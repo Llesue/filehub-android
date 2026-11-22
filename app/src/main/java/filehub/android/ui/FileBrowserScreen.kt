@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -54,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
@@ -79,6 +82,7 @@ import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileKind
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.SortOrder
+import kotlinx.coroutines.flow.first
 import filehub.android.ui.theme.FileHubFileBlue
 import filehub.android.ui.theme.FileHubFileBrown
 import filehub.android.ui.theme.FileHubFileCyan
@@ -248,21 +252,21 @@ fun FileBrowserScreen(
                 }
                 DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
                     if (!state.readOnly) {
-                        DropdownMenuItem(
+                        CompactDropdownMenuItem(
                             text = { Text(stringResource(R.string.transfer_upload_action)) },
                             onClick = {
                                 moreMenu = false
                                 filePicker.launch(arrayOf("*/*"))
                             },
                         )
-                        DropdownMenuItem(
+                        CompactDropdownMenuItem(
                             text = { Text(stringResource(R.string.transfer_photo_action)) },
                             onClick = {
                                 moreMenu = false
                                 mediaPicker.launch(arrayOf("image/*", "video/*"))
                             },
                         )
-                        DropdownMenuItem(
+                        CompactDropdownMenuItem(
                             text = { Text(stringResource(R.string.transfer_camera_action)) },
                             onClick = {
                                 moreMenu = false
@@ -270,7 +274,7 @@ fun FileBrowserScreen(
                             },
                         )
                     }
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.action_new_folder)) },
                         leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
                         onClick = {
@@ -278,7 +282,7 @@ fun FileBrowserScreen(
                             newFolder = true
                         },
                     )
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.action_new_file)) },
                         leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
                         onClick = {
@@ -286,7 +290,7 @@ fun FileBrowserScreen(
                             newFile = true
                         },
                     )
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.file_refresh)) },
                         leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
                         onClick = {
@@ -300,7 +304,6 @@ fun FileBrowserScreen(
         }
 
         Breadcrumb(
-            rootAlias = state.root?.alias.orEmpty(),
             path = state.path,
             onNavigate = viewModel::navigateTo,
         )
@@ -345,7 +348,7 @@ fun FileBrowserScreen(
                 title = stringResource(R.string.file_login_required),
                 action = null,
             )
-            state.error != null -> MessageState(
+            state.error != null && state.entries.isEmpty() -> MessageState(
                 title = state.error.orEmpty(),
                 action = {
                     TextButton(onClick = viewModel::refresh) {
@@ -355,16 +358,45 @@ fun FileBrowserScreen(
             )
             state.loading && state.entries.isEmpty() -> SkeletonList()
             state.entries.isEmpty() -> EmptyFolder()
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 10.dp,
-                    bottom = 24.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+            else -> Column(modifier = Modifier.fillMaxSize()) {
+                state.error?.let { message ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 12.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = viewModel::refresh) {
+                                Text(stringResource(R.string.common_retry))
+                            }
+                        }
+                    }
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 0.dp,
+                        end = 0.dp,
+                        top = 4.dp,
+                        bottom = 24.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                 items(state.entries, key = { it.name + it.modified + it.size }) { entry ->
                     FileCard(
                         entry = entry,
@@ -407,6 +439,7 @@ fun FileBrowserScreen(
                     }
                 }
             }
+        }
         }
         }
         if (state.selectionMode) {
@@ -512,14 +545,18 @@ fun FileBrowserScreen(
     state.previewEntry?.let { entry ->
         PreviewDialog(
             entry = entry,
+            imageEntries = state.previewImages,
             imageLoader = imageLoader,
-            downloadUrl = viewModel.downloadUrl(entry),
+            imageUrlFor = viewModel::previewImageUrl,
+            thumbnailUrlFor = viewModel::thumbnailUrl,
+            downloadUrlFor = viewModel::downloadUrl,
             text = state.textPreview,
             pdfFile = state.pdfPreviewFile,
             loading = state.previewLoading,
             mediaReady = state.previewMediaReady,
             error = state.previewError,
             playerFactory = viewModel::createPlayer,
+            onPageChanged = viewModel::previewPage,
             onLongPress = {
                 imageMenu = true
                 viewModel.loadProperties(entry)
@@ -606,7 +643,7 @@ private fun SortMenuItem(
     onClick: () -> Unit,
 ) {
     val selected = sort == current
-    DropdownMenuItem(
+    CompactDropdownMenuItem(
         text = {
             Text(
                 text = sortLabel(sort) + if (selected) {
@@ -629,60 +666,72 @@ private fun sortLabel(sort: FileSort): String = when (sort) {
 
 @Composable
 private fun Breadcrumb(
-    rootAlias: String,
     path: String,
     onNavigate: (String) -> Unit,
 ) {
     val segments = path.split('/').filter { it.isNotEmpty() }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val scrollState = rememberScrollState()
+    LaunchedEffect(path) {
+        snapshotFlow { scrollState.maxValue }.first { it > 0 }
+        scrollState.animateScrollTo(scrollState.maxValue)
+    }
+    Surface(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(18.dp),
     ) {
-        Icon(
-            painter = painterResource(R.drawable.ic_file_folder),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.size(6.dp))
-        Text(
-            text = rootAlias,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (segments.isEmpty()) {
-                MaterialTheme.colorScheme.onSurface
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            fontWeight = if (segments.isEmpty()) FontWeight.SemiBold else FontWeight.Normal,
-            modifier = Modifier.clickable { onNavigate("") },
-        )
-        segments.forEachIndexed { index, segment ->
+        Row(
+            modifier = Modifier
+                .horizontalScroll(scrollState)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_file_folder),
+                contentDescription = null,
+                tint = fileIconColor(FileKind.Folder),
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.size(6.dp))
             Text(
-                text = "  ›  ",
+                text = "/",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clickable { onNavigate("") }
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
             )
-            Text(
-                text = segment,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (index == segments.lastIndex) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                fontWeight = if (index == segments.lastIndex) FontWeight.SemiBold else FontWeight.Normal,
-                modifier = Modifier.clickable {
-                    onNavigate(segments.take(index + 1).joinToString("/"))
-                },
-            )
+            segments.forEachIndexed { index, segment ->
+                if (index > 0) {
+                    Text(
+                        text = "/",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 1.dp),
+                    )
+                }
+                Text(
+                    text = segment,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (index == segments.lastIndex) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontWeight = if (index == segments.lastIndex) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier
+                        .clickable {
+                            onNavigate(segments.take(index + 1).joinToString("/"))
+                        }
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                )
+            }
+            // Keep the last path segment away from the screen edge.
+            Spacer(Modifier.size(24.dp))
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileCard(
     entry: FileEntry,
@@ -710,32 +759,29 @@ private fun FileCard(
         DateUtils.MINUTE_IN_MILLIS,
         DateUtils.FORMAT_ABBREV_RELATIVE,
     ).toString()
-    val meta = if (entry.isDir) time else "$size · $time"
+    val meta = if (entry.isDir) {
+        if (entry.size > 0) "$size · $time" else time
+    } else {
+        "$size · $time"
+    }
 
-    Surface(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 60.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+            )
             .combinedClickable(
                 onClick = {
                     if (selectionMode || selected) onToggle() else onEntry()
                 },
                 onLongClick = onToggle,
-            ),
-        shape = RoundedCornerShape(12.dp),
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
-        border = BorderStroke(
-            if (selected) 1.5.dp else 1.dp,
-            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-        ),
+            )
+            .padding(start = 16.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -797,28 +843,28 @@ private fun FileCard(
                     Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.file_more))
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.file_details)) },
                         onClick = {
                             menuOpen = false
                             onDetails()
                         },
                     )
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.share_create)) },
                         onClick = {
                             menuOpen = false
                             onShare()
                         },
                     )
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.move_to)) },
                         onClick = {
                             menuOpen = false
                             onMove()
                         },
                     )
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.copy_to)) },
                         onClick = {
                             menuOpen = false
@@ -826,7 +872,7 @@ private fun FileCard(
                         },
                     )
                     if (entry.name.endsWith(".zip", ignoreCase = true)) {
-                        DropdownMenuItem(
+                        CompactDropdownMenuItem(
                             text = { Text(stringResource(R.string.extract)) },
                             onClick = {
                                 menuOpen = false
@@ -835,7 +881,7 @@ private fun FileCard(
                         )
                     }
                     if (!entry.isDir) {
-                        DropdownMenuItem(
+                        CompactDropdownMenuItem(
                             text = { Text(stringResource(R.string.transfer_download_action)) },
                             onClick = {
                                 menuOpen = false
@@ -843,14 +889,14 @@ private fun FileCard(
                             },
                         )
                     }
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.action_rename)) },
                         onClick = {
                             menuOpen = false
                             onRename()
                         },
                     )
-                    DropdownMenuItem(
+                    CompactDropdownMenuItem(
                         text = {
                             Text(
                                 stringResource(R.string.action_delete),
@@ -865,7 +911,6 @@ private fun FileCard(
                 }
             }
         }
-    }
 }
 
 @Composable
@@ -954,7 +999,7 @@ private fun EmptyFolder() {
         Icon(
             painter = painterResource(R.drawable.ic_file_folder),
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = fileIconColor(FileKind.Folder),
             modifier = Modifier.size(56.dp),
         )
         Spacer(Modifier.height(16.dp))
@@ -976,46 +1021,37 @@ private fun SkeletonList() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         repeat(7) {
-            Surface(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(76.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    .height(56.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
+                )
+                Spacer(Modifier.size(12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
+                            .fillMaxWidth(0.55f)
+                            .height(12.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)),
                     )
-                    Spacer(Modifier.size(12.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.55f)
-                                .height(12.dp)
-                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)),
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.3f)
-                                .height(10.dp)
-                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)),
-                        )
-                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.3f)
+                            .height(10.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)),
+                    )
                 }
             }
         }
     }
 }
-
-

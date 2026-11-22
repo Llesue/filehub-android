@@ -13,16 +13,22 @@ import okhttp3.OkHttpClient
  */
 class ThumbnailLoaderFactory(private val context: Context) {
 
-    private val loaders = mutableMapOf<String, ImageLoader>()
+    private data class Entry(val token: String, val loader: ImageLoader)
+
+    private val loaders = mutableMapOf<String, Entry>()
 
     @Synchronized
-    fun get(profileId: String, token: String): ImageLoader =
-        loaders.getOrPut(profileId) { create(token) }
+    fun get(profileId: String, token: String): ImageLoader {
+        val cached = loaders[profileId]
+        if (cached != null && cached.token == token) return cached.loader
+        cached?.let { runCatching { it.loader.shutdown() } }
+        return create(token).also { loaders[profileId] = Entry(token, it) }
+    }
 
     @Synchronized
     fun close(profileId: String) {
-        loaders.remove(profileId)?.let { loader ->
-            runCatching { loader.shutdown() }
+        loaders.remove(profileId)?.let { entry ->
+            runCatching { entry.loader.shutdown() }
         }
     }
 

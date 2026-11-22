@@ -1,6 +1,7 @@
 package filehub.android
 
 import android.content.Context
+import filehub.android.data.DirectoryCacheRepository
 import filehub.android.data.FilesRepository
 import filehub.android.data.ShareRepository
 import filehub.android.data.SessionRepository
@@ -24,15 +25,19 @@ class AppContainer(context: Context) {
     val profileStore: ProfileStore = ProfileStore(appContext)
     val settingsStore: SettingsStore = SettingsStore(appContext)
     val tokenVault: TokenVault = TokenVault()
-    val sessionRepository: SessionRepository = SessionRepository(profileStore, tokenVault)
-    val filesRepository: FilesRepository = FilesRepository(sessionRepository)
-    val shareRepository: ShareRepository = ShareRepository(sessionRepository)
+    val sessionRepository: SessionRepository = SessionRepository(appContext, profileStore, tokenVault)
+    val filesRepository: FilesRepository = FilesRepository(appContext, sessionRepository)
+    val shareRepository: ShareRepository = ShareRepository(appContext, sessionRepository)
     val thumbnailLoaderFactory: ThumbnailLoaderFactory = ThumbnailLoaderFactory(appContext)
     val mediaPlayerFactory: MediaPlayerFactory = MediaPlayerFactory(appContext)
     val previewDownloader: PreviewDownloader = PreviewDownloader(appContext.cacheDir)
     val transferStore: TransferStore = TransferStore(appContext)
     val transferRepository: TransferRepository = TransferRepository(appContext, transferStore)
-    val syncDatabase: SyncDatabase = Room.databaseBuilder(appContext, SyncDatabase::class.java, "filehub-sync.db").fallbackToDestructiveMigration().build()
+    val syncDatabase: SyncDatabase = Room.databaseBuilder(appContext, SyncDatabase::class.java, "filehub-sync.db")
+        .addMigrations(SyncDatabase.MIGRATION_3_4, SyncDatabase.MIGRATION_4_5)
+        .fallbackToDestructiveMigration()
+        .build()
+    val directoryCacheRepository: DirectoryCacheRepository = DirectoryCacheRepository(syncDatabase.directoryCacheDao())
     val photoSyncRepository: PhotoSyncRepository = PhotoSyncRepository(appContext, syncDatabase.photoSyncDao())
     val folderSyncRepository: FolderSyncRepository = FolderSyncRepository(appContext, syncDatabase.folderSyncDao())
 

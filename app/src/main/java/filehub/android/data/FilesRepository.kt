@@ -1,5 +1,7 @@
 package filehub.android.data
 
+import android.content.Context
+import filehub.android.R
 import filehub.android.core.model.DirectoryListing
 import filehub.android.core.model.FileProperties
 import filehub.android.core.model.FileSort
@@ -12,6 +14,7 @@ import filehub.android.data.api.FileHubApiException
 import filehub.android.data.api.TextFileDto
 
 class FilesRepository(
+    private val context: Context,
     private val session: SessionRepository,
 ) {
     suspend fun tokenFor(profile: ServerProfile): String? = session.tokenFor(profile)
@@ -24,6 +27,7 @@ class FilesRepository(
         order: SortOrder,
         cursor: String?,
         limit: Int = 200,
+        includeSizes: Boolean = true,
     ): DirectoryListing = api(profile).list(
         rootId = rootId,
         path = path,
@@ -101,7 +105,7 @@ class FilesRepository(
 
     private suspend fun api(profile: ServerProfile): FileHubApi {
         val token = session.tokenFor(profile)
-            ?: throw FileHubApiException(401, "UNAUTHORIZED", "设备授权已失效，请重新登录")
+            ?: throw FileHubApiException(401, "UNAUTHORIZED", context.getString(R.string.error_unauthorized))
         return FileHubApi(profile.baseUrl, token)
     }
 }
