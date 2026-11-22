@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
@@ -713,8 +714,10 @@ fun PreviewDialog(
                         contentColor = contentColor,
                         showDetails = false,
                         showOrientation = false,
-                        showEdit = false,
-                        onEdit = {},
+                        showEdit = entry.kind == FileKind.Text ||
+                            entry.kind == FileKind.Code ||
+                            entry.isMarkdown,
+                        onEdit = onEdit ?: {},
                         onDetails = onLongPress,
                         onToggleOrientation = {},
                         onClose = onClose,
@@ -1185,60 +1188,49 @@ private fun CodePreview(
 ) {
     val truncated = content.length > CODE_PREVIEW_MAX_CHARS
     val shown = if (truncated) content.take(CODE_PREVIEW_MAX_CHARS) else content
-    val lineCount = shown.count { it == '\n' } + 1
-    val numbers = remember(shown) {
-        buildString {
-            for (index in 1..lineCount) {
-                if (index > 1) append('\n')
-                append(index)
-            }
-        }
-    }
-    val vertical = rememberScrollState()
-    val horizontal = rememberScrollState()
+    val lines = remember(shown) { shown.split('\n') }
+    val digits = remember(lines) { lines.size.toString().length }
     val codeStyle = MaterialTheme.typography.bodySmall.copy(
         fontFamily = FontFamily.Monospace,
         fontSize = 13.sp,
         lineHeight = 19.sp,
     )
-    Column(modifier = modifier) {
+    val gutterWidth = (digits * 8 + 16).dp
+    LazyColumn(modifier = modifier.fillMaxSize()) {
         if (truncated) {
-            Text(
-                text = stringResource(R.string.code_preview_truncated),
-                style = MaterialTheme.typography.bodySmall,
-                color = contentColor,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White.copy(alpha = 0.12f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            )
+            item(key = "truncated") {
+                Text(
+                    text = stringResource(R.string.code_preview_truncated),
+                    color = contentColor,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(vertical),
-        ) {
-            Text(
-                text = numbers,
-                style = codeStyle,
-                color = contentColor.copy(alpha = 0.55f),
-                textAlign = TextAlign.End,
-                softWrap = false,
-                modifier = Modifier
-                    .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
-            )
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(horizontal),
-            ) {
+        itemsIndexed(lines) { index, line ->
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = (index + 1).toString(),
+                    style = codeStyle,
+                    color = contentColor.copy(alpha = 0.55f),
+                    textAlign = TextAlign.End,
+                    softWrap = false,
+                    modifier = Modifier
+                        .width(gutterWidth)
+                        .padding(end = 8.dp),
+                )
                 SelectionContainer {
                     Text(
-                        text = shown,
+                        text = line.ifEmpty { " " },
                         style = codeStyle,
                         color = contentColor,
-                        softWrap = false,
-                        modifier = Modifier.padding(end = 16.dp, top = 12.dp, bottom = 12.dp),
+                        softWrap = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 16.dp),
                     )
                 }
             }

@@ -30,7 +30,8 @@ private val KNOWN_EXTENSIONS = setOf(
     "sqlite3", "mdb", "accdb", "zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst",
     "cab", "tgz", "kt", "kts", "java", "rs", "go", "py", "js", "ts", "tsx", "jsx",
     "c", "h", "cpp", "hpp", "cs", "rb", "php", "sh", "zsh", "sql", "json", "yaml",
-    "yml", "toml", "xml", "ini", "conf", "cfg", "properties", "env", "md", "markdown",
+    "yml", "toml", "xml", "ini", "conf", "cfg", "properties", "env", "bat", "cmd",
+    "ps1", "psm1", "vbs", "reg", "ahk", "md", "markdown",
     "txt", "log", "html", "css", "scss", "vue", "svelte", "lua", "pl", "swift", "dart",
 )
 
@@ -94,7 +95,7 @@ fun FileNameText(
     ) {
         Text(
             text = body,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f, fill = false),
             style = style,
             color = color,
             fontWeight = fontWeight,

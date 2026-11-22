@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -188,7 +189,6 @@ fun ReorderableAddressList(
                                 if (from == null) return@detectDragGestures
                                 val destination = targetIndex ?: from
                                 val finalOffset = offsetForTarget(from, destination)
-                                settling = true
                                 scope.launch {
                                     val start = dragOffset
                                     val startedAt = System.nanoTime()
@@ -199,11 +199,13 @@ fun ReorderableAddressList(
                                         if (fraction >= 1f) break
                                         kotlinx.coroutines.delay(16)
                                     }
+                                    if (destination != from) onMove(from, destination)
                                     draggingIndex = null
                                     targetIndex = null
                                     dragOffset = 0f
+                                    settling = true
+                                    withFrameNanos { }
                                     settling = false
-                                    if (destination != from) onMove(from, destination)
                                 }
                             },
                             onDragCancel = {

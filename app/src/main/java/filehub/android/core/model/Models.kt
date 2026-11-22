@@ -209,7 +209,7 @@ internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKin
             "kt", "kts", "java", "rs", "go", "py", "js", "ts", "tsx", "jsx",
             "c", "h", "cpp", "hpp", "cs", "rb", "php", "sh", "zsh", "sql",
             "json", "yaml", "yml", "toml", "xml", "ini", "conf", "cfg",
-            "properties", "env",
+            "properties", "env", "bat", "cmd", "ps1", "psm1", "vbs", "reg", "ahk",
         ) -> FileKind.Code
         mime.startsWith("text/") -> FileKind.Text
         ext in setOf("md", "markdown", "txt", "log", "csv") -> FileKind.Text

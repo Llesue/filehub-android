@@ -81,7 +81,7 @@ fun TextEditorScreen(
     var discardDialog by remember { mutableStateOf(false) }
     var pendingEncoding by remember { mutableStateOf<String?>(null) }
     var preview by remember { mutableStateOf(false) }
-    var wrap by remember { mutableStateOf(!viewModel.isMarkdown) }
+    var wrap by remember { mutableStateOf(true) }
 
     LaunchedEffect(state.loading) {
         if (!state.loading && fieldValue.text != state.content) {
@@ -442,7 +442,7 @@ private fun EditorBody(
             .verticalScroll(vertical)
             .padding(vertical = 8.dp),
     ) {
-        if (!markdown) {
+        if (!markdown && !wrap) {
             Text(
                 text = numbers,
                 style = bodyStyle.copy(
