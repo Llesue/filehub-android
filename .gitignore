@@ -14,3 +14,4 @@ dist/
 *.keystore
 keystore.properties
 *.hprof
+.build-host

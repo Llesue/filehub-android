@@ -2,7 +2,7 @@
 # Install the Android SDK command-line tools + platform/build-tools on the
 # remote build host. Idempotent: safe to re-run.
 #
-# Usage (on parasite or any Linux host with JDK 17+):
+# Usage (on the remote build host or any Linux host with JDK 17+):
 #   ./scripts/provision-sdk.sh
 #
 # Environment:

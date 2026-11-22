@@ -8,18 +8,25 @@
 #   ./scripts/build-remote.sh wrapper    # generate/refresh the Gradle wrapper only
 #
 # Environment overrides:
-#   FILEHUB_ANDROID_BUILD_HOST  SSH alias (default: build-host)
+#   FILEHUB_ANDROID_BUILD_HOST  SSH alias (default: .build-host, gitignored)
 #   FILEHUB_ANDROID_BUILD_DIR   remote workspace (default: ~/build/filehub-android)
 #   ANDROID_SDK_ROOT            remote SDK root (default: $HOME/android-sdk)
 #   GRADLE_VERSION              default: 9.8.2
 set -euo pipefail
 
 MODE="${1:-debug}"
-HOST="${FILEHUB_ANDROID_BUILD_HOST:-build-host}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOST="${FILEHUB_ANDROID_BUILD_HOST:-}"
+if [[ -z "$HOST" && -f "$ROOT/.build-host" ]]; then
+  HOST="$(tr -d '[:space:]' < "$ROOT/.build-host")"
+fi
+if [[ -z "$HOST" ]]; then
+  echo "set FILEHUB_ANDROID_BUILD_HOST or create .build-host with the SSH alias" >&2
+  exit 2
+fi
 REMOTE_DIR="${FILEHUB_ANDROID_BUILD_DIR:-~/build/filehub-android}"
 SDK_ROOT="${ANDROID_SDK_ROOT:-\$HOME/android-sdk}"
 GRADLE_VERSION="${GRADLE_VERSION:-9.8.2}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH_CMD=(ssh -o BatchMode=yes)
 RSYNC_SSH="ssh -o BatchMode=yes"
 
