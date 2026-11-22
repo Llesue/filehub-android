@@ -146,5 +146,34 @@
     <string name="transfer_status_failed">Failed</string>
     <string name="transfer_status_cancelled">Cancelled</string>
     <string name="my_transfers">Transfers</string>
+    <string name="photo_sync_title">Photo sync</string>
+    <string name="photo_sync_channel">Photo sync</string>
+    <string name="photo_sync_permission">Photo library permission is required</string>
+    <string name="photo_sync_result">Synced %1$d / %2$d</string>
+    <string name="photo_sync_screen">Photo sync</string>
+    <string name="photo_sync_target_root">Target root</string>
+    <string name="photo_sync_target_path">Target folder</string>
+    <string name="photo_sync_albums">Albums</string>
+    <string name="photo_sync_include_videos">Include videos</string>
+    <string name="photo_sync_wifi_only">Wi-Fi only</string>
+    <string name="photo_sync_charging_only">Charging only</string>
+    <string name="photo_sync_album_folders">Keep album folders</string>
+    <string name="photo_sync_schedule">Schedule</string>
+    <string name="photo_sync_save">Save and enable</string>
+    <string name="photo_sync_now">Sync now</string>
+    <string name="photo_sync_disable">Turn off</string>
+    <string name="photo_sync_enabled">Enabled</string>
+    <string name="photo_sync_last_run">Last run</string>
+    <string name="photo_sync_pending">Pending</string>
+    <string name="photo_sync_permission_button">Allow photo access</string>
+    <string name="photo_sync_select_all">Select all</string>
+    <string name="photo_sync_no_albums">No albums found</string>
+    <string name="photo_sync_schedule_manual">Manual</string>
+    <string name="photo_sync_schedule_daily">Daily</string>
+    <string name="photo_sync_schedule_weekly">Weekly</string>
+    <string name="photo_sync_schedule_hourly">Hourly</string>
+    <string name="photo_sync_schedule_15m">Every 15 minutes</string>
+    <string name="photo_sync_saved">Photo sync settings saved</string>
+    <string name="photo_sync_save_failed">Could not save photo sync settings</string>
 </resources>
 

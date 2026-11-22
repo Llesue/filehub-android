@@ -146,5 +146,34 @@
     <string name="transfer_status_failed">失败</string>
     <string name="transfer_status_cancelled">已取消</string>
     <string name="my_transfers">传输</string>
+    <string name="photo_sync_title">相册同步</string>
+    <string name="photo_sync_channel">相册同步</string>
+    <string name="photo_sync_permission">需要相册访问权限</string>
+    <string name="photo_sync_result">已同步 %1$d / %2$d</string>
+    <string name="photo_sync_screen">相册同步</string>
+    <string name="photo_sync_target_root">目标 root</string>
+    <string name="photo_sync_target_path">目标文件夹</string>
+    <string name="photo_sync_albums">相册</string>
+    <string name="photo_sync_include_videos">包含视频</string>
+    <string name="photo_sync_wifi_only">仅 Wi-Fi</string>
+    <string name="photo_sync_charging_only">仅充电</string>
+    <string name="photo_sync_album_folders">按相册分目录</string>
+    <string name="photo_sync_schedule">同步频率</string>
+    <string name="photo_sync_save">保存并开启</string>
+    <string name="photo_sync_now">立即同步</string>
+    <string name="photo_sync_disable">关闭</string>
+    <string name="photo_sync_enabled">已开启</string>
+    <string name="photo_sync_last_run">上次同步</string>
+    <string name="photo_sync_pending">待同步</string>
+    <string name="photo_sync_permission_button">允许访问相册</string>
+    <string name="photo_sync_select_all">全选</string>
+    <string name="photo_sync_no_albums">没有找到相册</string>
+    <string name="photo_sync_schedule_manual">手动</string>
+    <string name="photo_sync_schedule_daily">每天</string>
+    <string name="photo_sync_schedule_weekly">每周</string>
+    <string name="photo_sync_schedule_hourly">每小时</string>
+    <string name="photo_sync_schedule_15m">每 15 分钟</string>
+    <string name="photo_sync_saved">相册同步设置已保存</string>
+    <string name="photo_sync_save_failed">保存相册同步设置失败</string>
 </resources>
 

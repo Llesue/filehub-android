@@ -10,6 +10,9 @@ import filehub.android.data.media.PreviewDownloader
 import filehub.android.data.media.ThumbnailLoaderFactory
 import filehub.android.data.transfer.TransferRepository
 import filehub.android.data.transfer.TransferStore
+import androidx.room.Room
+import filehub.android.data.sync.PhotoSyncRepository
+import filehub.android.data.sync.SyncDatabase
 import filehub.android.core.model.ServerProfile
 
 class AppContainer(context: Context) {
@@ -24,6 +27,8 @@ class AppContainer(context: Context) {
     val previewDownloader: PreviewDownloader = PreviewDownloader(appContext.cacheDir)
     val transferStore: TransferStore = TransferStore(appContext)
     val transferRepository: TransferRepository = TransferRepository(appContext, transferStore)
+    val syncDatabase: SyncDatabase = Room.databaseBuilder(appContext, SyncDatabase::class.java, "filehub-sync.db").build()
+    val photoSyncRepository: PhotoSyncRepository = PhotoSyncRepository(appContext, syncDatabase.photoSyncDao())
 
     suspend fun profileAndToken(profileId: String): Pair<ServerProfile, String>? {
         val profile = profileStore.read().profiles.firstOrNull { it.id == profileId } ?: return null
