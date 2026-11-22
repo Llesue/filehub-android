@@ -73,6 +73,28 @@ data class FileEntry(
     val kind: FileKind by lazy { detectKind(name, mimeType, isDir) }
 }
 
+data class SearchResult(
+    val rootId: Long,
+    val name: String,
+    val path: String,
+    val isDir: Boolean,
+    val size: Long,
+    val modified: Long,
+    val mimeType: String,
+    val hasPreview: Boolean,
+) {
+    fun toEntry(): FileEntry = FileEntry(
+        name = name,
+        isDir = isDir,
+        isSymlink = false,
+        size = size,
+        modified = modified,
+        mimeType = mimeType,
+        hasPreview = hasPreview,
+        symlinkState = null,
+    )
+}
+
 data class DirectoryListing(
     val entries: List<FileEntry>,
     val nextCursor: String?,

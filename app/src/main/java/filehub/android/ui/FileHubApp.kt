@@ -48,6 +48,7 @@ fun FileHubApp(viewModel: AppViewModel) {
     val navController = rememberNavController()
     val application = LocalContext.current.applicationContext as FileHubApplication
     val filesViewModel: FilesViewModel = viewModel(factory = FilesViewModel.factory(application))
+    val searchViewModel: SearchViewModel = viewModel(factory = SearchViewModel.factory(application))
     var tab by rememberSaveable { mutableStateOf(MainTab.Servers) }
     val session by viewModel.session.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -96,6 +97,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                             filesViewModel = filesViewModel,
                             onAddServer = { navController.navigate("addServer") },
                             onRetry = viewModel::refreshRoots,
+                            onSearch = { rootId -> navController.navigate("search/${rootId ?: -1}") },
                         )
                         MainTab.My -> MyScreen(
                             state = session,
@@ -106,6 +108,36 @@ fun FileHubApp(viewModel: AppViewModel) {
                     }
                 }
             }
+        }
+        composable("search/{rootId}") { entry ->
+            val rootId = entry.arguments?.getString("rootId")?.toLongOrNull()?.takeIf { it >= 0 }
+            val scopeAlias = rootId?.let { id -> session.roots.firstOrNull { it.id == id }?.alias }
+            SearchScreen(
+                viewModel = searchViewModel,
+                scopeRootId = rootId,
+                scopeRootAlias = scopeAlias,
+                rootAliases = session.roots.associate { it.id to it.alias },
+                onBack = {
+                    searchViewModel.reset()
+                    navController.popBackStack()
+                },
+                onOpenResult = { result ->
+                    val active = session.active
+                    val root = session.roots.firstOrNull { it.id == result.rootId }
+                    if (active != null && root != null) {
+                        if (result.isDir) {
+                            filesViewModel.open(active, root, result.path)
+                        } else {
+                            val parent = result.path.substringBeforeLast('/', "")
+                            filesViewModel.open(active, root, parent)
+                            filesViewModel.showPreview(result.toEntry())
+                        }
+                        tab = MainTab.Browse
+                    }
+                    searchViewModel.reset()
+                    navController.popBackStack()
+                },
+            )
         }
         composable("addServer") {
             AddServerScreen(

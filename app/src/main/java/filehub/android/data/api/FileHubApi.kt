@@ -6,6 +6,7 @@ import filehub.android.core.model.FileEntry
 import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.SortOrder
+import filehub.android.core.model.SearchResult
 import filehub.android.core.model.LoginResult
 import filehub.android.core.model.ServerProfile
 import java.io.IOException
@@ -16,6 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -128,6 +130,80 @@ internal data class ListResponseDto(
 )
 
 @Serializable
+internal data class MkdirRequest(val root: Long, val path: String, val name: String)
+
+@Serializable
+internal data class TouchRequest(val root: Long, val path: String, val name: String)
+
+@Serializable
+internal data class RenameRequest(
+    val root: Long,
+    val path: String,
+    @SerialName("new_name") val newName: String,
+)
+
+@Serializable
+internal data class TransferRequest(
+    @SerialName("source_root") val sourceRoot: Long,
+    val paths: List<String>,
+    @SerialName("dest_root") val destRoot: Long,
+    @SerialName("dest_path") val destPath: String?,
+)
+
+@Serializable
+internal data class DeletePreviewRequest(val root: Long, val paths: List<String>)
+
+@Serializable
+internal data class DeleteConfirmRequest(
+    val token: String,
+    @SerialName("confirm_code") val confirmCode: String?,
+)
+
+@Serializable
+data class DeleteItemDto(
+    val relative: String = "",
+    @SerialName("is_dir") val isDir: Boolean = false,
+    val size: Long = 0,
+)
+
+@Serializable
+data class DeletePreviewDto(
+    val token: String,
+    @SerialName("expires_at") val expiresAt: Long = 0,
+    val items: List<DeleteItemDto> = emptyList(),
+    @SerialName("confirm_code") val confirmCode: String = "",
+    @SerialName("requires_code") val requiresCode: Boolean = false,
+)
+
+@Serializable
+internal data class SearchEntryDto(
+    @SerialName("root_id") val rootId: Long? = null,
+    val name: String,
+    val path: String,
+    @SerialName("is_dir") val isDir: Boolean = false,
+    val size: Long = 0,
+    val modified: Long = 0,
+    @SerialName("mime_type") val mimeType: String = "",
+    @SerialName("has_preview") val hasPreview: Boolean = false,
+)
+
+@Serializable
+internal data class SearchResponseDto(
+    val entries: List<SearchEntryDto> = emptyList(),
+    @SerialName("next_cursor") val nextCursor: String? = null,
+)
+
+@Serializable
+data class TextFileDto(
+    val content: String = "",
+    val etag: String = "",
+    val size: Long = 0,
+    val modified: Long = 0,
+    @SerialName("line_ending") val lineEnding: String = "lf",
+    val writable: Boolean = false,
+)
+
+@Serializable
 internal data class ErrorEnvelope(
     val error: ErrorDto? = null,
 )
@@ -219,6 +295,100 @@ class FileHubApi(
         )
     }
 
+    suspend fun mkdir(rootId: Long, path: String, name: String) {
+        postJson(
+            path = "fs/mkdir",
+            body = MkdirRequest(rootId, path, name),
+            serializer = MkdirRequest.serializer(),
+        )
+    }
+
+    suspend fun touch(rootId: Long, path: String, name: String) {
+        postJson(
+            path = "fs/touch",
+            body = TouchRequest(rootId, path, name),
+            serializer = TouchRequest.serializer(),
+        )
+    }
+
+    suspend fun rename(rootId: Long, path: String, newName: String) {
+        postJson(
+            path = "fs/rename",
+            body = RenameRequest(rootId, path, newName),
+            serializer = RenameRequest.serializer(),
+        )
+    }
+
+    suspend fun copy(rootId: Long, paths: List<String>, destRoot: Long, destPath: String) {
+        postJson(
+            path = "fs/copy",
+            body = TransferRequest(rootId, paths, destRoot, destPath),
+            serializer = TransferRequest.serializer(),
+        )
+    }
+
+    suspend fun move(rootId: Long, paths: List<String>, destRoot: Long, destPath: String) {
+        postJson(
+            path = "fs/move",
+            body = TransferRequest(rootId, paths, destRoot, destPath),
+            serializer = TransferRequest.serializer(),
+        )
+    }
+
+    suspend fun deletePreview(rootId: Long, paths: List<String>): DeletePreviewDto =
+        postJson(
+            path = "fs/delete/preview",
+            body = DeletePreviewRequest(rootId, paths),
+            serializer = DeletePreviewRequest.serializer(),
+            deserializer = DeletePreviewDto.serializer(),
+        )
+
+    suspend fun deleteConfirm(token: String, confirmCode: String?) {
+        postJson(
+            path = "fs/delete",
+            body = DeleteConfirmRequest(token, confirmCode),
+            serializer = DeleteConfirmRequest.serializer(),
+        )
+    }
+
+    suspend fun searchAll(
+        query: String,
+        cursor: String? = null,
+        limit: Int = 100,
+        kind: String? = null,
+    ): Pair<List<SearchResult>, String?> {
+        val params = buildMap {
+            put("q", query)
+            put("limit", limit.toString())
+            cursor?.takeIf { it.isNotBlank() }?.let { put("cursor", it) }
+            kind?.takeIf { it.isNotBlank() }?.let { put("kind", it) }
+        }
+        val response = getJson("search/all", SearchResponseDto.serializer(), params)
+        return response.entries.map { it.toSearchResult(null) } to response.nextCursor
+    }
+
+    suspend fun search(
+        rootId: Long,
+        query: String,
+        limit: Int = 100,
+        kind: String? = null,
+    ): List<SearchResult> {
+        val params = buildMap {
+            put("root", rootId.toString())
+            put("q", query)
+            put("limit", limit.toString())
+            kind?.takeIf { it.isNotBlank() }?.let { put("kind", it) }
+        }
+        val response = getJson("search", SearchResponseDto.serializer(), params)
+        return response.entries.map { it.toSearchResult(rootId) }
+    }
+
+    suspend fun readText(rootId: Long, path: String): TextFileDto = getJson(
+        path = "file",
+        deserializer = TextFileDto.serializer(),
+        query = mapOf("root" to rootId.toString(), "path" to path),
+    )
+
     suspend fun deleteToken(tokenId: Long) {
         requestUnit(
             path = "auth/tokens/$tokenId",
@@ -266,6 +436,31 @@ class FileHubApi(
             method = "POST",
             body = null,
             csrfToken = csrfToken,
+        )
+    }
+
+    private suspend fun <B> postJson(
+        path: String,
+        body: B,
+        serializer: SerializationStrategy<B>,
+    ) {
+        val bytes = JSON.encodeToString(serializer, body).toByteArray(Charsets.UTF_8)
+        requestUnit(path = path, method = "POST", body = bytes, csrfToken = null)
+    }
+
+    private suspend fun <B, T> postJson(
+        path: String,
+        body: B,
+        serializer: SerializationStrategy<B>,
+        deserializer: DeserializationStrategy<T>,
+    ): T {
+        val bytes = JSON.encodeToString(serializer, body).toByteArray(Charsets.UTF_8)
+        return requestJson(
+            path = path,
+            method = "POST",
+            body = bytes,
+            csrfToken = null,
+            deserializer = deserializer,
         )
     }
 
@@ -375,6 +570,17 @@ class FileHubApi(
         query.forEach { (key, value) -> builder.addQueryParameter(key, value) }
         return builder.build()
     }
+
+    private fun SearchEntryDto.toSearchResult(rootHint: Long?): SearchResult = SearchResult(
+        rootId = rootId ?: rootHint ?: 0,
+        name = name,
+        path = path,
+        isDir = isDir,
+        size = size,
+        modified = modified,
+        mimeType = mimeType,
+        hasPreview = hasPreview,
+    )
 
     companion object {
         private const val TOKEN_LIFETIME_SECONDS = 365L * 24 * 60 * 60

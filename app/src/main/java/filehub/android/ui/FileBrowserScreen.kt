@@ -6,6 +6,9 @@ import android.text.format.Formatter
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -29,6 +32,10 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -42,6 +49,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -70,21 +78,26 @@ import filehub.android.ui.theme.FileHubFileTeal
 
 @Composable
 fun FileBrowserScreen(
-    state: FileBrowserState,
-    imageLoader: ImageLoader?,
-    thumbnailUrl: (FileEntry) -> String?,
+    viewModel: FilesViewModel,
+    onSearch: (Long?) -> Unit,
     onBack: () -> Unit,
-    onNavigate: (String) -> Unit,
-    onRefresh: () -> Unit,
-    onLoadMore: () -> Unit,
-    onSort: (FileSort) -> Unit,
-    onEntry: (FileEntry) -> Unit,
-    onDismissDetails: () -> Unit,
 ) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val imageLoader by viewModel.imageLoader.collectAsStateWithLifecycle()
     var sortMenu by remember { mutableStateOf(false) }
     var moreMenu by remember { mutableStateOf(false) }
+    var newFolder by remember { mutableStateOf(false) }
+    var newFile by remember { mutableStateOf(false) }
+    var renameEntry by remember { mutableStateOf<FileEntry?>(null) }
 
-    BackHandler(enabled = state.selectedEntry == null) { onBack() }
+    BackHandler(
+        enabled = state.selectedEntry == null &&
+            state.previewEntry == null &&
+            state.deletePreview == null &&
+            !newFolder && !newFile && renameEntry == null,
+    ) {
+        if (state.selectionMode) viewModel.clearSelection() else onBack()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -93,6 +106,19 @@ fun FileBrowserScreen(
                 .padding(start = 4.dp, end = 8.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (state.selectionMode) {
+                IconButton(onClick = { viewModel.clearSelection() }) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.selection_cancel))
+                }
+                Text(
+                    text = stringResource(R.string.selection_selected, state.selected.size),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = viewModel::selectAll) {
+                    Text(stringResource(R.string.selection_select_all))
+                }
+            } else {
             IconButton(onClick = onBack) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
@@ -115,7 +141,7 @@ fun FileBrowserScreen(
                     )
                 }
             }
-            IconButton(onClick = {}) {
+            IconButton(onClick = { onSearch(state.root?.id) }) {
                 Icon(Icons.Filled.Search, contentDescription = null)
             }
             Box {
@@ -141,15 +167,15 @@ fun FileBrowserScreen(
                 DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                     SortMenuItem(FileSort.Name, state.sort, state.order) {
                         sortMenu = false
-                        onSort(FileSort.Name)
+                        viewModel.setSort(FileSort.Name)
                     }
                     SortMenuItem(FileSort.Size, state.sort, state.order) {
                         sortMenu = false
-                        onSort(FileSort.Size)
+                        viewModel.setSort(FileSort.Size)
                     }
                     SortMenuItem(FileSort.Modified, state.sort, state.order) {
                         sortMenu = false
-                        onSort(FileSort.Modified)
+                        viewModel.setSort(FileSort.Modified)
                     }
                 }
             }
@@ -159,22 +185,67 @@ fun FileBrowserScreen(
                 }
                 DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_new_folder)) },
+                        leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                        onClick = {
+                            moreMenu = false
+                            newFolder = true
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_new_file)) },
+                        leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                        onClick = {
+                            moreMenu = false
+                            newFile = true
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text(stringResource(R.string.file_refresh)) },
                         leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
                         onClick = {
                             moreMenu = false
-                            onRefresh()
+                            viewModel.refresh()
                         },
                     )
                 }
+            }
             }
         }
 
         Breadcrumb(
             rootAlias = state.root?.alias.orEmpty(),
             path = state.path,
-            onNavigate = onNavigate,
+            onNavigate = viewModel::navigateTo,
         )
+
+        state.operationError?.let { message ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                    )
+                    IconButton(onClick = viewModel::clearOperationError) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            }
+        }
 
         if (state.loading && state.entries.isNotEmpty()) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -182,6 +253,7 @@ fun FileBrowserScreen(
             Spacer(Modifier.height(1.dp))
         }
 
+        Box(modifier = Modifier.weight(1f)) {
         when {
             state.loginRequired -> MessageState(
                 title = stringResource(R.string.file_login_required),
@@ -190,7 +262,7 @@ fun FileBrowserScreen(
             state.error != null -> MessageState(
                 title = state.error.orEmpty(),
                 action = {
-                    TextButton(onClick = onRefresh) {
+                    TextButton(onClick = viewModel::refresh) {
                         Text(stringResource(R.string.common_retry))
                     }
                 },
@@ -211,13 +283,19 @@ fun FileBrowserScreen(
                     FileCard(
                         entry = entry,
                         imageLoader = imageLoader,
-                        thumbnailUrl = thumbnailUrl(entry),
-                        onEntry = { onEntry(entry) },
+                        thumbnailUrl = viewModel.thumbnailUrl(entry),
+                        selected = entry.name in state.selected,
+                        selectionMode = state.selectionMode,
+                        onEntry = { viewModel.enter(entry) },
+                        onToggle = { viewModel.toggleSelection(entry) },
+                        onDetails = { viewModel.showDetails(entry) },
+                        onRename = { renameEntry = entry },
+                        onDelete = { viewModel.requestDelete(listOf(entry)) },
                     )
                 }
                 state.nextCursor?.let { cursor ->
                     item(key = "footer-$cursor") {
-                        LaunchedEffect(cursor) { onLoadMore() }
+                        LaunchedEffect(cursor) { viewModel.loadMore() }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -230,10 +308,113 @@ fun FileBrowserScreen(
                 }
             }
         }
+        }
+        if (state.selectionMode) {
+            SelectionBar(
+                count = state.selected.size,
+                onDelete = viewModel::requestDeleteSelected,
+                onClear = viewModel::clearSelection,
+            )
+        }
     }
 
+    if (newFolder) {
+        TextInputDialog(
+            title = stringResource(R.string.dialog_new_folder_title),
+            confirmLabel = stringResource(R.string.dialog_create),
+            onDismiss = { newFolder = false },
+            onConfirm = { name ->
+                newFolder = false
+                viewModel.createFolder(name)
+            },
+        )
+    }
+    if (newFile) {
+        TextInputDialog(
+            title = stringResource(R.string.dialog_new_file_title),
+            confirmLabel = stringResource(R.string.dialog_create),
+            onDismiss = { newFile = false },
+            onConfirm = { name ->
+                newFile = false
+                viewModel.createFile(name)
+            },
+        )
+    }
+    renameEntry?.let { entry ->
+        TextInputDialog(
+            title = stringResource(R.string.dialog_rename_title),
+            initialValue = entry.name,
+            confirmLabel = stringResource(R.string.dialog_save),
+            onDismiss = { renameEntry = null },
+            onConfirm = { newName ->
+                renameEntry = null
+                viewModel.rename(entry, newName)
+            },
+        )
+    }
+    state.deletePreview?.let { preview ->
+        DeleteConfirmDialog(
+            preview = preview,
+            loading = state.operationLoading,
+            error = state.operationError,
+            onDismiss = viewModel::dismissDeletePreview,
+            onConfirm = viewModel::confirmDelete,
+        )
+    }
+    state.previewEntry?.let { entry ->
+        PreviewDialog(
+            entry = entry,
+            imageLoader = imageLoader,
+            downloadUrl = viewModel.downloadUrl(entry),
+            text = state.textPreview,
+            pdfFile = state.pdfPreviewFile,
+            loading = state.previewLoading,
+            mediaReady = state.previewMediaReady,
+            error = state.previewError,
+            playerFactory = viewModel::createPlayer,
+            onClose = viewModel::closePreview,
+        )
+    }
     state.selectedEntry?.let { entry ->
-        FileDetailsDialog(entry = entry, path = state.path, onDismiss = onDismissDetails)
+        FileDetailsDialog(entry = entry, path = state.path, onDismiss = viewModel::dismissSelected)
+    }
+}
+
+@Composable
+private fun SelectionBar(
+    count: Int,
+    onDelete: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(R.string.selection_selected, count),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+            Row {
+                TextButton(onClick = onClear) {
+                    Text(stringResource(R.string.selection_cancel))
+                }
+                TextButton(onClick = onDelete) {
+                    Text(
+                        text = stringResource(R.string.selection_delete),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -321,12 +502,19 @@ private fun Breadcrumb(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileCard(
     entry: FileEntry,
     imageLoader: ImageLoader?,
     thumbnailUrl: String?,
+    selected: Boolean,
+    selectionMode: Boolean,
     onEntry: () -> Unit,
+    onToggle: () -> Unit,
+    onDetails: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -342,10 +530,22 @@ private fun FileCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onEntry),
+            .combinedClickable(
+                onClick = {
+                    if (selectionMode || selected) onToggle() else onEntry()
+                },
+                onLongClick = onToggle,
+            ),
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        border = BorderStroke(
+            if (selected) 1.5.dp else 1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        ),
     ) {
         Row(
             modifier = Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
@@ -372,6 +572,22 @@ private fun FileCard(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
+                }
+                if (selected) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(18.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(12.dp),
+                        )
+                    }
                 }
             }
             Spacer(Modifier.size(12.dp))
@@ -400,7 +616,26 @@ private fun FileCard(
                         text = { Text(stringResource(R.string.file_details)) },
                         onClick = {
                             menuOpen = false
-                            onEntry()
+                            onDetails()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_rename)) },
+                        onClick = {
+                            menuOpen = false
+                            onRename()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                stringResource(R.string.action_delete),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            onDelete()
                         },
                     )
                 }

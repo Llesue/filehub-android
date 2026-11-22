@@ -2,6 +2,7 @@ package filehub.android.ui
 
 import android.app.Application
 import coil3.ImageLoader
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -9,14 +10,20 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import filehub.android.FileHubApplication
 import filehub.android.core.model.FileEntry
+import filehub.android.core.model.FileKind
 import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.ServerProfile
 import filehub.android.core.model.SortOrder
 import filehub.android.data.FilesRepository
+import filehub.android.data.api.DeletePreviewDto
+import filehub.android.data.api.TextFileDto
+import filehub.android.data.media.MediaPlayerFactory
+import filehub.android.data.media.PreviewDownloader
 import filehub.android.data.media.ThumbnailLoaderFactory
 import filehub.android.data.api.FileHubApiException
 import filehub.android.data.toUserMessage
+import java.io.File
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,13 +48,26 @@ data class FileBrowserState(
     val error: String? = null,
     val loginRequired: Boolean = false,
     val selectedEntry: FileEntry? = null,
+    val selected: Set<String> = emptySet(),
+    val deletePreview: DeletePreviewDto? = null,
+    val operationLoading: Boolean = false,
+    val operationError: String? = null,
+    val previewEntry: FileEntry? = null,
+    val textPreview: TextFileDto? = null,
+    val pdfPreviewFile: File? = null,
+    val previewLoading: Boolean = false,
+    val previewMediaReady: Int = 0,
+    val previewError: String? = null,
 ) {
     val isEmpty: Boolean get() = !loading && error == null && entries.isEmpty()
+    val selectionMode: Boolean get() = selected.isNotEmpty()
 }
 
 class FilesViewModel(
     private val repository: FilesRepository,
     private val thumbnailLoaderFactory: ThumbnailLoaderFactory,
+    private val mediaPlayerFactory: MediaPlayerFactory,
+    private val previewDownloader: PreviewDownloader,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileBrowserState())
@@ -55,6 +75,8 @@ class FilesViewModel(
 
     private val _imageLoader = MutableStateFlow<ImageLoader?>(null)
     val imageLoader: StateFlow<ImageLoader?> = _imageLoader.asStateFlow()
+
+    private var activeToken: String? = null
 
     private var loadJob: Job? = null
 
@@ -68,6 +90,7 @@ class FilesViewModel(
         )
         viewModelScope.launch {
             repository.tokenFor(profile)?.let { token ->
+                activeToken = token
                 _imageLoader.value = thumbnailLoaderFactory.get(profile.id, token)
             }
         }
@@ -94,12 +117,197 @@ class FilesViewModel(
 
     fun enter(entry: FileEntry) {
         if (!entry.isDir) {
-            _state.update { it.copy(selectedEntry = entry) }
+            showPreview(entry)
             return
         }
         val current = _state.value
         val next = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
         navigateTo(next)
+    }
+
+    fun showDetails(entry: FileEntry) {
+        _state.update { it.copy(selectedEntry = entry) }
+    }
+
+    fun toggleSelection(entry: FileEntry) {
+        _state.update {
+            val next = it.selected.toMutableSet()
+            if (!next.add(entry.name)) next.remove(entry.name)
+            it.copy(selected = next)
+        }
+    }
+
+    fun clearSelection() {
+        _state.update { it.copy(selected = emptySet()) }
+    }
+
+    fun selectAll() {
+        _state.update { it.copy(selected = it.entries.map(FileEntry::name).toSet()) }
+    }
+
+    fun requestDeleteSelected() {
+        val current = _state.value
+        requestDelete(current.entries.filter { it.name in current.selected })
+    }
+
+    fun requestDelete(entries: List<FileEntry>) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        if (entries.isEmpty()) return
+        val paths = entries.map { entry ->
+            if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        }
+        _state.update {
+            it.copy(
+                selected = entries.map(FileEntry::name).toSet(),
+                operationLoading = true,
+                operationError = null,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { repository.deletePreview(profile, root.id, paths) }
+                .onSuccess { preview ->
+                    _state.update {
+                        it.copy(operationLoading = false, deletePreview = preview, operationError = null)
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                    }
+                }
+        }
+    }
+
+    fun confirmDelete(confirmCode: String?) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val preview = current.deletePreview ?: return
+        _state.update { it.copy(operationLoading = true, operationError = null) }
+        viewModelScope.launch {
+            runCatching { repository.deleteConfirm(profile, preview.token, confirmCode) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            operationLoading = false,
+                            deletePreview = null,
+                            selected = emptySet(),
+                            operationError = null,
+                        )
+                    }
+                    refresh()
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                    }
+                }
+        }
+    }
+
+    fun dismissDeletePreview() {
+        _state.update { it.copy(deletePreview = null, operationError = null) }
+    }
+
+    fun createFolder(name: String) {
+        mutate { profile, root ->
+            repository.mkdir(profile, root.id, _state.value.path, name)
+        }
+    }
+
+    fun createFile(name: String) {
+        mutate { profile, root ->
+            repository.touch(profile, root.id, _state.value.path, name)
+        }
+    }
+
+    fun rename(entry: FileEntry, newName: String) {
+        mutate { profile, root ->
+            val path = if (_state.value.path.isEmpty()) entry.name else "${_state.value.path}/${entry.name}"
+            repository.rename(profile, root.id, path, newName)
+        }
+    }
+
+    fun showPreview(entry: FileEntry) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val needsText = entry.kind == FileKind.Text || entry.kind == FileKind.Code
+        val needsPdf = entry.kind == FileKind.Pdf
+        val needsMedia = entry.kind == FileKind.Video || entry.kind == FileKind.Audio
+        _state.update {
+            it.copy(
+                previewEntry = entry,
+                textPreview = null,
+                pdfPreviewFile = null,
+                previewLoading = needsText || needsPdf || needsMedia,
+                previewMediaReady = 0,
+                previewError = null,
+            )
+        }
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        when {
+            needsText -> viewModelScope.launch {
+                runCatching { repository.readText(profile, root.id, path) }
+                    .onSuccess { text ->
+                        _state.update { it.copy(textPreview = text, previewLoading = false) }
+                    }
+                    .onFailure { error ->
+                        _state.update {
+                            it.copy(previewLoading = false, previewError = error.toUserMessage())
+                        }
+                    }
+            }
+            needsPdf -> viewModelScope.launch {
+                val token = ensureToken(profile)
+                val url = downloadUrl(entry)
+                if (token == null || url == null) {
+                    _state.update { it.copy(previewLoading = false, previewError = "设备授权已失效") }
+                    return@launch
+                }
+                runCatching { previewDownloader.download(url, token, entry.name) }
+                    .onSuccess { file ->
+                        _state.update { it.copy(pdfPreviewFile = file, previewLoading = false) }
+                    }
+                    .onFailure { error ->
+                        _state.update {
+                            it.copy(previewLoading = false, previewError = error.toUserMessage())
+                        }
+                    }
+            }
+            needsMedia -> viewModelScope.launch {
+                val token = ensureToken(profile)
+                if (token == null) {
+                    _state.update { it.copy(previewLoading = false, previewError = "设备授权已失效") }
+                } else {
+                    _state.update {
+                        it.copy(previewLoading = false, previewMediaReady = it.previewMediaReady + 1)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun ensureToken(profile: ServerProfile): String? {
+        activeToken?.let { return it }
+        return repository.tokenFor(profile)?.also { activeToken = it }
+    }
+
+    fun closePreview() {
+        _state.update {
+            it.copy(
+                previewEntry = null,
+                textPreview = null,
+                pdfPreviewFile = null,
+                previewError = null,
+                previewLoading = false,
+            )
+        }
+    }
+
+    fun clearOperationError() {
+        _state.update { it.copy(operationError = null) }
     }
 
     fun goUp() {
@@ -139,6 +347,23 @@ class FilesViewModel(
         _state.update { it.copy(selectedEntry = null) }
     }
 
+    fun createPlayer(): ExoPlayer? = activeToken?.let(mediaPlayerFactory::create)
+
+    fun downloadUrl(entry: FileEntry, inline: Boolean = true): String? {
+        val current = _state.value
+        val profile = current.profile ?: return null
+        val root = current.root ?: return null
+        val base = profile.baseUrl.toHttpUrlOrNull() ?: return null
+        val remotePath = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        return base.newBuilder()
+            .addPathSegments("api/v1/download")
+            .addQueryParameter("root", root.id.toString())
+            .addQueryParameter("path", remotePath)
+            .addQueryParameter("inline", inline.toString())
+            .build()
+            .toString()
+    }
+
     fun thumbnailUrl(entry: FileEntry, width: Int = 128): String? {
         if (!entry.hasPreview) return null
         val current = _state.value
@@ -160,6 +385,25 @@ class FilesViewModel(
     fun clear() {
         loadJob?.cancel()
         _state.value = FileBrowserState()
+    }
+
+    private fun mutate(block: suspend (ServerProfile, FileRoot) -> Unit) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        _state.update { it.copy(operationLoading = true, operationError = null) }
+        viewModelScope.launch {
+            runCatching { block(profile, root) }
+                .onSuccess {
+                    _state.update { it.copy(operationLoading = false, selected = emptySet()) }
+                    refresh()
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                    }
+                }
+        }
     }
 
     private fun load(path: String, append: Boolean, cursor: String? = null) {
@@ -217,7 +461,12 @@ class FilesViewModel(
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = application as FileHubApplication
-                FilesViewModel(app.container.filesRepository, app.container.thumbnailLoaderFactory)
+                FilesViewModel(
+                    app.container.filesRepository,
+                    app.container.thumbnailLoaderFactory,
+                    app.container.mediaPlayerFactory,
+                    app.container.previewDownloader,
+                )
             }
         }
     }

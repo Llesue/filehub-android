@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -32,9 +33,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -52,15 +50,16 @@ fun BrowseScreen(
     filesViewModel: FilesViewModel,
     onAddServer: () -> Unit,
     onRetry: () -> Unit,
+    onSearch: (Long?) -> Unit,
 ) {
     val active = state.active
     val files by filesViewModel.state.collectAsStateWithLifecycle()
-    val imageLoader by filesViewModel.imageLoader.collectAsStateWithLifecycle()
-    var openedRoot by remember { mutableStateOf<FileRoot?>(null) }
 
     LaunchedEffect(active?.id) {
-        openedRoot = null
-        filesViewModel.clear()
+        val currentProfile = filesViewModel.state.value.profile
+        if (active == null || (currentProfile != null && currentProfile.id != active.id)) {
+            filesViewModel.clear()
+        }
     }
 
     if (active == null) {
@@ -91,26 +90,18 @@ fun BrowseScreen(
         return
     }
 
-    val root = openedRoot
+    val root = files.root
     if (root != null) {
         FileBrowserScreen(
-            state = files,
-            imageLoader = imageLoader,
-            thumbnailUrl = filesViewModel::thumbnailUrl,
+            viewModel = filesViewModel,
+            onSearch = onSearch,
             onBack = {
                 if (files.path.isEmpty()) {
-                    openedRoot = null
                     filesViewModel.clear()
                 } else {
                     filesViewModel.goUp()
                 }
             },
-            onNavigate = filesViewModel::navigateTo,
-            onRefresh = filesViewModel::refresh,
-            onLoadMore = filesViewModel::loadMore,
-            onSort = filesViewModel::setSort,
-            onEntry = filesViewModel::enter,
-            onDismissDetails = filesViewModel::dismissSelected,
         )
         return
     }
@@ -135,6 +126,9 @@ fun BrowseScreen(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+            IconButton(onClick = { onSearch(null) }) {
+                Icon(Icons.Filled.Search, contentDescription = null)
             }
             IconButton(onClick = onRetry) {
                 Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.common_refresh))
@@ -190,7 +184,6 @@ fun BrowseScreen(
                     RootCard(
                         root = item,
                         onClick = {
-                            openedRoot = item
                             filesViewModel.open(profile = active, root = item)
                         },
                     )
