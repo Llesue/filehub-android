@@ -68,5 +68,6 @@ Signing certificate SHA-256:
 - [`docs/ui-spec.md`](docs/ui-spec.md) — UI proposal
 - [`docs/sync-spec.md`](docs/sync-spec.md) — photo/directory sync design
 - [`docs/app-icon.svg`](docs/app-icon.svg) — source logo
+- [`docs/plans/0.1.1.md`](docs/plans/0.1.1.md) — next patch plan
 - [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md) — release notes
 - [`CHANGELOG.md`](CHANGELOG.md)
