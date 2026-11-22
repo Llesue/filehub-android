@@ -12,7 +12,7 @@ Status: **v0.2.0 development** — second feedback round implemented, awaiting d
 ## Features
 
 - Multiple FileHub instances, password login → per-device API token (Android Keystore)
-- Multi-address failover; the last known working address is tried first
+- Multi-address failover; addresses are tried in the configured order (put LAN first)
 - Roots + remote mounts, compact file rows, folder sizes, cursor paging, thumbnails
 - File operations: create, rename, delete with confirmation code, copy/move, ZIP
 - Search across all roots / current root

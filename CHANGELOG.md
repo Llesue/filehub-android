@@ -26,6 +26,7 @@
 - Sync locking per profile, per-profile notifications with server name, and cleanup on logout/remove.
 - Catch-up sync when the app opens after a missed schedule; token failures disable the affected sync.
 - Search result paths are normalized before opening.
+- Server failover probes addresses in the configured order instead of always trying the last working address first.
 - Adaptive launcher icon and in-app brand mark generated from the supplied SVG.
 - Markdown tables, task lists, strikethrough and links.
 - Double-tap image zoom and a persistent blurred image backdrop.

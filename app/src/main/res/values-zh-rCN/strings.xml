@@ -254,7 +254,7 @@
     <string name="server_add_address">添加地址</string>
     <string name="server_save">保存</string>
     <string name="server_address">地址</string>
-    <string name="server_addresses_hint">从上到下依次尝试，直到有一个可用</string>
+    <string name="server_addresses_hint">从上到下依次尝试，直到有一个可用；内网地址建议放在最上面</string>
     <string name="preview_rotate">旋转</string>
     <string name="error_server_setup_required">服务器尚未初始化，请先在浏览器中完成初始化</string>
     <string name="error_unauthorized">设备授权已失效，请重新登录</string>

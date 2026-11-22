@@ -254,7 +254,7 @@
     <string name="server_add_address">Add address</string>
     <string name="server_save">Save</string>
     <string name="server_address">Address</string>
-    <string name="server_addresses_hint">Tried from top to bottom until one responds</string>
+    <string name="server_addresses_hint">Tried from top to bottom until one responds; put the LAN address first</string>
     <string name="preview_rotate">Rotate</string>
     <string name="error_server_setup_required">Server is not initialized. Complete setup in a browser first.</string>
     <string name="error_unauthorized">Device token expired. Sign in again.</string>

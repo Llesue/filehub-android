@@ -138,7 +138,10 @@ class SessionRepository(
             error(message)
         }
 
-        val addresses = orderedAddresses(profile)
+        // Always probe in the user-configured order. The last working address
+        // stays as baseUrl for API calls, but must not jump the queue: a LAN
+        // address placed first should win whenever the device is at home.
+        val addresses = normalizedAddresses(profile)
         var lastError: Throwable? = null
         for ((index, address) in addresses.withIndex()) {
             _connection.value = ServerConnection(
@@ -296,7 +299,7 @@ class SessionRepository(
     private suspend fun probe(profile: ServerProfile, token: String): ProbeResult? {
         var lastError: Throwable? = null
         var unauthorized = false
-        for (address in orderedAddresses(profile)) {
+        for (address in normalizedAddresses(profile)) {
             val api = FileHubApi(address, token, probeClient)
             val roots = runCatching { api.roots() }.getOrElse { error ->
                 lastError = error
@@ -321,9 +324,6 @@ class SessionRepository(
             .mapNotNull { raw -> runCatching { FileHubApi.normalizeBaseUrl(raw) }.getOrNull() }
             .distinct()
 
-    /** Tries the last known working address before falling back to the rest. */
-    private fun orderedAddresses(profile: ServerProfile): List<String> =
-        (listOf(profile.baseUrl) + normalizedAddresses(profile)).distinct()
 
     private fun resolveIcon(baseUrl: String, raw: String?): String? {
         if (raw.isNullOrBlank()) {
