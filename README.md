@@ -2,7 +2,7 @@
 
 Native Android client for [FileHub](https://github.com/Llesue/filehub).
 
-Status: **v0.2.0 development** — second feedback round implemented, awaiting device QA and release sign-off.
+Status: **v0.1.0** — first public release. See [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md).
 
 - Kotlin + Jetpack Compose (Material 3), `minSdk 26`, `compileSdk 37.1`, `targetSdk 36`
 - OkHttp + kotlinx.serialization, Room, WorkManager, Media3, Coil
@@ -52,6 +52,15 @@ If the device token expires or the configured target location disappears, the af
 
 The debug APK is written to `dist/filehub-android-debug.apk`.
 
+## Release signing
+
+Release builds read `keystore.properties` from the repository root (gitignored). The file points at the
+keystore outside the repository and is synced to the build host by `scripts/build-remote.sh`.
+Keystore and password backups must be kept outside Git.
+
+Signing certificate SHA-256:
+`F3:FB:0B:7C:94:43:79:1F:0C:A2:B2:B8:E4:2F:91:B0:09:23:7E:6F:B2:B0:95:F3:21:41:82:3B:0D:B1:7E:71`
+
 ## Docs
 
 - [`PLAN.md`](PLAN.md) — scope, architecture, milestones
@@ -59,4 +68,5 @@ The debug APK is written to `dist/filehub-android-debug.apk`.
 - [`docs/ui-spec.md`](docs/ui-spec.md) — UI proposal
 - [`docs/sync-spec.md`](docs/sync-spec.md) — photo/directory sync design
 - [`docs/app-icon.svg`](docs/app-icon.svg) — source logo
+- [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md) — release notes
 - [`CHANGELOG.md`](CHANGELOG.md)
