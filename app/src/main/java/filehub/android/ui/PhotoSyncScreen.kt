@@ -140,6 +140,10 @@ fun PhotoSyncScreen(
         masterEnabled = config?.enabled ?: masterEnabled
     }
 
+    LaunchedEffect(config?.lastRunAt) {
+        if (state.queued) viewModel.clearQueued()
+    }
+
     LaunchedEffect(hasPermission, includeVideos) {
         if (hasPermission) viewModel.refreshBuckets(includeVideos)
     }
@@ -232,6 +236,7 @@ fun PhotoSyncScreen(
                     config = existing,
                     onSyncNow = viewModel::syncNow,
                     syncEnabled = masterEnabled,
+                    queued = state.queued,
                 )
             }
 
@@ -284,6 +289,13 @@ fun PhotoSyncScreen(
                 }
             }
 
+            if (root != null && config?.rootId?.let { it != root.id } == true) {
+                Text(
+                    text = stringResource(R.string.sync_root_changed_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             OutlinedTextField(
                 value = remotePath,
                 onValueChange = { remotePath = it },
@@ -487,6 +499,7 @@ fun PhotoSyncScreen(
             onNavigate = folderPicker::navigate,
             onUp = folderPicker::up,
             onLoadMore = folderPicker::loadMore,
+            onCreateFolder = folderPicker::createFolder,
             onDismiss = folderPicker::close,
             onConfirm = { selected ->
                 remotePath = selected
@@ -525,6 +538,7 @@ private fun SyncStatusCard(
     config: PhotoSyncConfigEntity,
     onSyncNow: () -> Unit,
     syncEnabled: Boolean,
+    queued: Boolean,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -563,6 +577,13 @@ private fun SyncStatusCard(
             }
             TextButton(onClick = onSyncNow, enabled = syncEnabled && config.enabled) {
                 Text(stringResource(R.string.photo_sync_now))
+            }
+            if (queued) {
+                Text(
+                    text = stringResource(R.string.sync_queued_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

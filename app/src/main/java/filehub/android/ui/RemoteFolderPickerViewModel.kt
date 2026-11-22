@@ -128,6 +128,23 @@ class RemoteFolderPickerViewModel(
         }
     }
 
+    fun createFolder(name: String) {
+        val current = _state.value
+        val rootId = current.rootId ?: return
+        val profile = sessionRepository.state.value.active ?: return
+        val folder = name.trim()
+        if (folder.isEmpty()) return
+        viewModelScope.launch {
+            runCatching {
+                filesRepository.mkdir(profile, rootId, current.path, folder)
+            }.onSuccess {
+                load(rootId, current.path, fallbackToRoot = false, requestedPath = current.path)
+            }.onFailure { error ->
+                _state.update { it.copy(error = error.toUserMessage(application)) }
+            }
+        }
+    }
+
     fun loadMore() {
         val current = _state.value
         val rootId = current.rootId ?: return

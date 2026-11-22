@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -33,6 +34,7 @@ data class PhotoSyncUiState(
     val saving: Boolean = false,
     val error: String? = null,
     val saved: Boolean = false,
+    val queued: Boolean = false,
 )
 
 class PhotoSyncViewModel(
@@ -79,7 +81,7 @@ class PhotoSyncViewModel(
         resetEntries: Boolean = false,
     ) {
         if (_state.value.saving) return
-        _state.value = _state.value.copy(saving = true, error = null, saved = false)
+        _state.value = _state.value.copy(saving = true, error = null, saved = false, queued = false)
         viewModelScope.launch {
             runCatching {
                 repository.save(
@@ -114,8 +116,15 @@ class PhotoSyncViewModel(
 
     fun syncNow() {
         sessionRepository.state.value.active?.id?.let { id ->
-            viewModelScope.launch { repository.syncNow(id) }
+            viewModelScope.launch {
+                repository.syncNow(id)
+                _state.update { it.copy(queued = true) }
+            }
         }
+    }
+
+    fun clearQueued() {
+        _state.update { it.copy(queued = false) }
     }
 
     fun setEnabled(enabled: Boolean) {

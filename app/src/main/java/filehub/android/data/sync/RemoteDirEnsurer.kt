@@ -51,7 +51,8 @@ internal class RemoteDirEnsurer(
         try {
             api.mkdir(rootId, parent, name)
         } catch (error: FileHubApiException) {
-            if (error.statusCode !in listOf(409, 403)) throw error
+            // FileHub >= 0.2.2 reports an existing directory as 409; the race is harmless.
+            if (error.statusCode != 409) throw error
         }
     }
 }

@@ -299,5 +299,14 @@
         <string name="folder_sync_conflicts_count">%1$d 个冲突</string>
     <string name="folder_picker_load_more">加载更多</string>
     <string name="sync_root_missing">配置的目标位置已不存在，请在同步设置中重新选择。</string>
+    <string name="delete_code_hint">请在下方输入这 4 位确认码，5 分钟内有效。</string>
+    <string name="my_expiry_value">%1$s 到期</string>
+    <string name="my_expiry_days">还剩 %1$d 天</string>
+    <string name="my_expiry_today">今天到期</string>
+    <string name="my_expiry_expired">已过期，请重新登录</string>
+    <string name="server_address_reorder">拖动排序</string>
+    <string name="sync_queued_hint">已加入队列，将在网络和充电条件满足后开始。</string>
+    <string name="folder_picker_new">新建文件夹</string>
+    <string name="sync_root_changed_hint">目标路径会保留；切换存储位置后，会在新位置创建同名目录。</string>
 </resources>
 

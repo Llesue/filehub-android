@@ -43,9 +43,10 @@ object PhotoSyncNotifications {
         current: String,
         id: Int = ID,
         serverName: String = "",
+        profileId: String = "",
     ): ForegroundInfo {
         ensureChannel(context)
-        val notification = notification(context, done, total, current, serverName)
+        val notification = notification(context, done, total, current, serverName, profileId, id)
         return if (Build.VERSION.SDK_INT >= 29) {
             ForegroundInfo(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
@@ -61,12 +62,13 @@ object PhotoSyncNotifications {
         current: String,
         id: Int = ID,
         serverName: String = "",
+        profileId: String = "",
     ) {
         if (!canNotify(context)) return
         runCatching {
             NotificationManagerCompat.from(context).notify(
                 id,
-                notification(context, done, total, current, serverName),
+                notification(context, done, total, current, serverName, profileId, id),
             )
         }
     }
@@ -77,6 +79,7 @@ object PhotoSyncNotifications {
         message: String,
         id: Int = ID,
         serverName: String = "",
+        profileId: String = "",
     ) {
         if (!canNotify(context)) return
         ensureChannel(context)
@@ -84,7 +87,7 @@ object PhotoSyncNotifications {
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
             .setContentTitle(title(context, serverName))
             .setContentText(message)
-            .setContentIntent(intent(context))
+            .setContentIntent(intent(context, id, profileId))
             .setAutoCancel(true)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(id + 1, notification) }
@@ -101,26 +104,31 @@ object PhotoSyncNotifications {
         total: Int,
         current: String,
         serverName: String,
+        profileId: String,
+        id: Int,
     ): Notification {
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setContentTitle(title(context, serverName))
             .setContentText(if (total > 0) "$done / $total · $current" else current)
-            .setContentIntent(intent(context))
+            .setContentIntent(intent(context, id, profileId))
             .setOnlyAlertOnce(true)
             .setOngoing(true)
         if (total > 0) builder.setProgress(total, done, false) else builder.setProgress(0, 0, true)
         return builder.build()
     }
 
-    private fun intent(context: Context): PendingIntent = PendingIntent.getActivity(
-        context,
-        0,
-        Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        },
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun intent(context: Context, id: Int, profileId: String): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            id,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(NotificationDest.EXTRA, NotificationDest.PHOTO_SYNC)
+                putExtra(NotificationDest.EXTRA_PROFILE, profileId)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
     private fun canNotify(context: Context): Boolean =
         Build.VERSION.SDK_INT < 33 ||

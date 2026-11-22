@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -21,6 +22,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -37,9 +42,11 @@ fun RemoteFolderPickerDialog(
     onNavigate: (String) -> Unit,
     onUp: () -> Unit,
     onLoadMore: () -> Unit,
+    onCreateFolder: (String) -> Unit,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
+    var newFolder by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -135,6 +142,14 @@ fun RemoteFolderPickerDialog(
                         }
                     }
                 }
+                TextButton(
+                    onClick = { newFolder = true },
+                    enabled = !state.loading,
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null)
+                    Spacer(Modifier.size(4.dp))
+                    Text(stringResource(R.string.folder_picker_new))
+                }
             }
         },
         confirmButton = {
@@ -151,6 +166,17 @@ fun RemoteFolderPickerDialog(
             }
         },
     )
+    if (newFolder) {
+        TextInputDialog(
+            title = stringResource(R.string.folder_picker_new),
+            confirmLabel = stringResource(R.string.dialog_create),
+            onDismiss = { newFolder = false },
+            onConfirm = { name ->
+                newFolder = false
+                onCreateFolder(name)
+            },
+        )
+    }
 }
 
 @Composable

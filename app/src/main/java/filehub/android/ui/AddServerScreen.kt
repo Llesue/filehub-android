@@ -123,37 +123,20 @@ fun AddServerScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                addresses.forEachIndexed { index, address ->
-                    OutlinedTextField(
-                        value = address,
-                        onValueChange = {
-                            addresses[index] = it
-                            touched = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text(stringResource(R.string.login_url_hint)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Uri,
-                            imeAction = ImeAction.Done,
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                focusManager.clearFocus()
-                                keyboard?.hide()
-                            },
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        trailingIcon = {
-                            IconButton(
-                                onClick = { addresses.removeAt(index) },
-                                enabled = addresses.size > 1,
-                            ) {
-                                Icon(Icons.Filled.Delete, contentDescription = null)
-                            }
-                        },
-                    )
-                }
+                ReorderableAddressList(
+                    addresses = addresses,
+                    placeholder = stringResource(R.string.login_url_hint),
+                    onValueChange = { index, value ->
+                        addresses[index] = value
+                        touched = true
+                    },
+                    onRemove = { addresses.removeAt(it) },
+                    onMove = { from, to ->
+                        val item = addresses.removeAt(from)
+                        addresses.add(to, item)
+                        touched = true
+                    },
+                )
                 OutlinedButton(
                     onClick = {
                         addresses += "https://"

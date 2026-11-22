@@ -121,6 +121,20 @@ class SessionRepository(
         }
 
     /**
+     * Switches the active server immediately, without waiting for a probe.
+     * Used when a sync notification points at a server that is not active;
+     * callers refresh roots afterwards.
+     */
+    suspend fun activate(profileId: String) {
+        val profile = _state.value.profiles.firstOrNull { it.id == profileId } ?: return
+        if (_state.value.active?.id == profileId) return
+        store.setActive(profileId)
+        _state.update {
+            it.copy(active = profile, roots = emptyList(), rootsLoading = true, error = null)
+        }
+    }
+
+    /**
      * Activates a profile only after one of its addresses answers. The current
      * address is tried first; the rest are fallbacks. This keeps the server
      * page visible and shows per-address progress instead of blocking Browse.

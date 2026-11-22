@@ -114,6 +114,7 @@ fun FileHubApp(viewModel: AppViewModel) {
     var tab by rememberSaveable { mutableStateOf(MainTab.Servers) }
     val session by viewModel.session.collectAsStateWithLifecycle()
     val connection by viewModel.connection.collectAsStateWithLifecycle()
+    val notificationDestination by NotificationNavigator.destination.collectAsStateWithLifecycle()
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val language = when {
         AppCompatDelegate.getApplicationLocales().isEmpty -> "system"
@@ -136,6 +137,13 @@ fun FileHubApp(viewModel: AppViewModel) {
         val message = session.error ?: return@LaunchedEffect
         snackbar.showSnackbar(message)
         viewModel.clearSessionError()
+    }
+
+    LaunchedEffect(notificationDestination) {
+        val destination = notificationDestination ?: return@LaunchedEffect
+        NotificationNavigator.destination.value = null
+        destination.profileId?.let(viewModel::activateProfile)
+        navController.navigate(destination.route) { launchSingleTop = true }
     }
 
     LaunchedEffect(connection?.status, connection?.profileId) {

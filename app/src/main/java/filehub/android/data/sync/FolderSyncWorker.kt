@@ -36,6 +36,7 @@ class FolderSyncWorker(
             "",
             FolderSyncNotifications.idFor(profileId),
             config?.serverName.orEmpty(),
+            profileId,
         )
     }
 
@@ -69,6 +70,7 @@ class FolderSyncWorker(
                     "",
                     FolderSyncNotifications.idFor(profileId),
                     config.serverName,
+                    profileId,
                 ),
             )
         } catch (error: CancellationException) {
@@ -231,6 +233,7 @@ class FolderSyncWorker(
                 path,
                 FolderSyncNotifications.idFor(profileId),
                 config.serverName,
+                profileId,
             )
         }
 
@@ -627,6 +630,7 @@ class FolderSyncWorker(
             result,
             FolderSyncNotifications.idFor(config.profileId),
             config.serverName,
+            config.profileId,
         )
     }
 
@@ -641,6 +645,7 @@ class FolderSyncWorker(
             message,
             FolderSyncNotifications.idFor(config.profileId),
             config.serverName,
+            config.profileId,
         )
         return Result.retry()
     }
@@ -659,6 +664,7 @@ class FolderSyncWorker(
             message,
             FolderSyncNotifications.idFor(config.profileId),
             config.serverName,
+            config.profileId,
         )
         return Result.failure()
     }

@@ -118,6 +118,14 @@ class AppViewModel(
         _login.value = LoginUiState()
     }
 
+    fun activateProfile(profileId: String) {
+        if (session.value.active?.id == profileId) return
+        viewModelScope.launch {
+            repository.activate(profileId)
+            repository.refreshRoots()
+        }
+    }
+
     fun connectProfile(profileId: String) {
         connectJob?.cancel()
         connectJob = viewModelScope.launch { repository.connect(profileId) }

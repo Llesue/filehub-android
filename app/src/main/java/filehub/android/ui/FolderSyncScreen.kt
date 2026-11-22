@@ -126,6 +126,10 @@ fun FolderSyncScreen(
         masterEnabled = config?.enabled ?: masterEnabled
     }
 
+    LaunchedEffect(config?.lastRunAt) {
+        if (state.queued) viewModel.clearQueued()
+    }
+
     LaunchedEffect(config) {
         viewModel.refreshStats()
     }
@@ -191,6 +195,7 @@ fun FolderSyncScreen(
                     conflicts = state.conflicts,
                     onSyncNow = viewModel::syncNow,
                     syncEnabled = masterEnabled,
+                    queued = state.queued,
                 )
             }
 
@@ -235,6 +240,13 @@ fun FolderSyncScreen(
                         )
                     }
                 }
+            }
+            if (root != null && config?.rootId?.let { it != root.id } == true) {
+                Text(
+                    text = stringResource(R.string.sync_root_changed_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             OutlinedTextField(
                 value = remotePath,
@@ -397,6 +409,7 @@ fun FolderSyncScreen(
             onNavigate = remoteFolderPicker::navigate,
             onUp = remoteFolderPicker::up,
             onLoadMore = remoteFolderPicker::loadMore,
+            onCreateFolder = remoteFolderPicker::createFolder,
             onDismiss = remoteFolderPicker::close,
             onConfirm = { selected ->
                 remotePath = selected
@@ -415,6 +428,7 @@ private fun FolderStatusCard(
     conflicts: Int,
     onSyncNow: () -> Unit,
     syncEnabled: Boolean,
+    queued: Boolean,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -457,6 +471,13 @@ private fun FolderStatusCard(
             )
             TextButton(onClick = onSyncNow, enabled = syncEnabled && config.enabled) {
                 Text(stringResource(R.string.folder_sync_now))
+            }
+            if (queued) {
+                Text(
+                    text = stringResource(R.string.sync_queued_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

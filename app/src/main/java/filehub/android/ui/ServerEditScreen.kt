@@ -164,28 +164,22 @@ fun ServerEditScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                addresses.forEachIndexed { index, address ->
-                    OutlinedTextField(
-                        value = address,
-                        onValueChange = { value ->
-                            addresses = addresses.toMutableList().also { it[index] = value }
-                        },
-                        label = { Text(stringResource(R.string.server_address)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        trailingIcon = {
-                            IconButton(
-                                onClick = {
-                                    addresses = addresses.toMutableList().also { it.removeAt(index) }
-                                },
-                                enabled = addresses.size > 1,
-                            ) {
-                                Icon(Icons.Filled.Delete, contentDescription = null)
-                            }
-                        },
-                    )
-                }
+                ReorderableAddressList(
+                    addresses = addresses,
+                    label = stringResource(R.string.server_address),
+                    onValueChange = { index, value ->
+                        addresses = addresses.toMutableList().also { it[index] = value }
+                    },
+                    onRemove = {
+                        addresses = addresses.toMutableList().also { list -> list.removeAt(it) }
+                    },
+                    onMove = { from, to ->
+                        addresses = addresses.toMutableList().also { list ->
+                            val item = list.removeAt(from)
+                            list.add(to, item)
+                        }
+                    },
+                )
                 OutlinedButton(
                     onClick = { addresses = (addresses + "https://").toMutableList() },
                     modifier = Modifier.fillMaxWidth(),

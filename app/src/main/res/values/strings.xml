@@ -300,5 +300,14 @@
         <string name="folder_sync_conflicts_count">%1$d conflicts</string>
     <string name="folder_picker_load_more">Load more</string>
     <string name="sync_root_missing">The configured target location no longer exists. Re-select it in sync settings.</string>
+    <string name="delete_code_hint">Enter this 4-digit code below. It is valid for 5 minutes.</string>
+    <string name="my_expiry_value">Expires %1$s</string>
+    <string name="my_expiry_days">%1$d days left</string>
+    <string name="my_expiry_today">Expires today</string>
+    <string name="my_expiry_expired">Expired. Sign in again.</string>
+    <string name="server_address_reorder">Drag to reorder</string>
+    <string name="sync_queued_hint">Queued. It will start when the network and charging conditions are met.</string>
+    <string name="folder_picker_new">New folder</string>
+    <string name="sync_root_changed_hint">The target path stays as typed; after switching the storage location it will be created under the new location.</string>
 </resources>
 

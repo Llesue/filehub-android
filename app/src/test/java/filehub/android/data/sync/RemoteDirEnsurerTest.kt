@@ -1,6 +1,7 @@
 package filehub.android.data.sync
 
 import filehub.android.data.api.FileHubApi
+import filehub.android.data.api.FileHubApiException
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -51,6 +52,35 @@ class RemoteDirEnsurerTest {
 
         ensurer.ensure("Phone/Photos/微信")
         assertEquals(6, server.requestCount)
+    }
+
+    @Test
+    fun treatsMkdirConflictAsExistingDirectory() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(404))   // full path
+        server.enqueue(MockResponse().setResponseCode(404))   // Phone
+        server.enqueue(MockResponse().setResponseCode(409))   // Phone exists
+        server.enqueue(MockResponse().setResponseCode(404))   // Phone/Photos
+        server.enqueue(MockResponse().setResponseCode(409))   // Phone/Photos exists
+        server.enqueue(MockResponse().setResponseCode(409))   // final exists
+
+        val ensurer = ensurer()
+        ensurer.ensure("Phone/Photos/微信")
+        assertEquals(6, server.requestCount)
+
+        ensurer.ensure("Phone/Photos/微信")
+        assertEquals(6, server.requestCount)
+    }
+
+    @Test
+    fun permissionErrorsAreNotSwallowed() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(404))   // full path
+        server.enqueue(MockResponse().setResponseCode(404))   // Phone
+        server.enqueue(MockResponse().setResponseCode(403))   // mkdir denied
+
+        val error = runCatching { ensurer().ensure("Phone/Photos/微信") }.exceptionOrNull()
+
+        assertTrue(error is FileHubApiException)
+        assertEquals(403, (error as FileHubApiException).statusCode)
     }
 
     @Test

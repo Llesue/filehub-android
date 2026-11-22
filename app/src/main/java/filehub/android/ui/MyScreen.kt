@@ -179,7 +179,31 @@ fun MyScreen(
         }
 
         InfoCard(title = stringResource(R.string.my_server)) {
-            InfoRow(stringResource(R.string.my_token_expiry), formatExpiry(profile.tokenExpiresAt))
+            val expiresAt = profile.tokenExpiresAt
+            InfoRow(
+                label = stringResource(R.string.my_token_expiry),
+                value = expiresAt?.let {
+                    stringResource(R.string.my_expiry_value, formatExpiry(it))
+                } ?: "—",
+            )
+            if (expiresAt != null) {
+                val remainingDays = remainingDays(expiresAt)
+                Text(
+                    text = if (remainingDays > 0) {
+                        stringResource(R.string.my_expiry_days, remainingDays)
+                    } else if (expiresAt * 1000 > System.currentTimeMillis()) {
+                        stringResource(R.string.my_expiry_today)
+                    } else {
+                        stringResource(R.string.my_expiry_expired)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (expiresAt * 1000 > System.currentTimeMillis()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
             Text(
                 text = stringResource(R.string.my_token_expiry_hint),
                 style = MaterialTheme.typography.bodySmall,
@@ -406,7 +430,11 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
-private fun formatExpiry(epochSeconds: Long?): String {
-    if (epochSeconds == null) return "—"
-    return DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(epochSeconds * 1000))
+private fun formatExpiry(epochSeconds: Long): String =
+    DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(epochSeconds * 1000))
+
+private fun remainingDays(epochSeconds: Long): Long {
+    val remainingMillis = epochSeconds * 1000 - System.currentTimeMillis()
+    if (remainingMillis <= 0) return 0
+    return (remainingMillis + 86_399_999) / 86_400_000
 }

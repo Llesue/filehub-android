@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class FolderSyncUiState(
@@ -30,6 +31,7 @@ data class FolderSyncUiState(
     val error: String? = null,
     val pending: Int = 0,
     val conflicts: Int = 0,
+    val queued: Boolean = false,
 )
 
 class FolderSyncViewModel(
@@ -77,7 +79,7 @@ class FolderSyncViewModel(
             _state.value = _state.value.copy(error = application.getString(R.string.folder_sync_no_folder))
             return
         }
-        _state.value = _state.value.copy(saving = true, error = null, saved = false)
+        _state.value = _state.value.copy(saving = true, error = null, saved = false, queued = false)
         viewModelScope.launch {
             runCatching {
                 repository.save(
@@ -111,8 +113,15 @@ class FolderSyncViewModel(
 
     fun syncNow() {
         sessionRepository.state.value.active?.id?.let { id ->
-            viewModelScope.launch { repository.syncNow(id) }
+            viewModelScope.launch {
+                repository.syncNow(id)
+                _state.update { it.copy(queued = true) }
+            }
         }
+    }
+
+    fun clearQueued() {
+        _state.update { it.copy(queued = false) }
     }
 
     fun setEnabled(enabled: Boolean) {

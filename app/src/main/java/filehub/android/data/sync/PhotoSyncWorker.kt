@@ -35,6 +35,7 @@ class PhotoSyncWorker(
             "",
             PhotoSyncNotifications.idFor(profileId),
             config?.serverName.orEmpty(),
+            profileId,
         )
     }
 
@@ -74,6 +75,7 @@ class PhotoSyncWorker(
                     "",
                     PhotoSyncNotifications.idFor(profileId),
                     config.serverName,
+                    profileId,
                 ),
             )
         } catch (error: CancellationException) {
@@ -201,6 +203,7 @@ class PhotoSyncWorker(
                 photos.getOrNull(index)?.name.orEmpty(),
                 PhotoSyncNotifications.idFor(profileId),
                 config.serverName,
+                profileId,
             )
         }
 
@@ -415,6 +418,7 @@ class PhotoSyncWorker(
             result,
             PhotoSyncNotifications.idFor(config.profileId),
             config.serverName,
+            config.profileId,
         )
     }
 
@@ -429,6 +433,7 @@ class PhotoSyncWorker(
             message,
             PhotoSyncNotifications.idFor(config.profileId),
             config.serverName,
+            config.profileId,
         )
         return Result.retry()
     }
@@ -447,6 +452,7 @@ class PhotoSyncWorker(
             message,
             PhotoSyncNotifications.idFor(config.profileId),
             config.serverName,
+            config.profileId,
         )
         return Result.failure()
     }
