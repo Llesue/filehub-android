@@ -155,6 +155,9 @@ class SessionRepository(
     fun clearError() {
         _state.update { it.copy(error = null) }
     }
+
+    suspend fun tokenFor(profile: ServerProfile): String? =
+        store.readToken(profile.id)?.let(vault::decrypt)
 }
 
 fun Throwable.toUserMessage(): String = when (this) {

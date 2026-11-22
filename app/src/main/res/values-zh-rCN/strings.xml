@@ -60,5 +60,30 @@
     <string name="common_refresh">刷新</string>
     <string name="browse_root_placeholder">文件列表正在接入</string>
     <string name="my_version_format">FileHub Android %1$s</string>
+    <string name="file_sort_name">名称</string>
+    <string name="file_sort_size">大小</string>
+    <string name="file_sort_modified">修改时间</string>
+    <string name="file_sort_asc">升序</string>
+    <string name="file_sort_desc">降序</string>
+    <string name="file_empty_title">这个文件夹是空的</string>
+    <string name="file_empty_body">点顶栏上传，或新建一个文件夹。</string>
+    <string name="file_error">无法加载这个文件夹</string>
+    <string name="file_read_only">只读</string>
+    <string name="file_read_only_reason">此位置为只读。</string>
+    <string name="file_login_required">设备授权已过期，请重新登录。</string>
+    <string name="file_details">属性</string>
+    <string name="file_name">名称</string>
+    <string name="file_type">类型</string>
+    <string name="file_size">大小</string>
+    <string name="file_modified">修改时间</string>
+    <string name="file_path">路径</string>
+    <string name="file_folder">文件夹</string>
+    <string name="file_close">关闭</string>
+    <string name="file_loading">正在加载…</string>
+    <string name="file_refresh">刷新</string>
+    <string name="file_sort">排序</string>
+    <string name="file_more">更多</string>
+    <string name="file_root">根目录</string>
+    <string name="file_symlink">软链接</string>
 </resources>
 

@@ -60,5 +60,30 @@
     <string name="common_refresh">Refresh</string>
     <string name="browse_root_placeholder">File browser is coming next.</string>
     <string name="my_version_format">FileHub Android %1$s</string>
+    <string name="file_sort_name">Name</string>
+    <string name="file_sort_size">Size</string>
+    <string name="file_sort_modified">Modified</string>
+    <string name="file_sort_asc">Ascending</string>
+    <string name="file_sort_desc">Descending</string>
+    <string name="file_empty_title">This folder is empty</string>
+    <string name="file_empty_body">Upload from the top bar or create a folder.</string>
+    <string name="file_error">Could not load this folder</string>
+    <string name="file_read_only">Read-only</string>
+    <string name="file_read_only_reason">This location is read-only.</string>
+    <string name="file_login_required">Device token expired. Sign in again.</string>
+    <string name="file_details">Properties</string>
+    <string name="file_name">Name</string>
+    <string name="file_type">Type</string>
+    <string name="file_size">Size</string>
+    <string name="file_modified">Modified</string>
+    <string name="file_path">Path</string>
+    <string name="file_folder">Folder</string>
+    <string name="file_close">Close</string>
+    <string name="file_loading">Loading…</string>
+    <string name="file_refresh">Refresh</string>
+    <string name="file_sort">Sort</string>
+    <string name="file_more">More</string>
+    <string name="file_root">Root</string>
+    <string name="file_symlink">Symlink</string>
 </resources>
 

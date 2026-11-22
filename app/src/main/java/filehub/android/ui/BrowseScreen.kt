@@ -43,20 +43,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import filehub.android.R
 import filehub.android.core.model.FileRoot
-import filehub.android.core.model.ServerProfile
 import filehub.android.data.SessionState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun BrowseScreen(
     state: SessionState,
+    filesViewModel: FilesViewModel,
     onAddServer: () -> Unit,
     onRetry: () -> Unit,
 ) {
     val active = state.active
+    val files by filesViewModel.state.collectAsStateWithLifecycle()
+    val imageLoader by filesViewModel.imageLoader.collectAsStateWithLifecycle()
     var openedRoot by remember { mutableStateOf<FileRoot?>(null) }
 
     LaunchedEffect(active?.id) {
         openedRoot = null
+        filesViewModel.clear()
     }
 
     if (active == null) {
@@ -89,10 +93,24 @@ fun BrowseScreen(
 
     val root = openedRoot
     if (root != null) {
-        RootPlaceholder(
-            profile = active,
-            root = root,
-            onBack = { openedRoot = null },
+        FileBrowserScreen(
+            state = files,
+            imageLoader = imageLoader,
+            thumbnailUrl = filesViewModel::thumbnailUrl,
+            onBack = {
+                if (files.path.isEmpty()) {
+                    openedRoot = null
+                    filesViewModel.clear()
+                } else {
+                    filesViewModel.goUp()
+                }
+            },
+            onNavigate = filesViewModel::navigateTo,
+            onRefresh = filesViewModel::refresh,
+            onLoadMore = filesViewModel::loadMore,
+            onSort = filesViewModel::setSort,
+            onEntry = filesViewModel::enter,
+            onDismissDetails = filesViewModel::dismissSelected,
         )
         return
     }
@@ -171,7 +189,10 @@ fun BrowseScreen(
                 items(state.roots, key = { it.id }) { item ->
                     RootCard(
                         root = item,
-                        onClick = { openedRoot = item },
+                        onClick = {
+                            openedRoot = item
+                            filesViewModel.open(profile = active, root = item)
+                        },
                     )
                 }
             }
@@ -238,46 +259,6 @@ private fun Badge(text: String) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-    }
-}
-
-@Composable
-private fun RootPlaceholder(
-    profile: ServerProfile,
-    root: FileRoot,
-    onBack: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 12.dp, top = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back),
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = root.alias,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = profile.displayName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (root.readOnly) Badge(stringResource(R.string.browse_root_read_only))
-        }
-        CenteredMessage(
-            title = stringResource(R.string.browse_root_placeholder),
-            action = null,
         )
     }
 }

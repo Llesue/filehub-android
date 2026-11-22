@@ -1,7 +1,11 @@
 package filehub.android.data.api
 
 import android.os.Build
+import filehub.android.core.model.DirectoryListing
+import filehub.android.core.model.FileEntry
 import filehub.android.core.model.FileRoot
+import filehub.android.core.model.FileSort
+import filehub.android.core.model.SortOrder
 import filehub.android.core.model.LoginResult
 import filehub.android.core.model.ServerProfile
 import java.io.IOException
@@ -99,6 +103,31 @@ internal data class RootDto(
 internal data class RootsResponseDto(val roots: List<RootDto>)
 
 @Serializable
+internal data class EntryDto(
+    @SerialName("item_id") val itemId: Long? = null,
+    val name: String,
+    @SerialName("is_dir") val isDir: Boolean = false,
+    @SerialName("is_symlink") val isSymlink: Boolean = false,
+    val size: Long = 0,
+    val modified: Long = 0,
+    @SerialName("created_at") val createdAt: Long = 0,
+    @SerialName("mime_type") val mimeType: String = "",
+    @SerialName("has_preview") val hasPreview: Boolean = false,
+    @SerialName("symlink_state") val symlinkState: String? = null,
+)
+
+@Serializable
+internal data class ListResponseDto(
+    val root: RootDto? = null,
+    val path: String = "",
+    @SerialName("read_only") val readOnly: Boolean = false,
+    @SerialName("read_only_reason") val readOnlyReason: String? = null,
+    val entries: List<EntryDto> = emptyList(),
+    @SerialName("next_cursor") val nextCursor: String? = null,
+    val stale: Boolean = false,
+)
+
+@Serializable
 internal data class ErrorEnvelope(
     val error: ErrorDto? = null,
 )
@@ -147,6 +176,47 @@ class FileHubApi(
                 mountId = it.mountId,
             )
         }
+    }
+
+    suspend fun list(
+        rootId: Long,
+        path: String,
+        sort: FileSort = FileSort.Name,
+        order: SortOrder = SortOrder.Asc,
+        cursor: String? = null,
+        limit: Int = 200,
+    ): DirectoryListing {
+        val query = buildMap {
+            put("root", rootId.toString())
+            put("path", path)
+            put("sort", sort.apiValue)
+            put("order", order.apiValue)
+            put("limit", limit.toString())
+            cursor?.takeIf { it.isNotBlank() }?.let { put("cursor", it) }
+        }
+        val response = getJson(
+            path = "list",
+            deserializer = ListResponseDto.serializer(),
+            query = query,
+        )
+        return DirectoryListing(
+            entries = response.entries.map {
+                FileEntry(
+                    name = it.name,
+                    isDir = it.isDir,
+                    isSymlink = it.isSymlink,
+                    size = it.size,
+                    modified = it.modified,
+                    mimeType = it.mimeType,
+                    hasPreview = it.hasPreview,
+                    symlinkState = it.symlinkState,
+                )
+            },
+            nextCursor = response.nextCursor,
+            readOnly = response.readOnly,
+            readOnlyReason = response.readOnlyReason,
+            stale = response.stale,
+        )
     }
 
     suspend fun deleteToken(tokenId: Long) {
@@ -202,12 +272,14 @@ class FileHubApi(
     private suspend fun <T> getJson(
         path: String,
         deserializer: DeserializationStrategy<T>,
+        query: Map<String, String> = emptyMap(),
     ): T = requestJson(
         path = path,
         method = "GET",
         body = null,
         csrfToken = null,
         deserializer = deserializer,
+        query = query,
     )
 
     private suspend fun <T> requestJson(
@@ -216,8 +288,9 @@ class FileHubApi(
         body: ByteArray?,
         csrfToken: String?,
         deserializer: DeserializationStrategy<T>,
+        query: Map<String, String> = emptyMap(),
     ): T {
-        val responseBody = execute(buildRequest(path, method, body, csrfToken))
+        val responseBody = execute(buildRequest(path, method, body, csrfToken, query))
         return runCatching {
             JSON.decodeFromString(deserializer, responseBody)
         }.getOrElse { error ->
@@ -244,6 +317,7 @@ class FileHubApi(
         method: String,
         body: ByteArray?,
         csrfToken: String?,
+        query: Map<String, String> = emptyMap(),
     ): Request {
         val requestBody = when {
             body != null -> body.toRequestBody(JSON_MEDIA_TYPE)
@@ -253,7 +327,7 @@ class FileHubApi(
             else -> null
         }
         return Request.Builder()
-            .url(apiUrl(path))
+            .url(apiUrl(path, query))
             .method(method, requestBody)
             .header("Accept", "application/json")
             .header("User-Agent", USER_AGENT)
@@ -292,13 +366,14 @@ class FileHubApi(
         )
     }
 
-    private fun apiUrl(path: String): HttpUrl {
+    private fun apiUrl(path: String, query: Map<String, String> = emptyMap()): HttpUrl {
         val base = baseUrl.toHttpUrlOrNull()
             ?: throw FileHubApiException(0, "INVALID_URL", "服务器地址无效")
-        return base.newBuilder()
+        val builder = base.newBuilder()
             .addPathSegments("api/v1")
             .addPathSegments(path.trimStart('/'))
-            .build()
+        query.forEach { (key, value) -> builder.addQueryParameter(key, value) }
+        return builder.build()
     }
 
     companion object {

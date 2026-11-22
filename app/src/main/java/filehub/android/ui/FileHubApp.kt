@@ -24,11 +24,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import filehub.android.FileHubApplication
 import filehub.android.R
 
 enum class MainTab(
@@ -43,6 +46,8 @@ enum class MainTab(
 @Composable
 fun FileHubApp(viewModel: AppViewModel) {
     val navController = rememberNavController()
+    val application = LocalContext.current.applicationContext as FileHubApplication
+    val filesViewModel: FilesViewModel = viewModel(factory = FilesViewModel.factory(application))
     var tab by rememberSaveable { mutableStateOf(MainTab.Servers) }
     val session by viewModel.session.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -88,6 +93,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                         )
                         MainTab.Browse -> BrowseScreen(
                             state = session,
+                            filesViewModel = filesViewModel,
                             onAddServer = { navController.navigate("addServer") },
                             onRetry = viewModel::refreshRoots,
                         )
