@@ -27,6 +27,7 @@ data class ShareUiState(
     val editing: ShareInfo? = null,
     val editLoading: Boolean = false,
     val editError: String? = null,
+    val openLink: String? = null,
 )
 
 class ShareViewModel(
@@ -147,6 +148,26 @@ class ShareViewModel(
                 )
             }
         }
+    }
+
+    fun open(share: ShareInfo) {
+        val profile = sessionRepository.state.value.active ?: return
+        viewModelScope.launch {
+            runCatching { shareRepository.url(profile, share.id) }
+                .onSuccess { created ->
+                    _state.value = _state.value.copy(
+                        openLink = absoluteUrl(profile.baseUrl, created.url),
+                        actionError = null,
+                    )
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(actionError = error.toUserMessage(application))
+                }
+        }
+    }
+
+    fun dismissOpenLink() {
+        _state.value = _state.value.copy(openLink = null)
     }
 
     fun rotate(share: ShareInfo) {

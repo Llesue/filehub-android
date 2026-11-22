@@ -237,8 +237,10 @@ fun FileBrowserScreen(
                     )
                 }
             }
-            IconButton(onClick = { onSearch(state.root?.id) }) {
-                Icon(Icons.Filled.Search, contentDescription = null)
+            if (state.root?.isRemote != true) {
+                IconButton(onClick = { onSearch(state.root?.id) }) {
+                    Icon(Icons.Filled.Search, contentDescription = null)
+                }
             }
             if (!state.readOnly && !state.selectionMode) {
                 IconButton(onClick = ::takePhoto) {
@@ -566,6 +568,7 @@ fun FileBrowserScreen(
         if (state.selectionMode) {
             SelectionBar(
                 count = state.selected.size,
+                showZip = state.root?.isRemote != true,
                 onDelete = viewModel::requestDeleteSelected,
                 onDownload = {
                     requestNotificationPermission()
@@ -776,6 +779,7 @@ fun FileBrowserScreen(
 @Composable
 private fun SelectionBar(
     count: Int,
+    showZip: Boolean,
     onDelete: () -> Unit,
     onDownload: () -> Unit,
     onZip: () -> Unit,
@@ -1065,7 +1069,7 @@ private fun FileCard(
                             onCopy()
                         },
                     )
-                    if (entry.name.endsWith(".zip", ignoreCase = true)) {
+                    if (!remote && entry.name.endsWith(".zip", ignoreCase = true)) {
                         CompactDropdownMenuItem(
                             text = { Text(stringResource(R.string.extract)) },
                             onClick = {
@@ -1185,6 +1189,7 @@ private fun FileDetailsDialog(
                         properties = properties,
                         loading = propertiesLoading,
                         error = propertiesError,
+                        fallbackFormat = entry.mimeType,
                         onRetry = onRetryProperties,
                     )
                 }

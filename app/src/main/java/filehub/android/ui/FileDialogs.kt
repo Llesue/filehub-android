@@ -1555,6 +1555,7 @@ fun ImagePropertiesSection(
     properties: filehub.android.core.model.FileProperties?,
     loading: Boolean,
     error: String?,
+    fallbackFormat: String? = null,
     onRetry: (() -> Unit)?,
 ) {
     when {
@@ -1587,7 +1588,7 @@ fun ImagePropertiesSection(
                     value = "${image.width} × ${image.height}",
                 )
             }
-            image.format?.let { format ->
+            (image.format ?: fallbackFormat)?.takeIf { it.isNotBlank() }?.let { format ->
                 DetailLine(label = stringResource(R.string.image_format), value = format)
             }
             Text(
@@ -1630,6 +1631,9 @@ fun ImagePropertiesSection(
             }
         }
         properties != null -> {
+            fallbackFormat?.takeIf { it.isNotBlank() }?.let { format ->
+                DetailLine(label = stringResource(R.string.image_format), value = format)
+            }
             Text(
                 text = stringResource(R.string.image_no_exif),
                 style = MaterialTheme.typography.bodySmall,
@@ -1707,6 +1711,7 @@ fun ImageActionsDialog(
                     properties = properties,
                     loading = loading,
                     error = error,
+                    fallbackFormat = entry.mimeType,
                     onRetry = null,
                 )
             }

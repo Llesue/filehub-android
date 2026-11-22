@@ -95,10 +95,13 @@ fun TextEditorScreen(
         if (state.dirty) discardDialog = true else onBack()
     }
 
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding(),
@@ -290,6 +293,7 @@ fun TextEditorScreen(
                 )
             }
         }
+    }
     }
 
     if (discardDialog) {

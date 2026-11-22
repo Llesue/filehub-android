@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -132,9 +134,7 @@ fun SharesScreen(
                         onEdit = { viewModel.beginEdit(share) },
                         onRotate = { viewModel.rotate(share) },
                         onRevoke = { viewModel.revoke(share) },
-                        onOpen = {
-                            viewModel.copyLink(share)
-                        },
+                        onOpen = { viewModel.open(share) },
                     )
                 }
                 state.nextCursor?.let { cursor ->
@@ -153,6 +153,19 @@ fun SharesScreen(
             }
         }
     }
+    }
+
+    LaunchedEffect(state.openLink) {
+        val link = state.openLink ?: return@LaunchedEffect
+        viewModel.dismissOpenLink()
+        runCatching {
+            context.startActivity(
+                android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse(link),
+                ),
+            )
+        }
     }
 
     LaunchedEffect(state.actionLink) {
@@ -187,6 +200,26 @@ fun SharesScreen(
 
     linkDialog?.let { link ->
         ShareLinkDialog(link = link, onDismiss = { linkDialog = null })
+    }
+
+    state.editing?.let { share ->
+        ShareEditDialog(
+            share = share,
+            loading = state.editLoading,
+            error = state.editError,
+            onDismiss = viewModel::dismissEdit,
+            onSave = { readOnly, revoked, expiresAt, clearExpires, password, clearPassword ->
+                viewModel.update(
+                    share = share,
+                    readOnly = readOnly,
+                    revoked = revoked,
+                    expiresAt = expiresAt,
+                    clearExpires = clearExpires,
+                    password = password,
+                    clearPassword = clearPassword,
+                )
+            },
+        )
     }
 }
 
@@ -388,6 +421,7 @@ fun ShareLinkDialog(link: String, onDismiss: () -> Unit) {
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ShareEditDialog(
     share: ShareInfo,
@@ -431,9 +465,9 @@ private fun ShareEditDialog(
                     text = stringResource(R.string.share_edit_expiry),
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     listOf<Int?>(null, 1, 7, 30, -1).forEach { choice ->
                         val label = when (choice) {

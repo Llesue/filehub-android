@@ -255,7 +255,14 @@ class FilesViewModel(
         loadJob?.cancel()
         cancelDirSizes()
         _state.update {
-            it.copy(path = normalized, entries = emptyList(), nextCursor = null, loading = true, error = null)
+            it.copy(
+                path = normalized,
+                entries = emptyList(),
+                nextCursor = null,
+                loading = true,
+                error = null,
+                operationError = null,
+            )
         }
         load(path = normalized, append = false)
     }

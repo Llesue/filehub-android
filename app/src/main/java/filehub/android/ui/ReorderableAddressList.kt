@@ -25,7 +25,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -62,7 +61,6 @@ fun ReorderableAddressList(
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
     var targetIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
-    var settling by remember { mutableStateOf(false) }
 
     fun heightAt(index: Int): Float = rowHeights.getOrNull(index)
         ?: with(density) { 72.dp.toPx() }
@@ -123,11 +121,7 @@ fun ReorderableAddressList(
                 }
                 .zIndex(if (dragging) 2f else 0f)
                 .graphicsLayer {
-                    translationY = when {
-                        dragging -> dragOffset
-                        settling -> 0f
-                        else -> animatedShift
-                    }
+                    translationY = if (dragging) dragOffset else animatedShift
                     if (dragging) {
                         scaleX = 1.02f
                         scaleY = 1.02f
@@ -166,10 +160,9 @@ fun ReorderableAddressList(
                             }
                         }
                     }
-                    .pointerInput(index, addresses.size, settling) {
+                    .pointerInput(index, addresses.size) {
                         detectDragGestures(
                             onDragStart = {
-                                if (settling) return@detectDragGestures
                                 draggingIndex = index
                                 targetIndex = index
                                 dragOffset = 0f
@@ -188,31 +181,15 @@ fun ReorderableAddressList(
                                 val from = draggingIndex
                                 if (from == null) return@detectDragGestures
                                 val destination = targetIndex ?: from
-                                val finalOffset = offsetForTarget(from, destination)
-                                scope.launch {
-                                    val start = dragOffset
-                                    val startedAt = System.nanoTime()
-                                    while (true) {
-                                        val elapsed = (System.nanoTime() - startedAt) / 1_000_000f
-                                        val fraction = (elapsed / 170f).coerceIn(0f, 1f)
-                                        dragOffset = start + (finalOffset - start) * fraction
-                                        if (fraction >= 1f) break
-                                        kotlinx.coroutines.delay(16)
-                                    }
-                                    if (destination != from) onMove(from, destination)
-                                    draggingIndex = null
-                                    targetIndex = null
-                                    dragOffset = 0f
-                                    settling = true
-                                    withFrameNanos { }
-                                    settling = false
-                                }
+                                if (destination != from) onMove(from, destination)
+                                draggingIndex = null
+                                targetIndex = null
+                                dragOffset = 0f
                             },
                             onDragCancel = {
                                 draggingIndex = null
                                 targetIndex = null
                                 dragOffset = 0f
-                                settling = false
                             },
                         )
                     },
