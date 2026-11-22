@@ -15,3 +15,6 @@ dist/
 keystore.properties
 *.hprof
 .build-host
+
+# Local planning notes, not part of the project
+/有可能会做.md
