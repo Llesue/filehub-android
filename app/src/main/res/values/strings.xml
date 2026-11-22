@@ -123,5 +123,28 @@
     <string name="search_min_chars">Type at least 3 characters, or 2 Chinese characters.</string>
     <string name="search_no_results">No matches</string>
     <string name="search_clear">Clear</string>
+    <string name="transfer_channel_name">Transfers</string>
+    <string name="transfer_channel_desc">File uploads and downloads</string>
+    <string name="transfer_uploading">Uploading %1$s</string>
+    <string name="transfer_downloading">Downloading %1$s</string>
+    <string name="transfer_completed">Transfer complete</string>
+    <string name="transfer_failed">Transfer failed</string>
+    <string name="transfers_title">Transfers</string>
+    <string name="transfers_empty">No transfers yet</string>
+    <string name="transfers_clear">Clear finished</string>
+    <string name="transfer_cancel">Cancel</string>
+    <string name="transfer_retry">Retry</string>
+    <string name="transfer_open">Open</string>
+    <string name="transfer_upload_action">Upload files</string>
+    <string name="transfer_photo_action">Upload photos &amp; videos</string>
+    <string name="transfer_camera_action">Take a photo</string>
+    <string name="transfer_download_action">Download</string>
+    <string name="transfer_permission_denied">Notification permission denied; transfers still run.</string>
+    <string name="transfer_status_queued">Queued</string>
+    <string name="transfer_status_running">Running</string>
+    <string name="transfer_status_completed">Completed</string>
+    <string name="transfer_status_failed">Failed</string>
+    <string name="transfer_status_cancelled">Cancelled</string>
+    <string name="my_transfers">Transfers</string>
 </resources>
 

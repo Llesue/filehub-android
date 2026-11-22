@@ -123,5 +123,28 @@
     <string name="search_min_chars">至少输入 3 个字符，或 2 个中文字符。</string>
     <string name="search_no_results">没有匹配结果</string>
     <string name="search_clear">清空</string>
+    <string name="transfer_channel_name">传输</string>
+    <string name="transfer_channel_desc">文件上传与下载</string>
+    <string name="transfer_uploading">正在上传 %1$s</string>
+    <string name="transfer_downloading">正在下载 %1$s</string>
+    <string name="transfer_completed">传输完成</string>
+    <string name="transfer_failed">传输失败</string>
+    <string name="transfers_title">传输</string>
+    <string name="transfers_empty">还没有传输任务</string>
+    <string name="transfers_clear">清除已完成</string>
+    <string name="transfer_cancel">取消</string>
+    <string name="transfer_retry">重试</string>
+    <string name="transfer_open">打开</string>
+    <string name="transfer_upload_action">上传文件</string>
+    <string name="transfer_photo_action">上传照片和视频</string>
+    <string name="transfer_camera_action">拍照上传</string>
+    <string name="transfer_download_action">下载</string>
+    <string name="transfer_permission_denied">通知权限被拒绝，传输仍会继续。</string>
+    <string name="transfer_status_queued">排队中</string>
+    <string name="transfer_status_running">进行中</string>
+    <string name="transfer_status_completed">已完成</string>
+    <string name="transfer_status_failed">失败</string>
+    <string name="transfer_status_cancelled">已取消</string>
+    <string name="my_transfers">传输</string>
 </resources>
 

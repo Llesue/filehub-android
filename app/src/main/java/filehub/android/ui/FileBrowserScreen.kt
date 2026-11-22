@@ -1,7 +1,13 @@
 package filehub.android.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.text.format.Formatter
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
@@ -56,12 +62,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import filehub.android.BuildConfig
+import java.io.File
 import filehub.android.R
 import filehub.android.core.model.FileEntry
 import filehub.android.core.model.FileKind
@@ -89,6 +100,52 @@ fun FileBrowserScreen(
     var newFolder by remember { mutableStateOf(false) }
     var newFile by remember { mutableStateOf(false) }
     var renameEntry by remember { mutableStateOf<FileEntry?>(null) }
+    val context = LocalContext.current
+    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+
+    fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            requestNotificationPermission()
+            viewModel.enqueueUploads(uris)
+        }
+    }
+    val mediaPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            requestNotificationPermission()
+            viewModel.enqueueUploads(uris)
+        }
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture(),
+    ) { ok ->
+        if (ok) {
+            requestNotificationPermission()
+            cameraUri?.let { viewModel.enqueueUploads(listOf(it)) }
+        }
+    }
+
+    fun takePhoto() {
+        val file = File(context.cacheDir, "camera-${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.files", file)
+        cameraUri = uri
+        cameraLauncher.launch(uri)
+    }
 
     BackHandler(
         enabled = state.selectedEntry == null &&
@@ -184,6 +241,29 @@ fun FileBrowserScreen(
                     Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.file_more))
                 }
                 DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                    if (!state.readOnly) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.transfer_upload_action)) },
+                            onClick = {
+                                moreMenu = false
+                                filePicker.launch(arrayOf("*/*"))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.transfer_photo_action)) },
+                            onClick = {
+                                moreMenu = false
+                                mediaPicker.launch(arrayOf("image/*", "video/*"))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.transfer_camera_action)) },
+                            onClick = {
+                                moreMenu = false
+                                takePhoto()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.action_new_folder)) },
                         leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
@@ -291,6 +371,10 @@ fun FileBrowserScreen(
                         onDetails = { viewModel.showDetails(entry) },
                         onRename = { renameEntry = entry },
                         onDelete = { viewModel.requestDelete(listOf(entry)) },
+                        onDownload = {
+                            requestNotificationPermission()
+                            viewModel.enqueueDownload(entry)
+                        },
                     )
                 }
                 state.nextCursor?.let { cursor ->
@@ -313,6 +397,10 @@ fun FileBrowserScreen(
             SelectionBar(
                 count = state.selected.size,
                 onDelete = viewModel::requestDeleteSelected,
+                onDownload = {
+                    requestNotificationPermission()
+                    viewModel.downloadSelected()
+                },
                 onClear = viewModel::clearSelection,
             )
         }
@@ -384,6 +472,7 @@ fun FileBrowserScreen(
 private fun SelectionBar(
     count: Int,
     onDelete: () -> Unit,
+    onDownload: () -> Unit,
     onClear: () -> Unit,
 ) {
     Surface(
@@ -406,6 +495,9 @@ private fun SelectionBar(
             Row {
                 TextButton(onClick = onClear) {
                     Text(stringResource(R.string.selection_cancel))
+                }
+                TextButton(onClick = onDownload) {
+                    Text(stringResource(R.string.transfer_download_action))
                 }
                 TextButton(onClick = onDelete) {
                     Text(
@@ -515,6 +607,7 @@ private fun FileCard(
     onDetails: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onDownload: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -619,6 +712,15 @@ private fun FileCard(
                             onDetails()
                         },
                     )
+                    if (!entry.isDir) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.transfer_download_action)) },
+                            onClick = {
+                                menuOpen = false
+                                onDownload()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.action_rename)) },
                         onClick = {

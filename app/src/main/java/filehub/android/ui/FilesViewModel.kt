@@ -1,6 +1,7 @@
 package filehub.android.ui
 
 import android.app.Application
+import android.net.Uri
 import coil3.ImageLoader
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.lifecycle.ViewModel
@@ -21,6 +22,7 @@ import filehub.android.data.api.TextFileDto
 import filehub.android.data.media.MediaPlayerFactory
 import filehub.android.data.media.PreviewDownloader
 import filehub.android.data.media.ThumbnailLoaderFactory
+import filehub.android.data.transfer.TransferRepository
 import filehub.android.data.api.FileHubApiException
 import filehub.android.data.toUserMessage
 import java.io.File
@@ -68,6 +70,7 @@ class FilesViewModel(
     private val thumbnailLoaderFactory: ThumbnailLoaderFactory,
     private val mediaPlayerFactory: MediaPlayerFactory,
     private val previewDownloader: PreviewDownloader,
+    private val transferRepository: TransferRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileBrowserState())
@@ -347,6 +350,41 @@ class FilesViewModel(
         _state.update { it.copy(selectedEntry = null) }
     }
 
+    fun enqueueUploads(uris: List<Uri>) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            uris.forEach { uri ->
+                transferRepository.enqueueUpload(profile, root.id, current.path, uri)
+            }
+        }
+    }
+
+    fun enqueueDownload(entry: FileEntry) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        if (entry.isDir) return
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        viewModelScope.launch {
+            transferRepository.enqueueDownload(
+                profile = profile,
+                rootId = root.id,
+                remotePath = path,
+                name = entry.name,
+                size = entry.size,
+                mimeType = entry.mimeType,
+            )
+        }
+    }
+
+    fun downloadSelected() {
+        val current = _state.value
+        current.entries.filter { it.name in current.selected && !it.isDir }.forEach(::enqueueDownload)
+    }
+
     fun createPlayer(): ExoPlayer? = activeToken?.let(mediaPlayerFactory::create)
 
     fun downloadUrl(entry: FileEntry, inline: Boolean = true): String? {
@@ -466,6 +504,7 @@ class FilesViewModel(
                     app.container.thumbnailLoaderFactory,
                     app.container.mediaPlayerFactory,
                     app.container.previewDownloader,
+                    app.container.transferRepository,
                 )
             }
         }

@@ -23,6 +23,7 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -201,6 +202,40 @@ data class TextFileDto(
     val modified: Long = 0,
     @SerialName("line_ending") val lineEnding: String = "lf",
     val writable: Boolean = false,
+)
+
+@Serializable
+internal data class CreateUploadRequest(
+    val root: Long,
+    val path: String,
+    val filename: String,
+    @SerialName("total_size") val totalSize: Long,
+    @SerialName("chunk_size") val chunkSize: Long? = null,
+    val mtime: Long? = null,
+)
+
+@Serializable
+data class UploadCreatedDto(
+    @SerialName("upload_id") val uploadId: String,
+    @SerialName("chunk_size") val chunkSize: Long,
+    val chunks: Int,
+    @SerialName("expires_at") val expiresAt: Long = 0,
+)
+
+@Serializable
+data class UploadStatusDto(
+    @SerialName("upload_id") val uploadId: String,
+    @SerialName("total_size") val totalSize: Long = 0,
+    @SerialName("chunk_size") val chunkSize: Long = 0,
+    val received: Long = 0,
+    @SerialName("received_chunks") val receivedChunks: List<Int> = emptyList(),
+    @SerialName("expires_at") val expiresAt: Long = 0,
+)
+
+@Serializable
+data class UploadCompleteDto(
+    val path: String = "",
+    val size: Long = 0,
 )
 
 @Serializable
@@ -389,6 +424,49 @@ class FileHubApi(
         query = mapOf("root" to rootId.toString(), "path" to path),
     )
 
+    suspend fun createUpload(
+        rootId: Long,
+        path: String,
+        filename: String,
+        totalSize: Long,
+        chunkSize: Long? = null,
+        mtime: Long? = null,
+    ): UploadCreatedDto = postJson(
+        path = "uploads",
+        body = CreateUploadRequest(rootId, path, filename, totalSize, chunkSize, mtime),
+        serializer = CreateUploadRequest.serializer(),
+        deserializer = UploadCreatedDto.serializer(),
+    )
+
+    suspend fun uploadStatus(uploadId: String): UploadStatusDto = getJson(
+        path = "uploads/$uploadId",
+        deserializer = UploadStatusDto.serializer(),
+    )
+
+    suspend fun uploadChunk(uploadId: String, index: Int, data: ByteArray) {
+        requestUnit(
+            path = "uploads/$uploadId/chunks/$index",
+            method = "PUT",
+            body = data,
+            csrfToken = null,
+            contentType = OCTET_STREAM,
+        )
+    }
+
+    suspend fun completeUpload(uploadId: String): UploadCompleteDto = postJsonEmpty(
+        path = "uploads/$uploadId/complete",
+        deserializer = UploadCompleteDto.serializer(),
+    )
+
+    suspend fun cancelUpload(uploadId: String) {
+        requestUnit(
+            path = "uploads/$uploadId",
+            method = "DELETE",
+            body = null,
+            csrfToken = null,
+        )
+    }
+
     suspend fun deleteToken(tokenId: Long) {
         requestUnit(
             path = "auth/tokens/$tokenId",
@@ -464,6 +542,17 @@ class FileHubApi(
         )
     }
 
+    private suspend fun <T> postJsonEmpty(
+        path: String,
+        deserializer: DeserializationStrategy<T>,
+    ): T = requestJson(
+        path = path,
+        method = "POST",
+        body = null,
+        csrfToken = null,
+        deserializer = deserializer,
+    )
+
     private suspend fun <T> getJson(
         path: String,
         deserializer: DeserializationStrategy<T>,
@@ -503,8 +592,9 @@ class FileHubApi(
         method: String,
         body: ByteArray?,
         csrfToken: String?,
+        contentType: MediaType? = JSON_MEDIA_TYPE,
     ) {
-        execute(buildRequest(path, method, body, csrfToken))
+        execute(buildRequest(path, method, body, csrfToken, contentType = contentType))
     }
 
     private fun buildRequest(
@@ -513,9 +603,10 @@ class FileHubApi(
         body: ByteArray?,
         csrfToken: String?,
         query: Map<String, String> = emptyMap(),
+        contentType: MediaType? = JSON_MEDIA_TYPE,
     ): Request {
         val requestBody = when {
-            body != null -> body.toRequestBody(JSON_MEDIA_TYPE)
+            body != null -> body.toRequestBody(contentType)
             method == "POST" || method == "PUT" || method == "PATCH" -> {
                 ByteArray(0).toRequestBody(null)
             }
@@ -585,6 +676,7 @@ class FileHubApi(
     companion object {
         private const val TOKEN_LIFETIME_SECONDS = 365L * 24 * 60 * 60
         private const val USER_AGENT = "FileHub-Android/0.1.0"
+        private val OCTET_STREAM = "application/octet-stream".toMediaType()
 
         fun normalizeBaseUrl(input: String): String {
             var raw = input.trim()

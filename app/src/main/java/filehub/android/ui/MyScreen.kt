@@ -45,6 +45,7 @@ fun MyScreen(
     onLogout: () -> Unit,
     onRemove: () -> Unit,
     onRefresh: () -> Unit,
+    onTransfers: () -> Unit,
 ) {
     val profile = state.active
     var confirmRemove by remember { mutableStateOf(false) }
@@ -159,6 +160,12 @@ fun MyScreen(
         }
 
         Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onTransfers,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.my_transfers))
+        }
         OutlinedButton(
             onClick = onRefresh,
             modifier = Modifier.fillMaxWidth(),

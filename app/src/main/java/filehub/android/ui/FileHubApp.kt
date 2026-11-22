@@ -1,6 +1,10 @@
 package filehub.android.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -11,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -26,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -33,6 +40,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import filehub.android.FileHubApplication
 import filehub.android.R
+import filehub.android.data.transfer.TransferStatus
 
 enum class MainTab(
     val labelRes: Int,
@@ -44,13 +52,45 @@ enum class MainTab(
 }
 
 @Composable
+private fun TransferPill(
+    name: String,
+    progress: Float,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.primaryContainer,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            androidx.compose.material3.LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
 fun FileHubApp(viewModel: AppViewModel) {
     val navController = rememberNavController()
     val application = LocalContext.current.applicationContext as FileHubApplication
     val filesViewModel: FilesViewModel = viewModel(factory = FilesViewModel.factory(application))
     val searchViewModel: SearchViewModel = viewModel(factory = SearchViewModel.factory(application))
+    val transferViewModel: TransferViewModel = viewModel(factory = TransferViewModel.factory(application))
     var tab by rememberSaveable { mutableStateOf(MainTab.Servers) }
     val session by viewModel.session.collectAsStateWithLifecycle()
+    val transfers by transferViewModel.items.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(session.error) {
@@ -65,14 +105,25 @@ fun FileHubApp(viewModel: AppViewModel) {
                 containerColor = MaterialTheme.colorScheme.background,
                 snackbarHost = { SnackbarHost(snackbar) },
                 bottomBar = {
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                        MainTab.entries.forEach { item ->
-                            NavigationBarItem(
-                                selected = tab == item,
-                                onClick = { tab = item },
-                                icon = { Icon(item.icon, contentDescription = null) },
-                                label = { Text(stringResource(item.labelRes)) },
+                    Column {
+                        transfers.firstOrNull {
+                            it.status == TransferStatus.QUEUED || it.status == TransferStatus.RUNNING
+                        }?.let { active ->
+                            TransferPill(
+                                name = active.name,
+                                progress = active.progress,
+                                onClick = { navController.navigate("transfers") },
                             )
+                        }
+                        NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                            MainTab.entries.forEach { item ->
+                                NavigationBarItem(
+                                    selected = tab == item,
+                                    onClick = { tab = item },
+                                    icon = { Icon(item.icon, contentDescription = null) },
+                                    label = { Text(stringResource(item.labelRes)) },
+                                )
+                            }
                         }
                     }
                 },
@@ -104,6 +155,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                             onLogout = viewModel::logout,
                             onRemove = { session.active?.let { viewModel.removeProfile(it.id) } },
                             onRefresh = viewModel::refreshRoots,
+                            onTransfers = { navController.navigate("transfers") },
                         )
                     }
                 }
@@ -137,6 +189,12 @@ fun FileHubApp(viewModel: AppViewModel) {
                     searchViewModel.reset()
                     navController.popBackStack()
                 },
+            )
+        }
+        composable("transfers") {
+            TransfersScreen(
+                viewModel = transferViewModel,
+                onBack = { navController.popBackStack() },
             )
         }
         composable("addServer") {
