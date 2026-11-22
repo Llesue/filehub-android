@@ -1,13 +1,14 @@
 # FileHub Android
 
+[简体中文](README.zh-CN.md) | English
+
 Native Android client for [FileHub](https://github.com/Llesue/filehub).
 
-Status: **v0.1.0** — first public release. See [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md).
+Status: **v0.1.0** — first public release. Download: [GitHub Releases](https://github.com/Llesue/filehub-android/releases/latest).
 
 - Kotlin + Jetpack Compose (Material 3), `minSdk 26`, `compileSdk 37.1`, `targetSdk 36`
 - OkHttp + kotlinx.serialization, Room, WorkManager, Media3, Coil
 - Builds run on the remote `parasite` host; local builds are not supported
-- Release APKs and tags are not published until the user signs off
 
 ## Features
 
@@ -47,10 +48,10 @@ If the device token expires or the configured target location disappears, the af
 ./scripts/provision-sdk.sh          # one-time, on the build host
 ./scripts/build-remote.sh           # debug APK -> dist/
 ./scripts/build-remote.sh check     # lint + unit tests
-./scripts/build-remote.sh release   # unsigned release build, never published automatically
+./scripts/build-remote.sh release   # signed release APK when keystore.properties exists
 ```
 
-The debug APK is written to `dist/filehub-android-debug.apk`.
+Release and debug APKs are written to `dist/`.
 
 ## Release signing
 
@@ -68,6 +69,5 @@ Signing certificate SHA-256:
 - [`docs/ui-spec.md`](docs/ui-spec.md) — UI proposal
 - [`docs/sync-spec.md`](docs/sync-spec.md) — photo/directory sync design
 - [`docs/app-icon.svg`](docs/app-icon.svg) — source logo
-- [`docs/plans/0.1.1.md`](docs/plans/0.1.1.md) — next patch plan
 - [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md) — release notes
 - [`CHANGELOG.md`](CHANGELOG.md)

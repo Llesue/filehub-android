@@ -16,6 +16,8 @@
 - Shares: create from a file/folder, password/expiry/read-only, QR code, revoke/rotate, public share viewer with ticket unlock and downloads.
 - Theme override (system/light/dark), Chinese and English resources, edge-to-edge UI.
 - Server favicons (branding icon with favicon fallback), editable server profiles, multi-address failover with per-server background sync.
+- Drag handles in Add Server and Edit Server reorder addresses; the list order is the connection attempt order.
+- Remote folder picker can create folders and load additional pages.
 - FileHub-matched colored file icons (yellow folders), 8dp card rhythm, theme-aware text preview and Markdown rendering.
 - Image long-press/more menu with properties, EXIF metadata and download.
 - Compact file rows with folder sizes and a persistent directory metadata cache (Room, max 200 directories).
@@ -31,6 +33,7 @@
 - Markdown tables, task lists, strikethrough and links.
 - Double-tap image zoom and a persistent blurred image backdrop.
 - All editable fields dismiss the keyboard/focus on Done; Save/Connect actions still submit.
+- Edit Server address fields accept Done again instead of leaving the field in edit mode.
 
 ### Fixed
 
@@ -38,8 +41,11 @@
 - Folder sync could upload the same file twice per decision pass.
 - Sync notifications from multiple servers overwrote each other.
 - Missing target roots or expired tokens now disable the affected sync instead of retrying forever.
-- Manual sync ignored Wi-Fi/charging constraints.
-- Changing the photo sync target folder now asks before clearing completed records.
+- Manual sync ignored Wi-Fi/charging constraints; the sync screen now explains when the run is queued behind those constraints.
+- Changing the photo sync target folder now asks before clearing completed records; switching roots shows that the target path will be recreated under the new root.
+- Sync notifications now open the matching photo/folder sync screen.
+- Delete confirmation now displays the server-provided 4-digit code instead of an empty input.
+- Sign-in validity shows the expiry suffix and remaining days so 2027 is not mistaken for tomorrow.
 
 ### Notes
 
