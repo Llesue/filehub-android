@@ -39,7 +39,7 @@ It does not require the app UI to be open, but Android/OEM restrictions still ap
 - Manual sync respects the same Wi-Fi/charging settings as the configured schedule.
 - Opening the app after a missed interval enqueues a one-time catch-up run.
 
-If the device token expires, the affected sync is disabled and the UI asks for a new login.
+If the device token expires or the configured target location disappears, the affected sync is disabled until it is reconfigured.
 
 ## Build
 

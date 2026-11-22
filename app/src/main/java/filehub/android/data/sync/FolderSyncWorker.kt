@@ -80,6 +80,24 @@ class FolderSyncWorker(
         val (profile, token) = app.container.profileAndToken(config.profileId)
             ?: return failPermanently(repo, config, applicationContext.getString(R.string.error_unauthorized))
         val api = FileHubApi(profile.baseUrl, token)
+        val roots = runCatching { api.roots() }
+            .getOrElse { error ->
+                if (error is FileHubApiException && error.statusCode == 401) {
+                    return failPermanently(
+                        repo,
+                        config,
+                        applicationContext.getString(R.string.error_unauthorized),
+                    )
+                }
+                return fail(repo, config, error.toUserMessage(applicationContext))
+            }
+        if (roots.none { it.id == config.rootId }) {
+            return failPermanently(
+                repo,
+                config,
+                applicationContext.getString(R.string.sync_root_missing),
+            )
+        }
         val remoteDirs = RemoteDirEnsurer(api, config.rootId)
         remoteDirs.ensure(config.remotePath)
 

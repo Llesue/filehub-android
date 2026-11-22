@@ -299,5 +299,6 @@
     <string name="sync_waiting_wifi">%1$d items waiting for Wi-Fi</string>
         <string name="folder_sync_conflicts_count">%1$d conflicts</string>
     <string name="folder_picker_load_more">Load more</string>
+    <string name="sync_root_missing">The configured target location no longer exists. Re-select it in sync settings.</string>
 </resources>
 

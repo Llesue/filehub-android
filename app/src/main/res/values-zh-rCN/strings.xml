@@ -298,5 +298,6 @@
     <string name="sync_waiting_wifi">%1$d 项等待 Wi-Fi</string>
         <string name="folder_sync_conflicts_count">%1$d 个冲突</string>
     <string name="folder_picker_load_more">加载更多</string>
+    <string name="sync_root_missing">配置的目标位置已不存在，请在同步设置中重新选择。</string>
 </resources>
 

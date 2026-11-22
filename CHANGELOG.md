@@ -36,6 +36,7 @@
 - Photo sync failed after the first file when the remote directory already existed (HTTP 500 from legacy servers).
 - Folder sync could upload the same file twice per decision pass.
 - Sync notifications from multiple servers overwrote each other.
+- Missing target roots or expired tokens now disable the affected sync instead of retrying forever.
 - Manual sync ignored Wi-Fi/charging constraints.
 - Changing the photo sync target folder now asks before clearing completed records.
 
