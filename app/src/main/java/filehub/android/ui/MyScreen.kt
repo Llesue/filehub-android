@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,11 +45,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
+import android.text.format.Formatter
 import filehub.android.BuildConfig
 import filehub.android.R
 import filehub.android.data.SessionState
-import java.text.DateFormat
-import java.util.Date
 
 @Composable
 fun MyScreen(
@@ -59,6 +61,10 @@ fun MyScreen(
     onPhotoSync: () -> Unit,
     onFolderSync: () -> Unit,
     onShares: () -> Unit,
+    usage: UsageUiState,
+    serverVersion: filehub.android.data.api.VersionDto?,
+    onLoadUsage: () -> Unit,
+    onLoadServerVersion: () -> Unit,
     theme: String,
     onThemeChange: (String) -> Unit,
     language: String,
@@ -68,6 +74,13 @@ fun MyScreen(
     var confirmRemove by remember { mutableStateOf(false) }
     val avatarUrl = profile?.avatarVersion?.takeIf { it > 0 }?.let { version ->
         "${profile.baseUrl.trimEnd('/')}/api/v1/me/avatar?v=$version"
+    }
+
+    LaunchedEffect(profile?.id) {
+        if (profile != null) {
+            onLoadUsage()
+            onLoadServerVersion()
+        }
     }
 
     if (profile == null) {
@@ -182,26 +195,20 @@ fun MyScreen(
             val expiresAt = profile.tokenExpiresAt
             InfoRow(
                 label = stringResource(R.string.my_token_expiry),
-                value = expiresAt?.let {
-                    stringResource(R.string.my_expiry_value, formatExpiry(it))
-                } ?: "—",
+                value = tokenValidityText(expiresAt),
             )
-            if (expiresAt != null) {
-                val remainingDays = remainingDays(expiresAt)
+            InfoRow(
+                label = stringResource(R.string.server_version),
+                value = serverVersion?.version ?: "—",
+            )
+            if (serverVersion?.updateAvailable == true) {
                 Text(
-                    text = if (remainingDays > 0) {
-                        stringResource(R.string.my_expiry_days, remainingDays)
-                    } else if (expiresAt * 1000 > System.currentTimeMillis()) {
-                        stringResource(R.string.my_expiry_today)
-                    } else {
-                        stringResource(R.string.my_expiry_expired)
-                    },
+                    text = stringResource(
+                        R.string.server_version_update,
+                        serverVersion.latest ?: "",
+                    ),
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (expiresAt * 1000 > System.currentTimeMillis()) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
             Text(
@@ -218,6 +225,8 @@ fun MyScreen(
             language = language,
             onLanguageChange = onLanguageChange,
         )
+        UsageCard(usage = usage, onRefresh = onLoadUsage)
+
         InfoCard(title = stringResource(R.string.my_version_format, BuildConfig.VERSION_NAME)) {
             Text(
                 text = stringResource(R.string.my_version_body),
@@ -295,6 +304,96 @@ fun MyScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun UsageCard(usage: UsageUiState, onRefresh: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    InfoCard(title = stringResource(R.string.usage_title)) {
+        val data = usage.usage
+        val used = data?.usedBytes
+        when {
+            usage.error != null -> {
+                Text(
+                    text = usage.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TextButton(onClick = onRefresh) {
+                    Text(stringResource(R.string.common_retry))
+                }
+            }
+            data == null || used == null -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        text = stringResource(R.string.usage_computing),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            else -> {
+                val quota = data.quotaBytes ?: 0
+                val usedText = Formatter.formatShortFileSize(context, used)
+                val quotaText = if (quota > 0) {
+                    Formatter.formatShortFileSize(context, quota)
+                } else {
+                    stringResource(R.string.usage_unlimited)
+                }
+                Text(
+                    text = "$usedText / $quotaText",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (quota > 0) {
+                    val fraction = (used.toFloat() / quota).coerceIn(0f, 1f)
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        color = if (fraction >= 0.9f) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                    )
+                }
+                val entryCount = data.entryCount
+                if (entryCount != null) {
+                    val maxEntries = data.maxEntries
+                    Text(
+                        text = if (maxEntries != null && maxEntries > 0) {
+                            stringResource(R.string.usage_entries_limit, entryCount, maxEntries)
+                        } else {
+                            stringResource(R.string.usage_entries, entryCount)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (data.stale || data.computing) {
+                        Text(
+                            text = stringResource(R.string.usage_refreshing),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
+                    TextButton(onClick = onRefresh, enabled = !usage.loading) {
+                        Text(stringResource(R.string.common_refresh))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -428,13 +527,4 @@ private fun InfoRow(label: String, value: String) {
             Text(text = value, style = MaterialTheme.typography.bodyMedium)
         }
     }
-}
-
-private fun formatExpiry(epochSeconds: Long): String =
-    DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(epochSeconds * 1000))
-
-private fun remainingDays(epochSeconds: Long): Long {
-    val remainingMillis = epochSeconds * 1000 - System.currentTimeMillis()
-    if (remainingMillis <= 0) return 0
-    return (remainingMillis + 86_399_999) / 86_400_000
 }

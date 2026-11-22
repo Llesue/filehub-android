@@ -24,6 +24,9 @@ data class ShareUiState(
     val error: String? = null,
     val actionLink: String? = null,
     val actionError: String? = null,
+    val editing: ShareInfo? = null,
+    val editLoading: Boolean = false,
+    val editError: String? = null,
 )
 
 class ShareViewModel(
@@ -91,6 +94,58 @@ class ShareViewModel(
                 .onFailure { error ->
                     _state.value = _state.value.copy(actionError = error.toUserMessage(application))
                 }
+        }
+    }
+
+    fun beginEdit(share: ShareInfo) {
+        _state.value = _state.value.copy(editing = share, editError = null)
+    }
+
+    fun dismissEdit() {
+        _state.value = _state.value.copy(editing = null, editLoading = false, editError = null)
+    }
+
+    fun update(
+        share: ShareInfo,
+        readOnly: Boolean,
+        revoked: Boolean,
+        expiresAt: Long?,
+        clearExpires: Boolean,
+        password: String?,
+        clearPassword: Boolean,
+    ) {
+        val profile = sessionRepository.state.value.active ?: return
+        val readOnlyChange = readOnly.takeIf { it != share.readOnly }
+        val revokedChange = revoked.takeIf { it != share.revoked }
+        val expiresChange = expiresAt.takeIf { it != null && it != share.expiresAt }
+        val hasChange = readOnlyChange != null || revokedChange != null ||
+            clearExpires || expiresChange != null || !password.isNullOrBlank() || clearPassword
+        if (!hasChange) {
+            dismissEdit()
+            return
+        }
+        _state.value = _state.value.copy(editLoading = true, editError = null)
+        viewModelScope.launch {
+            runCatching {
+                shareRepository.update(
+                    profile = profile,
+                    id = share.id,
+                    readOnly = readOnlyChange,
+                    expiresAt = expiresChange,
+                    clearExpires = clearExpires,
+                    password = password?.takeIf { it.isNotBlank() },
+                    clearPassword = clearPassword,
+                    revoked = revokedChange,
+                )
+            }.onSuccess {
+                _state.value = _state.value.copy(editing = null, editLoading = false)
+                load()
+            }.onFailure { error ->
+                _state.value = _state.value.copy(
+                    editLoading = false,
+                    editError = error.toUserMessage(application),
+                )
+            }
         }
     }
 

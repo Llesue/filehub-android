@@ -62,8 +62,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import filehub.android.R
 import filehub.android.data.SessionState
 import filehub.android.data.sync.PhotoSyncConfigEntity
-import java.text.DateFormat
-import java.util.Date
 
 @Composable
 fun PhotoSyncScreen(
@@ -561,7 +559,7 @@ private fun SyncStatusCard(
             }
             Text(
                 text = stringResource(R.string.photo_sync_last_run) + ": " +
-                    (config.lastRunAt?.let { formatTime(it) } ?: "—"),
+                    (config.lastRunAt?.let { relativeTimeText(it) } ?: "—"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -617,6 +615,3 @@ private fun scheduleLabel(value: String): String = when (value) {
     "weekly" -> stringResource(R.string.photo_sync_schedule_weekly)
     else -> stringResource(R.string.photo_sync_schedule_daily)
 }
-
-private fun formatTime(epochSeconds: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(epochSeconds * 1000))

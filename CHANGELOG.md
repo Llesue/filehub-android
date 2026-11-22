@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.1.1 - 2026-11-23
+
+### Added
+
+- Remote mounts expose online/offline/unknown state; browsing falls back to cached listings with an explicit offline banner, and directory/photo sync preflights the remote root and reports one failure instead of per-file spam.
+- Image preview: single-tap chrome toggle, anchored pinch zoom with bounds, double-tap at 150% of 1:1, and a bottom-left original/preview switch with automatic fallback.
+- Startup auto-connects the active server in address order while keeping the server page visible, without overriding notification deep links or the user's tab choice.
+- Camera shortcut in the browser toolbar and empty folder state; photos upload to the folder where the shutter was pressed.
+- Full-screen delete confirmation with every selected entry, a numeric-code placeholder, autofocus, countdown, refresh-after-expiry and disabled dismissal while the request runs.
+- Server-side text probe with legacy encoding detection (UTF-16 without BOM, GBK/GB18030, Big5, Shift_JIS, EUC-KR, Windows-125x, ISO-8859-x); unknown files can open as text with lossy warnings.
+- Read-only code preview with line numbers, no soft wrap, horizontal scrolling, copy without gutter, and a 256 KB truncation notice.
+- Full-screen text editor with line-number gutter, 16sp/24sp body text, Markdown edit/preview toggle, encoding/BOM/line-ending preservation, If-Match conflicts, reload/overwrite choices, UTF-8 save-as, and read-only reasons.
+- On-demand remote directory sizes with a concurrency limit, timeout, cache and `≥` marker for partial results.
+- Unified relative time across file cards, details, search, sync pages and token validity, with unit tests.
+- Global audio player backed by MediaSessionService: queue from the current folder, previous/next, seek, background and notification controls, collapsed/expanded layouts, and automatic stop on logout.
+- Audio track discovery and transcoding fallback, with a track picker and clear ffmpeg/transcode errors.
+- Long filenames keep their real suffix (`tar.gz`, `7z`, `3gp`) without misreading `.gitignore`, `Dockerfile`, `v1.2.3` or `file.2026`.
+- PDF pages render at the available width and density, with a pixel cap and graceful failure.
+- Asynchronous job polling for copy/move/ZIP/unzip with progress, cancel, completion refresh and server error messages.
+- Storage quota card with computing/stale/error states and a 90% warning colour.
+- Server version display and search index status with start-index action, progress and partial-result warning.
+- Share editing: read-only, pause/resume, expiry, set/clear password; secrets stay masked.
+- Thumbnail status and retry from the file menu and details dialog.
+- Image details now include dimensions, format and localized EXIF keys with readable orientation values.
+- Built-in file names (`Dockerfile`, `Makefile`, `LICENSE`, `.gitignore`, …) are recognized as code/text.
+
+### Fixed
+
+- Tapping an image in search results crashed with `IndexOutOfBoundsException` when the preview pager shrank to one page; search previews are now pinned to the selected image.
+- Uploads now refresh the current directory after completion, debounced for batches, without refreshing unrelated folders.
+- Content URIs keep `DATE_MODIFIED`, `DATE_TAKEN` or document modification time when uploading; unknown-size copies preserve the original mtime.
+- Drag-reordering server addresses animates neighbouring rows using measured heights and snaps before committing the new order.
+- Downloads use `Pictures/FileHub`, `Movies/FileHub` and `Downloads/FileHub` consistently, including public shares.
+
 ## v0.1.0 - 2026-11-22
 
 ### Added

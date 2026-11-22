@@ -57,8 +57,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import filehub.android.R
 import filehub.android.data.SessionState
 import filehub.android.data.sync.FolderSyncConfigEntity
-import java.text.DateFormat
-import java.util.Date
 
 @Composable
 fun FolderSyncScreen(
@@ -451,7 +449,7 @@ private fun FolderStatusCard(
             }
             Text(
                 text = stringResource(R.string.folder_sync_last_run) + ": " +
-                    (config.lastRunAt?.let { formatFolderTime(it) } ?: "—"),
+                    (config.lastRunAt?.let { relativeTimeText(it) } ?: "—"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -518,6 +516,3 @@ private fun folderScheduleLabel(value: String): String = when (value) {
     "weekly" -> stringResource(R.string.photo_sync_schedule_weekly)
     else -> stringResource(R.string.photo_sync_schedule_daily)
 }
-
-private fun formatFolderTime(epochSeconds: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(epochSeconds * 1000))

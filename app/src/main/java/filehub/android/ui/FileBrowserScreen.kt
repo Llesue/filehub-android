@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -97,6 +96,8 @@ fun FileBrowserScreen(
     viewModel: FilesViewModel,
     roots: List<FileRoot>,
     onSearch: (Long?) -> Unit,
+    onEditText: (FileEntry) -> Unit,
+    onPauseAudio: () -> Unit,
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -112,8 +113,15 @@ fun FileBrowserScreen(
     var imageMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    var cameraFile by remember { mutableStateOf<File?>(null) }
+    var cameraTargetPath by remember { mutableStateOf<String?>(null) }
+    var cameraError by remember { mutableStateOf<String?>(null) }
+    val cameraUnavailable = stringResource(R.string.camera_unavailable)
 
     val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    val storagePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
 
@@ -123,6 +131,12 @@ fun FileBrowserScreen(
             PackageManager.PERMISSION_GRANTED
         ) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (Build.VERSION.SDK_INT <= 28 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
     val filePicker = rememberLauncherForActivityResult(
@@ -146,15 +160,30 @@ fun FileBrowserScreen(
     ) { ok ->
         if (ok) {
             requestNotificationPermission()
-            cameraUri?.let { viewModel.enqueueUploads(listOf(it)) }
+            val takenAt = cameraFile?.lastModified()?.takeIf { it > 0 }?.div(1000)
+            cameraUri?.let {
+                viewModel.enqueueUploads(
+                    listOf(it),
+                    directory = cameraTargetPath,
+                    mtime = takenAt,
+                )
+            }
+        } else {
+            cameraFile?.delete()
         }
+        cameraFile = null
+        cameraUri = null
+        cameraTargetPath = null
     }
 
     fun takePhoto() {
         val file = File(context.cacheDir, "camera-${System.currentTimeMillis()}.jpg")
         val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.files", file)
+        cameraFile = file
         cameraUri = uri
-        cameraLauncher.launch(uri)
+        cameraTargetPath = state.path
+        runCatching { cameraLauncher.launch(uri) }
+            .onFailure { cameraError = cameraUnavailable }
     }
 
     BackHandler(
@@ -211,6 +240,14 @@ fun FileBrowserScreen(
             IconButton(onClick = { onSearch(state.root?.id) }) {
                 Icon(Icons.Filled.Search, contentDescription = null)
             }
+            if (!state.readOnly && !state.selectionMode) {
+                IconButton(onClick = ::takePhoto) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_camera),
+                        contentDescription = stringResource(R.string.transfer_camera_action),
+                    )
+                }
+            }
             Box {
                 Surface(
                     modifier = Modifier.clickable(enabled = false) {},
@@ -243,6 +280,14 @@ fun FileBrowserScreen(
                     SortMenuItem(FileSort.Modified, state.sort, state.order) {
                         sortMenu = false
                         viewModel.setSort(FileSort.Modified)
+                    }
+                    if (state.root?.isRemote == true) {
+                        Text(
+                            text = stringResource(R.string.sort_remote_size_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
                     }
                 }
             }
@@ -308,6 +353,38 @@ fun FileBrowserScreen(
             onNavigate = viewModel::navigateTo,
         )
 
+        cameraError?.let { message ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                    )
+                    IconButton(onClick = { cameraError = null }) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            }
+        }
+
+        state.activeJobs.firstOrNull()?.let { job ->
+            JobProgressBar(job = job, onCancel = { viewModel.cancelJob(job.id) })
+        }
+
         state.operationError?.let { message ->
             Surface(
                 modifier = Modifier
@@ -357,9 +434,11 @@ fun FileBrowserScreen(
                 },
             )
             state.loading && state.entries.isEmpty() -> SkeletonList()
-            state.entries.isEmpty() -> EmptyFolder()
+            state.entries.isEmpty() -> EmptyFolder(
+                onCamera = if (!state.readOnly) ::takePhoto else null,
+            )
             else -> Column(modifier = Modifier.fillMaxSize()) {
-                state.error?.let { message ->
+                if (state.offline) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -372,15 +451,40 @@ fun FileBrowserScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = message,
+                                text = stringResource(R.string.file_offline_cached),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
                             )
                             TextButton(onClick = viewModel::refresh) {
                                 Text(stringResource(R.string.common_retry))
+                            }
+                        }
+                    }
+                } else {
+                    state.error?.let { message ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 12.dp, end = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = viewModel::refresh) {
+                                    Text(stringResource(R.string.common_retry))
+                                }
                             }
                         }
                     }
@@ -404,7 +508,19 @@ fun FileBrowserScreen(
                         thumbnailUrl = viewModel.thumbnailUrl(entry),
                         selected = entry.name in state.selected,
                         selectionMode = state.selectionMode,
-                        onEntry = { viewModel.enter(entry) },
+                        onEntry = {
+                            when (entry.kind) {
+                                FileKind.Audio -> {
+                                    requestNotificationPermission()
+                                    viewModel.requestAudioPlay(entry)
+                                }
+                                FileKind.Video -> {
+                                    onPauseAudio()
+                                    viewModel.enter(entry)
+                                }
+                                else -> viewModel.enter(entry)
+                            }
+                        },
                         onToggle = { viewModel.toggleSelection(entry) },
                         onDetails = { viewModel.showDetails(entry) },
                         onRename = { renameEntry = entry },
@@ -423,6 +539,11 @@ fun FileBrowserScreen(
                             transferMove = false
                         },
                         onExtract = { viewModel.unzip(entry) },
+                        onOpenAsText = { viewModel.openAsText(entry) },
+                        onRetryThumbnail = { viewModel.retryThumbnail(entry) },
+                        remote = state.root?.isRemote == true,
+                        dirSizeState = viewModel.dirSizeState(entry),
+                        onRequestDirSize = { viewModel.requestDirSize(entry) },
                     )
                 }
                 state.nextCursor?.let { cursor ->
@@ -533,12 +654,50 @@ fun FileBrowserScreen(
     state.shareCreated?.let { created ->
         ShareLinkDialog(link = created.url, onDismiss = viewModel::dismissShare)
     }
+    state.audioPicker?.let { picker ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissAudioPicker,
+            title = { Text(stringResource(R.string.audio_track_title)) },
+            text = {
+                Column {
+                    picker.info.tracks.forEach { track ->
+                        TextButton(
+                            onClick = { viewModel.chooseAudioTrack(track.index) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    R.string.audio_track_label,
+                                    track.index + 1,
+                                    track.codec.ifBlank { "?" },
+                                    track.channels,
+                                    track.language ?: "—",
+                                ),
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (track.supported) {
+                                Text(stringResource(R.string.audio_track_native))
+                            } else {
+                                Text(stringResource(R.string.audio_track_transcode))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissAudioPicker) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
+    }
     state.deletePreview?.let { preview ->
         DeleteConfirmDialog(
             preview = preview,
             loading = state.operationLoading,
             error = state.operationError,
             onDismiss = viewModel::dismissDeletePreview,
+            onRefresh = viewModel::refreshDeletePreview,
             onConfirm = viewModel::confirmDelete,
         )
     }
@@ -546,6 +705,7 @@ fun FileBrowserScreen(
         PreviewDialog(
             entry = entry,
             imageEntries = state.previewImages,
+            session = state.previewSession,
             imageLoader = imageLoader,
             imageUrlFor = viewModel::previewImageUrl,
             thumbnailUrlFor = viewModel::thumbnailUrl,
@@ -560,6 +720,17 @@ fun FileBrowserScreen(
             onLongPress = {
                 imageMenu = true
                 viewModel.loadProperties(entry)
+            },
+            onEdit = if (
+                state.textPreview?.writable == true &&
+                (entry.kind == FileKind.Text || entry.kind == FileKind.Code || state.previewAsText)
+            ) {
+                {
+                    viewModel.closePreview()
+                    onEditText(entry)
+                }
+            } else {
+                null
             },
             onClose = viewModel::closePreview,
         )
@@ -585,7 +756,20 @@ fun FileBrowserScreen(
         }
     }
     state.selectedEntry?.let { entry ->
-        FileDetailsDialog(entry = entry, path = state.path, onDismiss = viewModel::dismissSelected)
+        FileDetailsDialog(
+            entry = entry,
+            path = state.path,
+            remote = state.root?.isRemote == true,
+            dirSizeState = viewModel.dirSizeState(entry),
+            onRetryDirSize = { viewModel.retryDirSize(entry) },
+            thumbStatus = state.thumbStatus,
+            onRetryThumb = { viewModel.retryThumbnail(entry) },
+            properties = state.properties,
+            propertiesLoading = state.propertiesLoading,
+            propertiesError = state.propertiesError,
+            onRetryProperties = { viewModel.loadProperties(entry) },
+            onDismiss = viewModel::dismissSelected,
+        )
     }
 }
 
@@ -749,20 +933,31 @@ private fun FileCard(
     onMove: () -> Unit,
     onCopy: () -> Unit,
     onExtract: () -> Unit,
+    onOpenAsText: () -> Unit,
+    onRetryThumbnail: () -> Unit,
+    remote: Boolean,
+    dirSizeState: DirSizeState?,
+    onRequestDirSize: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    var thumbFailed by remember(thumbnailUrl) { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    val size = Formatter.formatShortFileSize(context, entry.size)
-    val time = DateUtils.getRelativeTimeSpanString(
-        entry.modified * 1000,
-        System.currentTimeMillis(),
-        DateUtils.MINUTE_IN_MILLIS,
-        DateUtils.FORMAT_ABBREV_RELATIVE,
-    ).toString()
+    val remoteDir = remote && entry.isDir
+    val size = if (remoteDir) {
+        dirSizeLabel(dirSizeState)
+    } else {
+        Formatter.formatShortFileSize(context, entry.size)
+    }
+    val time = relativeTimeText(entry.modified)
     val meta = if (entry.isDir) {
-        if (entry.size > 0) "$size · $time" else time
+        if (remoteDir) "$size · $time"
+        else if (entry.size > 0) "$size · $time"
+        else time
     } else {
         "$size · $time"
+    }
+    LaunchedEffect(entry.name, entry.modified, remoteDir) {
+        if (remoteDir && entry.size <= 0 && dirSizeState == null) onRequestDirSize()
     }
 
     Row(
@@ -801,6 +996,7 @@ private fun FileCard(
                         imageLoader = imageLoader,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
+                        onError = { thumbFailed = true },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -823,12 +1019,10 @@ private fun FileCard(
             }
             Spacer(Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = entry.name,
+                FileNameText(
+                    name = entry.name,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = meta,
@@ -889,6 +1083,24 @@ private fun FileCard(
                             },
                         )
                     }
+                    if (thumbFailed) {
+                        CompactDropdownMenuItem(
+                            text = { Text(stringResource(R.string.thumb_retry)) },
+                            onClick = {
+                                menuOpen = false
+                                onRetryThumbnail()
+                            },
+                        )
+                    }
+                    if (entry.kind == FileKind.File) {
+                        CompactDropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_open_as_text)) },
+                            onClick = {
+                                menuOpen = false
+                                onOpenAsText()
+                            },
+                        )
+                    }
                     CompactDropdownMenuItem(
                         text = { Text(stringResource(R.string.action_rename)) },
                         onClick = {
@@ -914,22 +1126,52 @@ private fun FileCard(
 }
 
 @Composable
-private fun FileDetailsDialog(entry: FileEntry, path: String, onDismiss: () -> Unit) {
+private fun FileDetailsDialog(
+    entry: FileEntry,
+    path: String,
+    remote: Boolean,
+    dirSizeState: DirSizeState?,
+    onRetryDirSize: () -> Unit,
+    thumbStatus: filehub.android.data.api.ThumbStatusDto?,
+    onRetryThumb: () -> Unit,
+    properties: filehub.android.core.model.FileProperties?,
+    propertiesLoading: Boolean,
+    propertiesError: String?,
+    onRetryProperties: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val size = Formatter.formatShortFileSize(context, entry.size)
-    val modified = DateUtils.getRelativeTimeSpanString(
-        entry.modified * 1000,
-        System.currentTimeMillis(),
-        DateUtils.MINUTE_IN_MILLIS,
-        DateUtils.FORMAT_ABBREV_RELATIVE,
-    ).toString()
+    val size = if (remote && entry.isDir) {
+        dirSizeLabel(dirSizeState)
+    } else {
+        Formatter.formatShortFileSize(context, entry.size)
+    }
+    val modified = relativeTimeText(entry.modified)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(entry.name) },
+        title = { FileNameText(entry.name) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 DetailRow(stringResource(R.string.file_type), entry.kind.name)
                 DetailRow(stringResource(R.string.file_size), size)
+                if (remote && entry.isDir && dirSizeState is DirSizeState.Failed) {
+                    TextButton(onClick = onRetryDirSize) {
+                        Text(stringResource(R.string.common_retry))
+                    }
+                }
+                if (thumbStatus?.state == "failed") {
+                    DetailRow(
+                        stringResource(R.string.thumb_status),
+                        thumbStatus.message ?: thumbStatus.reason ?: "—",
+                    )
+                    TextButton(onClick = onRetryThumb) {
+                        Text(stringResource(R.string.thumb_retry))
+                    }
+                } else if (thumbStatus?.state == "missing" && entry.hasPreview) {
+                    TextButton(onClick = onRetryThumb) {
+                        Text(stringResource(R.string.thumb_retry))
+                    }
+                }
                 DetailRow(stringResource(R.string.file_modified), modified)
                 DetailRow(
                     stringResource(R.string.file_path),
@@ -937,6 +1179,14 @@ private fun FileDetailsDialog(entry: FileEntry, path: String, onDismiss: () -> U
                 )
                 if (entry.isSymlink) {
                     DetailRow(stringResource(R.string.file_symlink), entry.symlinkState ?: "—")
+                }
+                if (entry.kind == FileKind.Image) {
+                    ImagePropertiesSection(
+                        properties = properties,
+                        loading = propertiesLoading,
+                        error = propertiesError,
+                        onRetry = onRetryProperties,
+                    )
                 }
             }
         },
@@ -946,6 +1196,80 @@ private fun FileDetailsDialog(entry: FileEntry, path: String, onDismiss: () -> U
             }
         },
     )
+}
+
+@Composable
+private fun JobProgressBar(job: ActiveJob, onCancel: () -> Unit) {
+    val status = when (job.status) {
+        "queued" -> stringResource(R.string.job_queued)
+        "running" -> stringResource(R.string.job_running)
+        "completed" -> stringResource(R.string.job_completed)
+        "failed" -> stringResource(R.string.job_failed)
+        "cancelled" -> stringResource(R.string.job_cancelled)
+        else -> job.status
+    }
+    val fraction = when {
+        job.total > 0 -> (job.progress.toFloat() / job.total).coerceIn(0f, 1f)
+        job.bytesTotal > 0 -> (job.bytesDone.toFloat() / job.bytesTotal).coerceIn(0f, 1f)
+        else -> null
+    }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
+            ) {
+                Text(
+                    text = "${job.label} · $status",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (fraction == null) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    )
+                }
+            }
+            IconButton(onClick = onCancel) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.job_cancel),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun dirSizeLabel(state: DirSizeState?): String {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return when (state) {
+        null, DirSizeState.Failed -> "—"
+        DirSizeState.Loading -> stringResource(R.string.file_dir_size_computing)
+        is DirSizeState.Ready -> {
+            val prefix = if (state.partial) "≥ " else ""
+            prefix + Formatter.formatShortFileSize(context, state.size)
+        }
+    }
 }
 
 @Composable
@@ -988,7 +1312,7 @@ private fun MessageState(title: String, action: (@Composable () -> Unit)?) {
 }
 
 @Composable
-private fun EmptyFolder() {
+private fun EmptyFolder(onCamera: (() -> Unit)? = null) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1013,6 +1337,18 @@ private fun EmptyFolder() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (onCamera != null) {
+            Spacer(Modifier.height(12.dp))
+            TextButton(onClick = onCamera) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_camera),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(stringResource(R.string.transfer_camera_action))
+            }
+        }
     }
 }
 

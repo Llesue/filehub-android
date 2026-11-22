@@ -255,6 +255,111 @@
     <string name="server_save">Save</string>
     <string name="server_address">Address</string>
     <string name="server_addresses_hint">Tried from top to bottom until one responds; put the LAN address first</string>
+    <string name="preview_show_original">View original</string>
+    <string name="preview_show_preview">View preview</string>
+    <string name="preview_original_failed">Could not load the original; showing the preview.</string>
+    <string name="error_remote_offline">The remote server is offline. Try again later.</string>
+    <string name="file_offline_cached">Offline — showing cached contents.</string>
+    <string name="browse_root_online">Online</string>
+    <string name="browse_root_offline">Offline</string>
+    <string name="browse_root_unknown">Status unknown</string>
+    <string name="sync_remote_auth">Remote authorization expired. Reconnect the mount.</string>
+    <string name="sync_remote_offline">Remote server is offline. Sync will retry later.</string>
+    <string name="action_open_as_text">Open as text</string>
+    <string name="text_too_large">File is too large to open.</string>
+    <string name="text_not_text">This is not a text file.</string>
+    <string name="text_lossy_hint">The encoding may be wrong; some characters were replaced.</string>
+    <string name="text_encoding_unsupported">This encoding is not supported.</string>
+    <string name="text_editor_disabled">Text editing is disabled on this server.</string>
+    <string name="camera_unavailable">No camera app is available.</string>
+    <string name="server_address_move_up">Move up</string>
+    <string name="server_address_move_down">Move down</string>
+    <string name="file_dir_size_computing">Calculating…</string>
+    <string name="code_preview_truncated">File is large; showing the first part only.</string>
+    <string name="editor_save">Save</string>
+    <string name="editor_preview">Preview</string>
+    <string name="editor_edit">Edit</string>
+    <string name="editor_encoding">Encoding</string>
+    <string name="editor_encoding_auto">Auto detect</string>
+    <string name="editor_save_utf8">Save as UTF-8</string>
+    <string name="editor_wrap">Wrap lines</string>
+    <string name="editor_no_wrap">No wrap</string>
+    <string name="editor_chars">%1$d chars</string>
+    <string name="editor_read_only">Read-only: %1$s</string>
+    <string name="editor_read_only_short">read-only</string>
+    <string name="editor_discard_title">Discard changes?</string>
+    <string name="editor_discard_body">Your changes have not been saved.</string>
+    <string name="editor_discard">Discard</string>
+    <string name="editor_conflict">The server file changed</string>
+    <string name="editor_conflict_body">Reload the latest version or overwrite it with your changes.</string>
+    <string name="editor_conflict_reload">Reload</string>
+    <string name="editor_conflict_force">Overwrite</string>
+    <string name="editor_encoding_unrepresentable">The current encoding cannot represent these characters.</string>
+    <string name="common_close">Close</string>
+    <string name="job_queued">Queued</string>
+    <string name="job_running">Running</string>
+    <string name="job_completed">Completed</string>
+    <string name="job_failed">Failed</string>
+    <string name="job_cancelled">Cancelled</string>
+    <string name="job_cancel">Cancel task</string>
+    <string name="usage_title">Storage quota</string>
+    <string name="usage_unlimited">Unlimited</string>
+    <string name="usage_computing">Calculating…</string>
+    <string name="usage_entries">%1$d files</string>
+    <string name="usage_entries_limit">%1$d / %2$d files</string>
+    <string name="usage_refreshing">Refreshing…</string>
+    <string name="search_index_missing">This folder has not been indexed yet.</string>
+    <string name="search_index_start">Start indexing</string>
+    <string name="search_index_running">Indexing…</string>
+    <string name="search_index_partial">Results may be incomplete.</string>
+    <string name="server_version">Server version</string>
+    <string name="server_version_update">Version %1$s is available.</string>
+    <string name="share_edit">Edit share</string>
+    <string name="share_edit_paused">Pause sharing</string>
+    <string name="share_edit_expiry">Expiry</string>
+    <string name="share_edit_expiry_keep">Keep</string>
+    <string name="share_edit_expiry_never">Never</string>
+    <string name="share_edit_password_set">Password: set</string>
+    <string name="share_edit_password_unset">Password: not set</string>
+    <string name="share_edit_password_new">New password (leave blank to keep)</string>
+    <string name="share_edit_clear_password">Remove password</string>
+    <string name="audio_play">Play</string>
+    <string name="audio_pause">Pause</string>
+    <string name="audio_next">Next</string>
+    <string name="audio_previous">Previous</string>
+    <string name="audio_close">Close player</string>
+    <string name="audio_expand">Expand player</string>
+    <string name="audio_collapse">Collapse player</string>
+    <string name="audio_track_title">Choose an audio track</string>
+    <string name="audio_track_label">Track %1$d · %2$s · %3$d ch · %4$s</string>
+    <string name="audio_track_native">Direct</string>
+    <string name="audio_track_transcode">Transcode</string>
+    <string name="audio_ffmpeg_missing">This audio needs transcoding, but ffmpeg is not available on the server.</string>
+    <string name="audio_transcode_failed">Audio transcoding failed.</string>
+    <string name="thumb_status">Thumbnail</string>
+    <string name="thumb_retry">Regenerate thumbnail</string>
+    <string name="image_format">Format</string>
+    <string name="exif_make">Camera make</string>
+    <string name="exif_model">Camera model</string>
+    <string name="exif_lens">Lens</string>
+    <string name="exif_taken_at">Taken at</string>
+    <string name="exif_exposure">Exposure</string>
+    <string name="exif_aperture">Aperture</string>
+    <string name="exif_focal_length">Focal length</string>
+    <string name="exif_orientation">Orientation</string>
+    <string name="exif_orientation_normal">Normal</string>
+    <string name="exif_orientation_flip_h">Flipped horizontally</string>
+    <string name="exif_orientation_180">Rotated 180°</string>
+    <string name="exif_orientation_flip_v">Flipped vertically</string>
+    <string name="exif_orientation_90_flip">Rotated 90° and flipped</string>
+    <string name="exif_orientation_90">Rotated 90°</string>
+    <string name="exif_orientation_270_flip">Rotated 270° and flipped</string>
+    <string name="exif_orientation_270">Rotated 270°</string>
+    <string name="delete_code_expires_in">Code expires in %1$d:%2$02d</string>
+    <string name="delete_code_expired">The code has expired.</string>
+    <string name="delete_code_refresh">Get a new code</string>
+    <string name="text_preview_truncated">File is large; showing the first part only.</string>
+    <string name="sort_remote_size_hint">Remote folder sizes may be incomplete.</string>
     <string name="preview_rotate">Rotate</string>
     <string name="error_server_setup_required">Server is not initialized. Complete setup in a browser first.</string>
     <string name="error_unauthorized">Device token expired. Sign in again.</string>
@@ -300,6 +405,7 @@
         <string name="folder_sync_conflicts_count">%1$d conflicts</string>
     <string name="folder_picker_load_more">Load more</string>
     <string name="sync_root_missing">The configured target location no longer exists. Re-select it in sync settings.</string>
+    <string name="delete_code_prompt">Enter the confirmation code to delete.</string>
     <string name="delete_code_hint">Enter this 4-digit code below. It is valid for 5 minutes.</string>
     <string name="my_expiry_value">Expires %1$s</string>
     <string name="my_expiry_days">%1$d days left</string>
@@ -309,5 +415,57 @@
     <string name="sync_queued_hint">Queued. It will start when the network and charging conditions are met.</string>
     <string name="folder_picker_new">New folder</string>
     <string name="sync_root_changed_hint">The target path stays as typed; after switching the storage location it will be created under the new location.</string>
+    <string name="time_just_now">Just now</string>
+    <string name="time_soon">Soon</string>
+    <string name="time_yesterday">Yesterday</string>
+    <string name="time_tomorrow">Tomorrow</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">%d minute ago</item>
+        <item quantity="other">%d minutes ago</item>
+    </plurals>
+    <plurals name="time_hours_ago">
+        <item quantity="one">%d hour ago</item>
+        <item quantity="other">%d hours ago</item>
+    </plurals>
+    <plurals name="time_days_ago">
+        <item quantity="one">%d day ago</item>
+        <item quantity="other">%d days ago</item>
+    </plurals>
+    <plurals name="time_weeks_ago">
+        <item quantity="one">%d week ago</item>
+        <item quantity="other">%d weeks ago</item>
+    </plurals>
+    <plurals name="time_months_ago">
+        <item quantity="one">%d month ago</item>
+        <item quantity="other">%d months ago</item>
+    </plurals>
+    <plurals name="time_years_ago">
+        <item quantity="one">%d year ago</item>
+        <item quantity="other">%d years ago</item>
+    </plurals>
+    <plurals name="time_in_minutes">
+        <item quantity="one">In %d minute</item>
+        <item quantity="other">In %d minutes</item>
+    </plurals>
+    <plurals name="time_in_hours">
+        <item quantity="one">In %d hour</item>
+        <item quantity="other">In %d hours</item>
+    </plurals>
+    <plurals name="time_in_days">
+        <item quantity="one">In %d day</item>
+        <item quantity="other">In %d days</item>
+    </plurals>
+    <plurals name="time_in_weeks">
+        <item quantity="one">In %d week</item>
+        <item quantity="other">In %d weeks</item>
+    </plurals>
+    <plurals name="time_in_months">
+        <item quantity="one">In %d month</item>
+        <item quantity="other">In %d months</item>
+    </plurals>
+    <plurals name="time_in_years">
+        <item quantity="one">In %d year</item>
+        <item quantity="other">In %d years</item>
+    </plurals>
 </resources>
 

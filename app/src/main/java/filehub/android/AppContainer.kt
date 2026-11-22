@@ -11,6 +11,7 @@ import filehub.android.data.local.TokenVault
 import filehub.android.data.media.MediaPlayerFactory
 import filehub.android.data.media.PreviewDownloader
 import filehub.android.data.media.ThumbnailLoaderFactory
+import filehub.android.data.playback.AudioPlayerController
 import filehub.android.data.transfer.TransferRepository
 import filehub.android.data.transfer.TransferStore
 import androidx.room.Room
@@ -33,6 +34,7 @@ class AppContainer(context: Context) {
     val previewDownloader: PreviewDownloader = PreviewDownloader(appContext.cacheDir)
     val transferStore: TransferStore = TransferStore(appContext)
     val transferRepository: TransferRepository = TransferRepository(appContext, transferStore)
+    val audioPlayerController: AudioPlayerController = AudioPlayerController(appContext, sessionRepository)
     val syncDatabase: SyncDatabase = Room.databaseBuilder(appContext, SyncDatabase::class.java, "filehub-sync.db")
         .addMigrations(SyncDatabase.MIGRATION_3_4, SyncDatabase.MIGRATION_4_5)
         .fallbackToDestructiveMigration()

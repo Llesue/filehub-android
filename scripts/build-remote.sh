@@ -24,7 +24,7 @@ if [[ -z "$HOST" ]]; then
   echo "set FILEHUB_ANDROID_BUILD_HOST or create .build-host with the SSH alias" >&2
   exit 2
 fi
-REMOTE_DIR="${FILEHUB_ANDROID_BUILD_DIR:-~/build/filehub-android}"
+REMOTE_DIR="${FILEHUB_ANDROID_BUILD_DIR:-build/filehub-android}"
 SDK_ROOT="${ANDROID_SDK_ROOT:-\$HOME/android-sdk}"
 GRADLE_VERSION="${GRADLE_VERSION:-9.8.2}"
 SSH_CMD=(ssh -o BatchMode=yes)

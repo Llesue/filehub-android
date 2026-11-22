@@ -64,9 +64,8 @@ class SessionRepository(
                 active = active,
             )
         }
-        if (active != null) {
-            refreshRoots(active)
-        }
+        // Root probing is owned by connect(), so a cold start can show the
+        // per-address connection progress without probing twice.
     }
 
     suspend fun login(addresses: List<String>, username: String, password: String): Result<ServerProfile> =
@@ -401,6 +400,8 @@ fun Throwable.toUserMessage(context: Context): String = when (this) {
         "NETWORK_ERROR" -> context.getString(R.string.login_error_network)
         "INVALID_URL" -> context.getString(R.string.error_invalid_url)
         "INVALID_RESPONSE" -> context.getString(R.string.error_invalid_response)
+        "REMOTE_OFFLINE" -> context.getString(R.string.error_remote_offline)
+        "REMOTE_TOKEN_INVALID", "REMOTE_GRANT_REVOKED" -> context.getString(R.string.sync_remote_auth)
         "NOT_FOUND" -> context.getString(R.string.error_not_found)
         "FORBIDDEN" -> context.getString(R.string.error_forbidden)
         else -> message.ifBlank { context.getString(R.string.operation_error) }

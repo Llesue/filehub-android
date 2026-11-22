@@ -10,8 +10,12 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import filehub.android.FileHubApplication
 import filehub.android.R
 import filehub.android.data.ServerConnection
+import filehub.android.data.FilesRepository
+import filehub.android.data.toUserMessage
 import filehub.android.data.SessionRepository
 import filehub.android.data.SessionState
+import filehub.android.data.api.UsageDto
+import filehub.android.data.api.VersionDto
 import filehub.android.data.local.SettingsStore
 import filehub.android.data.media.ThumbnailLoaderFactory
 import filehub.android.data.sync.FolderSyncRepository
@@ -26,6 +30,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+data class UsageUiState(
+    val loading: Boolean = false,
+    val usage: UsageDto? = null,
+    val error: String? = null,
+)
+
 data class LoginUiState(
     val loading: Boolean = false,
     val error: String? = null,
@@ -35,6 +45,7 @@ data class LoginUiState(
 class AppViewModel(
     private val application: Application,
     private val repository: SessionRepository,
+    private val filesRepository: FilesRepository,
     private val settingsStore: SettingsStore,
     private val thumbnailLoaderFactory: ThumbnailLoaderFactory,
     private val photoSyncRepository: PhotoSyncRepository,
@@ -49,6 +60,12 @@ class AppViewModel(
         initialValue = "system",
     )
 
+    private val _usage = MutableStateFlow(UsageUiState())
+    val usage: StateFlow<UsageUiState> = _usage.asStateFlow()
+
+    private val _serverVersion = MutableStateFlow<VersionDto?>(null)
+    val serverVersion: StateFlow<VersionDto?> = _serverVersion.asStateFlow()
+
     private val _login = MutableStateFlow(LoginUiState())
     val login: StateFlow<LoginUiState> = _login.asStateFlow()
 
@@ -60,6 +77,10 @@ class AppViewModel(
     init {
         viewModelScope.launch {
             repository.load()
+            val active = session.value.active
+            if (active != null && NotificationNavigator.destination.value == null) {
+                connectProfile(active.id)
+            }
             catchUpSyncs()
         }
         viewModelScope.launch {
@@ -135,6 +156,38 @@ class AppViewModel(
         repository.clearConnection()
     }
 
+    fun loadUsage() {
+        val profile = session.value.active ?: return
+        if (_usage.value.loading) return
+        _usage.value = UsageUiState(loading = true)
+        viewModelScope.launch {
+            runCatching { filesRepository.usage(profile) }
+                .onSuccess { first ->
+                    val settled = if ((first.computing || first.usedBytes == null) && first.usedBytes == null) {
+                        kotlinx.coroutines.delay(1500)
+                        runCatching { filesRepository.usage(profile) }.getOrDefault(first)
+                    } else {
+                        first
+                    }
+                    _usage.value = UsageUiState(loading = false, usage = settled)
+                }
+                .onFailure { error ->
+                    _usage.value = UsageUiState(
+                        loading = false,
+                        error = error.toUserMessage(application),
+                    )
+                }
+        }
+    }
+
+    fun loadServerVersion() {
+        val profile = session.value.active ?: return
+        viewModelScope.launch {
+            runCatching { filesRepository.version(profile) }
+                .onSuccess { _serverVersion.value = it }
+        }
+    }
+
     fun refreshRoots() {
         viewModelScope.launch { repository.refreshRoots() }
     }
@@ -207,6 +260,7 @@ class AppViewModel(
                 AppViewModel(
                     app,
                     app.container.sessionRepository,
+                    app.container.filesRepository,
                     app.container.settingsStore,
                     app.container.thumbnailLoaderFactory,
                     app.container.photoSyncRepository,

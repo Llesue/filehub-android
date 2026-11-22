@@ -36,7 +36,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
@@ -111,7 +110,9 @@ fun FileHubApp(viewModel: AppViewModel) {
         factory = RemoteFolderPickerViewModel.factory(application),
     )
     val shareViewModel: ShareViewModel = viewModel(factory = ShareViewModel.factory(application))
-    var tab by rememberSaveable { mutableStateOf(MainTab.Servers) }
+    val audioController = remember { application.container.audioPlayerController }
+    val audioState by audioController.state.collectAsStateWithLifecycle()
+    var tab by remember { mutableStateOf(MainTab.Servers) }
     val session by viewModel.session.collectAsStateWithLifecycle()
     val connection by viewModel.connection.collectAsStateWithLifecycle()
     val notificationDestination by NotificationNavigator.destination.collectAsStateWithLifecycle()
@@ -146,12 +147,16 @@ fun FileHubApp(viewModel: AppViewModel) {
         navController.navigate(destination.route) { launchSingleTop = true }
     }
 
+    LaunchedEffect(session.active?.id) {
+        if (session.active == null) audioController.stop()
+    }
+
     LaunchedEffect(connection?.status, connection?.profileId) {
         val current = connection ?: return@LaunchedEffect
         if (current.status != ServerConnectionStatus.Success) return@LaunchedEffect
         delay(450)
         if (viewModel.connection.value?.profileId == current.profileId) {
-            tab = MainTab.Browse
+            if (tab == MainTab.Servers) tab = MainTab.Browse
             viewModel.clearConnection()
         }
     }
@@ -182,6 +187,16 @@ fun FileHubApp(viewModel: AppViewModel) {
                 snackbarHost = { SnackbarHost(snackbar) },
                 bottomBar = {
                     Column {
+                        AudioPlayerBar(
+                            state = audioState,
+                            onTogglePlay = audioController::togglePlayPause,
+                            onNext = audioController::next,
+                            onPrevious = audioController::previous,
+                            onSeek = audioController::seekTo,
+                            onExpand = { audioController.setExpanded(true) },
+                            onCollapse = { audioController.setExpanded(false) },
+                            onClose = audioController::stop,
+                        )
                         transfers.firstOrNull {
                             it.status == TransferStatus.QUEUED || it.status == TransferStatus.RUNNING
                         }?.let { active ->
@@ -259,6 +274,23 @@ fun FileHubApp(viewModel: AppViewModel) {
                             onAddServer = { navController.navigate("addServer") },
                             onRetry = viewModel::refreshRoots,
                             onSearch = { rootId -> navController.navigate("search/${rootId ?: -1}") },
+                            onPauseAudio = audioController::pause,
+                            onEditText = { entry ->
+                                val browser = filesViewModel.state.value
+                                val profile = browser.profile
+                                val root = browser.root
+                                if (profile != null && root != null) {
+                                    val path = if (browser.path.isEmpty()) {
+                                        entry.name
+                                    } else {
+                                        "${browser.path}/${entry.name}"
+                                    }
+                                    filesViewModel.closePreview()
+                                    navController.navigate(
+                                        "editor/${profile.id}/${root.id}/${Uri.encode(path)}",
+                                    )
+                                }
+                            },
                         )
                         MainTab.My -> MyScreen(
                             state = session,
@@ -270,6 +302,10 @@ fun FileHubApp(viewModel: AppViewModel) {
                             onPhotoSync = { navController.navigate("photoSync") },
                             onFolderSync = { navController.navigate("folderSync") },
                             onShares = { navController.navigate("shares") },
+                            usage = viewModel.usage.collectAsStateWithLifecycle().value,
+                            serverVersion = viewModel.serverVersion.collectAsStateWithLifecycle().value,
+                            onLoadUsage = viewModel::loadUsage,
+                            onLoadServerVersion = viewModel::loadServerVersion,
                             theme = theme,
                             onThemeChange = viewModel::setTheme,
                             language = language,
@@ -301,7 +337,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                         } else {
                             val parent = result.path.substringBeforeLast('/', "")
                             filesViewModel.open(active, root, parent)
-                            filesViewModel.showPreview(result.toEntry())
+                            filesViewModel.showPreview(result.toEntry(), pinImages = true)
                         }
                         tab = MainTab.Browse
                     }
@@ -309,6 +345,30 @@ fun FileHubApp(viewModel: AppViewModel) {
                     navController.popBackStack()
                 },
             )
+        }
+        composable("editor/{profileId}/{rootId}/{path}") { entry ->
+            val profileId = entry.arguments?.getString("profileId")
+            val rootId = entry.arguments?.getString("rootId")?.toLongOrNull()
+            val path = entry.arguments?.getString("path")?.let(Uri::decode)
+            if (profileId != null && rootId != null && path != null) {
+                val editorViewModel: TextEditorViewModel = viewModel(
+                    key = "editor-$profileId-$rootId-$path",
+                    factory = TextEditorViewModel.factory(
+                        LocalContext.current.applicationContext as android.app.Application,
+                        profileId,
+                        rootId,
+                        path,
+                        path.endsWith(".md", true) || path.endsWith(".markdown", true),
+                    ),
+                )
+                TextEditorScreen(
+                    viewModel = editorViewModel,
+                    onBack = {
+                        filesViewModel.refresh()
+                        navController.popBackStack()
+                    },
+                )
+            }
         }
         composable("shares") {
             SharesScreen(

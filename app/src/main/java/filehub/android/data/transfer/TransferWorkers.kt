@@ -379,10 +379,10 @@ class DownloadWorker(
                 FileKind.Video -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
                 else -> MediaStore.Downloads.EXTERNAL_CONTENT_URI
             }
-            val relativePath = if (visual) {
-                Environment.DIRECTORY_DCIM + "/FileHub"
-            } else {
-                Environment.DIRECTORY_DOWNLOADS + "/FileHub"
+            val relativePath = when (kind) {
+                FileKind.Image -> Environment.DIRECTORY_PICTURES + "/FileHub"
+                FileKind.Video -> Environment.DIRECTORY_MOVIES + "/FileHub"
+                else -> Environment.DIRECTORY_DOWNLOADS + "/FileHub"
             }
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, item.name)
@@ -402,12 +402,27 @@ class DownloadWorker(
             part.delete()
             uri.toString()
         } else {
-            val baseDir = if (visual) Environment.DIRECTORY_DCIM else Environment.DIRECTORY_DOWNLOADS
-            val dir = File(applicationContext.getExternalFilesDir(baseDir), "FileHub")
-                .apply { mkdirs() }
-            val target = File(dir, item.name)
-            part.inputStream().use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
+            val publicDir = when (kind) {
+                FileKind.Image -> Environment.DIRECTORY_PICTURES
+                FileKind.Video -> Environment.DIRECTORY_MOVIES
+                else -> Environment.DIRECTORY_DOWNLOADS
+            }
+            val target = runCatching {
+                val dir = File(Environment.getExternalStoragePublicDirectory(publicDir), "FileHub")
+                    .apply { mkdirs() }
+                File(dir, item.name).also { file ->
+                    part.inputStream().use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+            }.getOrElse {
+                val dir = File(applicationContext.getExternalFilesDir(publicDir), "FileHub")
+                    .apply { mkdirs() }
+                File(dir, item.name).also { file ->
+                    part.inputStream().use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
             }
             part.delete()
             Uri.fromFile(target).toString()

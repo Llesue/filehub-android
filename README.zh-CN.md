@@ -4,10 +4,10 @@
 
 [FileHub](https://github.com/Llesue/filehub) 的原生 Android 客户端。
 
-当前版本：**v0.1.0**，首个公开版本。下载：[GitHub Releases](https://github.com/Llesue/filehub-android/releases/latest)。
+当前版本：**v0.1.1 开发中**。最新已发布版本：[v0.1.0](https://github.com/Llesue/filehub-android/releases/tag/v0.1.0)。
 
 - Kotlin + Jetpack Compose（Material 3），`minSdk 26`、`compileSdk 37.1`、`targetSdk 36`
-- OkHttp + kotlinx.serialization、Room、WorkManager、Media3、Coil
+- OkHttp + kotlinx.serialization、Room、WorkManager、Media3（后台音频会话）、Coil
 - 构建在远程 Linux 主机执行，本机构建需自备 JDK 和 Android SDK
 
 ## 功能
@@ -64,9 +64,10 @@ Release 构建读取仓库根目录的 `keystore.properties`（已 gitignore）�
 ## 文档
 
 - [`PLAN.md`](PLAN.md) — 范围、架构、里程碑
-- [`AGENTS.md`](AGENTS.md) — 工程约束
 - [`docs/ui-spec.md`](docs/ui-spec.md) — UI 方案
 - [`docs/sync-spec.md`](docs/sync-spec.md) — 相册/目录同步设计
 - [`docs/app-icon.svg`](docs/app-icon.svg) — 图标源文件
-- [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md) — 发布说明
+- [`docs/api-notes.md`](docs/api-notes.md) — 实际使用的接口与字段说明
+- [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md) — 0.1.0 发布说明
+- [`docs/release-notes/v0.1.1.md`](docs/release-notes/v0.1.1.md) — 0.1.1 发布说明
 - [`CHANGELOG.md`](CHANGELOG.md)

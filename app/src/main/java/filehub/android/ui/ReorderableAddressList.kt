@@ -1,5 +1,7 @@
 package filehub.android.ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
@@ -16,23 +19,31 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import filehub.android.R
-import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 @Composable
 fun ReorderableAddressList(
@@ -43,18 +54,84 @@ fun ReorderableAddressList(
     onRemove: (Int) -> Unit,
     onMove: (Int, Int) -> Unit,
 ) {
-    val rowHeightPx = with(LocalDensity.current) { 72.dp.toPx() }
+    val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val rowHeights = remember { mutableStateListOf<Float>() }
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
-    var dragOffset by remember { mutableStateOf(0f) }
+    var targetIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var settling by remember { mutableStateOf(false) }
 
+    fun heightAt(index: Int): Float = rowHeights.getOrNull(index)
+        ?: with(density) { 72.dp.toPx() }
+
+    fun computeTarget(from: Int, offset: Float): Int {
+        var remaining = offset
+        var index = from
+        if (offset > 0f) {
+            while (index < addresses.lastIndex && remaining > heightAt(index + 1) / 2f) {
+                remaining -= heightAt(index + 1)
+                index += 1
+            }
+        } else {
+            while (index > 0 && -remaining > heightAt(index - 1) / 2f) {
+                remaining += heightAt(index - 1)
+                index -= 1
+            }
+        }
+        return index
+    }
+
+    fun offsetForTarget(from: Int, target: Int): Float {
+        var total = 0f
+        if (target > from) {
+            for (i in from + 1..target) total += heightAt(i)
+        } else if (target < from) {
+            for (i in target until from) total -= heightAt(i)
+        }
+        return total
+    }
+
+    val moveUpLabel = stringResource(R.string.server_address_move_up)
+    val moveDownLabel = stringResource(R.string.server_address_move_down)
     addresses.forEachIndexed { index, address ->
+        val dragging = draggingIndex == index
+        val from = draggingIndex
+        val target = targetIndex
+        val shift = when {
+            from == null || target == null || from == target -> 0f
+            index == from -> 0f
+            from < target && index in (from + 1)..target -> -heightAt(from)
+            from > target && index in target until from -> heightAt(from)
+            else -> 0f
+        }
+        val animatedShift by animateFloatAsState(
+            targetValue = shift,
+            animationSpec = tween(170),
+            label = "address-shift-$index",
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 72.dp)
-                .zIndex(if (draggingIndex == index) 1f else 0f)
+                .onGloballyPositioned { coordinates ->
+                    val height = coordinates.size.height.toFloat()
+                    while (rowHeights.size <= index) rowHeights += height
+                    rowHeights[index] = height
+                }
+                .zIndex(if (dragging) 2f else 0f)
                 .graphicsLayer {
-                    translationY = if (draggingIndex == index) dragOffset else 0f
+                    translationY = when {
+                        dragging -> dragOffset
+                        settling -> 0f
+                        else -> animatedShift
+                    }
+                    if (dragging) {
+                        scaleX = 1.02f
+                        scaleY = 1.02f
+                        shadowElevation = 8.dp.toPx()
+                    }
                 },
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -64,29 +141,76 @@ fun ReorderableAddressList(
                 modifier = Modifier
                     .size(48.dp)
                     .padding(12.dp)
-                    .pointerInput(index, addresses.size) {
+                    .semantics {
+                        customActions = buildList {
+                            if (index > 0) {
+                                add(
+                                    CustomAccessibilityAction(
+                                        label = moveUpLabel,
+                                    ) {
+                                        onMove(index, index - 1)
+                                        true
+                                    },
+                                )
+                            }
+                            if (index < addresses.lastIndex) {
+                                add(
+                                    CustomAccessibilityAction(
+                                        label = moveDownLabel,
+                                    ) {
+                                        onMove(index, index + 1)
+                                        true
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    .pointerInput(index, addresses.size, settling) {
                         detectDragGestures(
                             onDragStart = {
+                                if (settling) return@detectDragGestures
                                 draggingIndex = index
+                                targetIndex = index
                                 dragOffset = 0f
                             },
                             onDrag = { change, amount ->
+                                if (draggingIndex != index) return@detectDragGestures
                                 change.consume()
                                 dragOffset += amount.y
+                                val next = computeTarget(index, dragOffset)
+                                if (next != targetIndex) {
+                                    targetIndex = next
+                                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                }
                             },
                             onDragEnd = {
                                 val from = draggingIndex
-                                if (from != null) {
-                                    val delta = (dragOffset / rowHeightPx).roundToInt()
-                                    val to = (from + delta).coerceIn(0, addresses.lastIndex)
-                                    if (to != from) onMove(from, to)
+                                if (from == null) return@detectDragGestures
+                                val destination = targetIndex ?: from
+                                val finalOffset = offsetForTarget(from, destination)
+                                settling = true
+                                scope.launch {
+                                    val start = dragOffset
+                                    val startedAt = System.nanoTime()
+                                    while (true) {
+                                        val elapsed = (System.nanoTime() - startedAt) / 1_000_000f
+                                        val fraction = (elapsed / 170f).coerceIn(0f, 1f)
+                                        dragOffset = start + (finalOffset - start) * fraction
+                                        if (fraction >= 1f) break
+                                        kotlinx.coroutines.delay(16)
+                                    }
+                                    draggingIndex = null
+                                    targetIndex = null
+                                    dragOffset = 0f
+                                    settling = false
+                                    if (destination != from) onMove(from, destination)
                                 }
-                                draggingIndex = null
-                                dragOffset = 0f
                             },
                             onDragCancel = {
                                 draggingIndex = null
+                                targetIndex = null
                                 dragOffset = 0f
+                                settling = false
                             },
                         )
                     },

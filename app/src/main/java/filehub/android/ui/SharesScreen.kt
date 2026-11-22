@@ -8,6 +8,8 @@ import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +36,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -125,6 +129,7 @@ fun SharesScreen(
                             viewModel.copyLink(share)
                             linkDialog = null
                         },
+                        onEdit = { viewModel.beginEdit(share) },
                         onRotate = { viewModel.rotate(share) },
                         onRevoke = { viewModel.revoke(share) },
                         onOpen = {
@@ -189,6 +194,7 @@ fun SharesScreen(
 private fun ShareCard(
     share: ShareInfo,
     onCopy: () -> Unit,
+    onEdit: () -> Unit,
     onRotate: () -> Unit,
     onRevoke: () -> Unit,
     onOpen: () -> Unit,
@@ -217,12 +223,10 @@ private fun ShareCard(
                 }
                 Spacer(Modifier.size(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = name,
+                    FileNameText(
+                        name = name,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = statusText(share) + " · " + stringResource(
@@ -245,6 +249,13 @@ private fun ShareCard(
                         Icon(Icons.Filled.MoreVert, contentDescription = null)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        CompactDropdownMenuItem(
+                            text = { Text(stringResource(R.string.share_edit)) },
+                            onClick = {
+                                menuOpen = false
+                                onEdit()
+                            },
+                        )
                         CompactDropdownMenuItem(
                             text = { Text(stringResource(R.string.share_rotate)) },
                             onClick = {
@@ -372,6 +383,150 @@ fun ShareLinkDialog(link: String, onDismiss: () -> Unit) {
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.share_close))
+            }
+        },
+    )
+}
+
+@Composable
+private fun ShareEditDialog(
+    share: ShareInfo,
+    loading: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onSave: (
+        readOnly: Boolean,
+        revoked: Boolean,
+        expiresAt: Long?,
+        clearExpires: Boolean,
+        password: String?,
+        clearPassword: Boolean,
+    ) -> Unit,
+) {
+    var readOnly by remember(share.id) { mutableStateOf(share.readOnly) }
+    var revoked by remember(share.id) { mutableStateOf(share.revoked) }
+    var expiryChoice by remember(share.id) { mutableStateOf<Int?>(null) }
+    var password by remember(share.id) { mutableStateOf("") }
+    var clearPassword by remember(share.id) { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = { if (!loading) onDismiss() },
+        title = { Text(stringResource(R.string.share_edit)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.share_read_only),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(checked = readOnly, onCheckedChange = { readOnly = it })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.share_edit_paused),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(checked = revoked, onCheckedChange = { revoked = it })
+                }
+                Text(
+                    text = stringResource(R.string.share_edit_expiry),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOf<Int?>(null, 1, 7, 30, -1).forEach { choice ->
+                        val label = when (choice) {
+                            null -> stringResource(R.string.share_edit_expiry_keep)
+                            1 -> "1d"
+                            7 -> "7d"
+                            30 -> "30d"
+                            else -> stringResource(R.string.share_edit_expiry_never)
+                        }
+                        FilterChip(
+                            selected = expiryChoice == choice,
+                            onClick = { expiryChoice = choice },
+                            label = { Text(label) },
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(
+                            if (share.hasPassword) {
+                                R.string.share_edit_password_set
+                            } else {
+                                R.string.share_edit_password_unset
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    enabled = !clearPassword,
+                    label = { Text(stringResource(R.string.share_edit_password_new)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (share.hasPassword) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.share_edit_clear_password),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = clearPassword,
+                            onCheckedChange = {
+                                clearPassword = it
+                                if (it) password = ""
+                            },
+                        )
+                    }
+                }
+                if (error != null) {
+                    Text(
+                        text = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val expiresAt = when (val choice = expiryChoice) {
+                        null -> null
+                        -1 -> null
+                        else -> System.currentTimeMillis() / 1000 + choice * 86_400L
+                    }
+                    onSave(
+                        readOnly,
+                        revoked,
+                        expiresAt,
+                        expiryChoice == -1,
+                        password.takeIf { it.isNotBlank() },
+                        clearPassword,
+                    )
+                },
+                enabled = !loading,
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text(stringResource(R.string.editor_save))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !loading) {
+                Text(stringResource(R.string.common_cancel))
             }
         },
     )

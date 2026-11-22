@@ -25,6 +25,7 @@ data class FileRoot(
     val readOnly: Boolean,
     val kind: String?,
     val mountId: Long?,
+    val online: Boolean? = null,
 ) {
     val isRemote: Boolean get() = kind == "remote"
 }
@@ -173,10 +174,18 @@ data class PublicShareMeta(
     val collection: Boolean,
 )
 
+private val KNOWN_CODE_NAMES = setOf("dockerfile", "makefile", "cmakelists.txt", "rakefile")
+private val KNOWN_TEXT_NAMES = setOf(
+    "license", "licence", "readme", "changelog", ".gitignore", ".gitattributes", ".env",
+)
+
 internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKind {
     if (isDir) return FileKind.Folder
     val mime = mimeType.lowercase()
     val ext = name.substringAfterLast('.', "").lowercase()
+    val lowerName = name.lowercase()
+    if (lowerName in KNOWN_CODE_NAMES) return FileKind.Code
+    if (lowerName in KNOWN_TEXT_NAMES) return FileKind.Text
     return when {
         mime.startsWith("image/") -> FileKind.Image
         ext in setOf("jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "heic", "heif", "jxl") -> FileKind.Image

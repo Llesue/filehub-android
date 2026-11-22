@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import filehub.android.FileHubApplication
 import filehub.android.core.model.SearchResult
 import filehub.android.data.FilesRepository
+import filehub.android.data.api.IndexStatusDto
 import filehub.android.data.SessionRepository
 import filehub.android.data.toUserMessage
 import kotlinx.coroutines.Job
@@ -27,6 +28,9 @@ data class SearchState(
     val error: String? = null,
     val nextCursor: String? = null,
     val searched: Boolean = false,
+    val indexStatus: IndexStatusDto? = null,
+    val indexLoading: Boolean = false,
+    val indexError: String? = null,
 )
 
 class SearchViewModel(
@@ -94,6 +98,7 @@ class SearchViewModel(
                         error = null,
                     )
                 }
+                if (results.isEmpty()) checkIndex()
             }.onFailure { error ->
                 _state.update {
                     it.copy(loading = false, error = error.toUserMessage(application))
@@ -127,6 +132,61 @@ class SearchViewModel(
             }.onFailure { error ->
                 _state.update { it.copy(loading = false, error = error.toUserMessage(application)) }
             }
+        }
+    }
+
+    fun checkIndex() {
+        val profile = sessionRepository.state.value.active ?: return
+        val rootId = _state.value.scopeRootId
+            ?: sessionRepository.state.value.roots.firstOrNull()?.id
+            ?: return
+        _state.update { it.copy(indexLoading = true, indexError = null) }
+        viewModelScope.launch {
+            runCatching { filesRepository.indexStatus(profile, rootId, "") }
+                .onSuccess { status ->
+                    _state.update { it.copy(indexStatus = status, indexLoading = false) }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(indexLoading = false, indexError = error.toUserMessage(application))
+                    }
+                }
+        }
+    }
+
+    fun startIndex() {
+        val profile = sessionRepository.state.value.active ?: return
+        val rootId = _state.value.scopeRootId
+            ?: sessionRepository.state.value.roots.firstOrNull()?.id
+            ?: return
+        _state.update { it.copy(indexLoading = true, indexError = null) }
+        viewModelScope.launch {
+            runCatching { filesRepository.startIndex(profile, rootId, "", recursive = true) }
+                .onSuccess {
+                    repeat(60) {
+                        val status = runCatching {
+                            filesRepository.indexStatus(profile, rootId, "")
+                        }.getOrNull()
+                        if (status != null) {
+                            _state.update { state -> state.copy(indexStatus = status) }
+                            val running = status.job != null &&
+                                status.job.status != "completed" &&
+                                status.job.status != "failed" &&
+                                status.job.status != "cancelled"
+                            if (!running && status.status == "ready") {
+                                _state.update { state -> state.copy(indexLoading = false) }
+                                return@launch
+                            }
+                        }
+                        kotlinx.coroutines.delay(2000)
+                    }
+                    _state.update { it.copy(indexLoading = false) }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(indexLoading = false, indexError = error.toUserMessage(application))
+                    }
+                }
         }
     }
 

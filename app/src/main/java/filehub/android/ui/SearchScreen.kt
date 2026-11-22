@@ -1,6 +1,5 @@
 package filehub.android.ui
 
-import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -28,7 +27,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -190,7 +191,10 @@ fun SearchScreen(
             ) {
                 CircularProgressIndicator()
             }
-            state.results.isEmpty() -> CenterHint(stringResource(R.string.search_no_results))
+            state.results.isEmpty() -> SearchEmptyState(
+                state = state,
+                onStartIndex = viewModel::startIndex,
+            )
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -222,6 +226,75 @@ fun SearchScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchEmptyState(state: SearchState, onStartIndex: () -> Unit) {
+    val status = state.indexStatus
+    val job = status?.job
+    val running = job != null && job.status != "completed" &&
+        job.status != "failed" && job.status != "cancelled"
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        when {
+            state.indexError != null -> {
+                Text(
+                    text = state.indexError,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            state.indexLoading && status == null -> CircularProgressIndicator()
+            running -> {
+                Text(
+                    text = stringResource(R.string.search_index_running),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(10.dp))
+                val total = job?.total ?: 0
+                val progress = job?.progress ?: 0
+                if (total > 0) {
+                    LinearProgressIndicator(
+                        progress = { (progress.toFloat() / total).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+            status?.status == "missing" -> {
+                Text(
+                    text = stringResource(R.string.search_index_missing),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onStartIndex,
+                    enabled = !state.indexLoading,
+                ) {
+                    Text(stringResource(R.string.search_index_start))
+                }
+            }
+            status?.partial == true -> {
+                Text(
+                    text = stringResource(R.string.search_no_results),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.search_index_partial),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            else -> CenterHint(stringResource(R.string.search_no_results))
         }
     }
 }
@@ -274,12 +347,10 @@ private fun SearchResultCard(
             }
             Spacer(Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = result.name,
+                FileNameText(
+                    name = result.name,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = subtitle,
@@ -291,12 +362,7 @@ private fun SearchResultCard(
                 if (!result.isDir) {
                     Text(
                         text = Formatter.formatShortFileSize(context, result.size) + " · " +
-                            DateUtils.getRelativeTimeSpanString(
-                                result.modified * 1000,
-                                System.currentTimeMillis(),
-                                DateUtils.MINUTE_IN_MILLIS,
-                                DateUtils.FORMAT_ABBREV_RELATIVE,
-                            ),
+                            relativeTimeText(result.modified),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

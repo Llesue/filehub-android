@@ -3,7 +3,10 @@ package filehub.android.data.transfer
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
+import androidx.documentfile.provider.DocumentFile
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -30,6 +33,7 @@ class TransferRepository(
         remoteDir: String,
         uri: Uri,
         mimeType: String? = null,
+        mtimeOverride: Long? = null,
     ): TransferItem? = runCatching {
         try {
             context.contentResolver.takePersistableUriPermission(
@@ -40,7 +44,7 @@ class TransferRepository(
             // Photo picker and file:// URIs do not support persistable grants;
             // the worker still has access for the current process lifetime.
         }
-        val meta = resolveMeta(uri, mimeType)
+        val meta = resolveMeta(uri, mimeType, mtimeOverride)
         val item = TransferItem(
             id = UUID.randomUUID().toString(),
             kind = TransferKind.UPLOAD,
@@ -130,10 +134,10 @@ class TransferRepository(
 
     private fun workName(id: String): String = "filehub-transfer-$id"
 
-    private fun resolveMeta(uri: Uri, fallbackMime: String?): Meta {
+    private fun resolveMeta(uri: Uri, fallbackMime: String?, mtimeOverride: Long?): Meta {
         var name = uri.lastPathSegment?.substringAfterLast('/') ?: "upload.bin"
         var size = -1L
-        var mtime = now()
+        var mtime = mtimeOverride ?: now()
         var mime = fallbackMime ?: context.contentResolver.getType(uri) ?: "application/octet-stream"
         if (uri.scheme == "content") {
             context.contentResolver.query(
@@ -149,6 +153,9 @@ class TransferRepository(
                     if (nameIndex >= 0) cursor.getString(nameIndex)?.let { name = it }
                     if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
                 }
+            }
+            if (mtimeOverride == null) {
+                mtime = queryContentMtime(uri) ?: now()
             }
         } else if (uri.scheme == "file") {
             uri.path?.let { File(it) }?.takeIf { it.isFile }?.let {
@@ -166,12 +173,35 @@ class TransferRepository(
                 target.outputStream().use { output -> input.copyTo(output) }
             }
             size = target.length()
-            mtime = target.lastModified() / 1000
+            if (mtimeOverride == null && uri.scheme != "content") {
+                mtime = target.lastModified() / 1000
+            }
             mime = fallbackMime ?: context.contentResolver.getType(uri) ?: "application/octet-stream"
             return Meta(name = name, size = size, mtime = mtime, mime = mime, localUri = Uri.fromFile(target).toString())
         }
         return Meta(name = name, size = size, mtime = mtime, mime = mime, localUri = uri.toString())
     }
+
+    private fun queryContentMtime(uri: Uri): Long? {
+        queryLong(uri, MediaStore.MediaColumns.DATE_MODIFIED)?.takeIf { it > 0 }?.let {
+            return it * 1000
+        }
+        queryLong(uri, MediaStore.MediaColumns.DATE_TAKEN)?.takeIf { it > 0 }?.let {
+            return it
+        }
+        queryLong(uri, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+            ?.takeIf { it > 0 }
+            ?.let { return it }
+        return runCatching {
+            DocumentFile.fromSingleUri(context, uri)?.lastModified()?.takeIf { it > 0 }
+        }.getOrNull()
+    }
+
+    private fun queryLong(uri: Uri, column: String): Long? = runCatching {
+        context.contentResolver.query(uri, arrayOf(column), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+        }
+    }.getOrNull()
 
     private fun openInput(uri: String): java.io.InputStream {
         val parsed = Uri.parse(uri)

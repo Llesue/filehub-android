@@ -18,29 +18,38 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import coil3.request.ImageRequest
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -50,6 +59,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -72,6 +82,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -90,14 +101,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -126,6 +140,7 @@ import androidx.media3.ui.PlayerView
 import filehub.android.R
 import filehub.android.core.model.FileEntry
 import filehub.android.core.model.FileKind
+import filehub.android.data.api.DeleteItemDto
 import filehub.android.data.api.DeletePreviewDto
 import filehub.android.data.api.TextFileDto
 
@@ -183,95 +198,208 @@ fun DeleteConfirmDialog(
     loading: Boolean,
     error: String?,
     onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
     onConfirm: (String?) -> Unit,
 ) {
     var code by remember(preview.token) { mutableStateOf("") }
     val context = LocalContext.current
     val totalBytes = preview.items.sumOf { it.size }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.delete_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = stringResource(
-                        R.string.delete_body,
-                        preview.items.size,
-                        Formatter.formatShortFileSize(context, totalBytes),
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                preview.items.take(4).forEach { item ->
-                    Text(
-                        text = "· ${item.relative}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var remainingSeconds by remember(preview.token) {
+        mutableLongStateOf(
+            (preview.expiresAt - System.currentTimeMillis() / 1000).coerceAtLeast(0),
+        )
+    }
+    LaunchedEffect(preview.token, preview.expiresAt) {
+        while (remainingSeconds > 0) {
+            delay(1000)
+            remainingSeconds = (preview.expiresAt - System.currentTimeMillis() / 1000)
+                .coerceAtLeast(0)
+        }
+    }
+    val expired = preview.expiresAt > 0 && remainingSeconds <= 0
+
+    if (preview.requiresCode) {
+        LaunchedEffect(preview.token) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+    }
+
+    Dialog(
+        onDismissRequest = { if (!loading) onDismiss() },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = !loading,
+            dismissOnClickOutside = !loading,
+        ),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.delete_title),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = stringResource(
+                                R.string.delete_body,
+                                preview.items.size,
+                                Formatter.formatShortFileSize(context, totalBytes),
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = onDismiss, enabled = !loading) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.common_cancel),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(preview.items, key = { it.relative }) { item ->
+                        DeleteItemRow(item = item)
+                    }
                 }
                 if (preview.requiresCode) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(10.dp),
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.delete_code),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = preview.confirmCode,
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 6.sp,
-                            )
-                            Text(
-                                text = stringResource(R.string.delete_code_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(R.string.delete_code_prompt),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (preview.expiresAt > 0) {
+                        Text(
+                            text = if (expired) {
+                                stringResource(R.string.delete_code_expired)
+                            } else {
+                                stringResource(
+                                    R.string.delete_code_expires_in,
+                                    remainingSeconds / 60,
+                                    remainingSeconds % 60,
+                                )
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (expired) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
                     }
+                    Spacer(Modifier.height(6.dp))
                     OutlinedTextField(
                         value = code,
-                        onValueChange = { code = it.filter(Char::isDigit).take(4) },
-                        label = { Text(stringResource(R.string.delete_code)) },
+                        onValueChange = { value ->
+                            code = value.filter(Char::isDigit).take(4)
+                        },
+                        placeholder = {
+                            Text(
+                                text = preview.confirmCode,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 4.sp,
+                            )
+                        },
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done,
+                        ),
                         keyboardActions = clearFocusOnDone(),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .widthIn(max = 220.dp)
+                            .focusRequester(focusRequester),
                     )
                 }
                 if (error != null) {
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         text = error,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                    }
+                    TextButton(onClick = onDismiss, enabled = !loading) {
+                        Text(stringResource(R.string.common_cancel))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    if (expired) {
+                        TextButton(onClick = onRefresh, enabled = !loading) {
+                            Text(stringResource(R.string.delete_code_refresh))
+                        }
+                    } else {
+                        TextButton(
+                            onClick = { onConfirm(if (preview.requiresCode) code else null) },
+                            enabled = !loading && (!preview.requiresCode || code.length == 4),
+                        ) {
+                            Text(stringResource(R.string.delete_confirm))
+                        }
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(if (preview.requiresCode) code else null) },
-                enabled = !loading && (!preview.requiresCode || code.length >= 4),
-            ) {
-                Text(stringResource(R.string.delete_confirm))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !loading) {
-                Text(stringResource(R.string.common_cancel))
-            }
-        },
-    )
+        }
+    }
+}
+
+@Composable
+private fun DeleteItemRow(item: DeleteItemDto) {
+    var expanded by remember(item.relative) { mutableStateOf(false) }
+    val name = item.relative.substringAfterLast('/')
+    val path = item.relative.substringBeforeLast('/', "")
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        FileNameText(
+            name = name,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+        )
+        if (path.isNotEmpty()) {
+            Text(
+                text = path,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = if (expanded) Int.MAX_VALUE else 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -293,7 +421,7 @@ fun ShareCreateDialog(
         title = { Text(stringResource(R.string.share_create)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(entryName, style = MaterialTheme.typography.bodyMedium)
+                FileNameText(entryName, style = MaterialTheme.typography.bodyMedium)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = stringResource(R.string.share_read_only),
@@ -368,6 +496,7 @@ private fun expiryLabel(days: Int?): String = when (days) {
 fun PreviewDialog(
     entry: FileEntry,
     imageEntries: List<FileEntry>,
+    session: Long,
     imageLoader: ImageLoader?,
     imageUrlFor: (FileEntry) -> String?,
     thumbnailUrlFor: (FileEntry) -> String?,
@@ -380,6 +509,7 @@ fun PreviewDialog(
     playerFactory: () -> ExoPlayer?,
     onPageChanged: (FileEntry) -> Unit,
     onLongPress: () -> Unit,
+    onEdit: (() -> Unit)?,
     onClose: () -> Unit,
 ) {
     val isMedia = entry.kind == FileKind.Image ||
@@ -397,6 +527,8 @@ fun PreviewDialog(
     val originalOrientation = remember(activity) { activity?.requestedOrientation }
     var controlsVisible by remember { mutableStateOf(true) }
     var zoomed by remember { mutableStateOf(false) }
+    var showOriginal by remember(session) { mutableStateOf(false) }
+    var originalError by remember(session) { mutableStateOf(false) }
 
     val pages = if (entry.kind == FileKind.Image) {
         imageEntries.ifEmpty { listOf(entry) }
@@ -406,8 +538,28 @@ fun PreviewDialog(
     val initialPage = pages.indexOfFirst {
         it.name == entry.name && it.modified == entry.modified
     }.coerceAtLeast(0)
-    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { pages.size })
+    val pagerState = key(session) {
+        rememberPagerState(initialPage = initialPage, pageCount = { pages.size })
+    }
     val currentEntry = pages.getOrElse(pagerState.currentPage) { entry }
+
+    LaunchedEffect(pages.size) {
+        if (pagerState.currentPage > pages.lastIndex) {
+            pagerState.scrollToPage(pages.lastIndex.coerceAtLeast(0))
+        }
+    }
+
+    LaunchedEffect(currentEntry.name, currentEntry.modified) {
+        showOriginal = false
+        originalError = false
+    }
+
+    LaunchedEffect(originalError) {
+        if (originalError) {
+            delay(2500)
+            originalError = false
+        }
+    }
 
     LaunchedEffect(pages) {
         val index = pages.indexOfFirst {
@@ -459,13 +611,19 @@ fun PreviewDialog(
                     error = error,
                     contentColor = contentColor,
                     playerFactory = playerFactory,
+                    original = showOriginal && entry.kind == FileKind.Image,
+                    onOriginalError = { originalError = true },
                     pagerEnabled = !zoomed,
                     onZoomChanged = { zoomed = it },
                     onLongPress = onLongPress,
+                    onImageTap = { controlsVisible = !controlsVisible },
                     onControlsVisibilityChanged = { controlsVisible = it },
                     modifier = Modifier.fillMaxSize(),
                 )
-                val showBar = entry.kind != FileKind.Video || controlsVisible
+                val showBar = when (entry.kind) {
+                    FileKind.Video, FileKind.Image -> controlsVisible
+                    else -> true
+                }
                 AnimatedVisibility(
                     visible = showBar,
                     enter = fadeIn(tween(160)),
@@ -477,6 +635,10 @@ fun PreviewDialog(
                         contentColor = contentColor,
                         showDetails = entry.kind == FileKind.Image,
                         showOrientation = entry.kind == FileKind.Video && activity != null,
+                        showEdit = entry.kind == FileKind.Text ||
+                            entry.kind == FileKind.Code ||
+                            entry.isMarkdown,
+                        onEdit = onEdit ?: {},
                         onDetails = onLongPress,
                         onToggleOrientation = {
                             activity?.requestedOrientation = if (landscape) {
@@ -489,6 +651,57 @@ fun PreviewDialog(
                         scrim = true,
                     )
                 }
+                if (entry.kind == FileKind.Image) {
+                    AnimatedVisibility(
+                        visible = controlsVisible,
+                        enter = fadeIn(tween(160)),
+                        exit = fadeOut(tween(160)),
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .navigationBarsPadding()
+                            .padding(16.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = Color.Black.copy(alpha = 0.55f),
+                            contentColor = Color.White,
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    if (!showOriginal && entry.size > ORIGINAL_MAX_BYTES) {
+                                        originalError = true
+                                    } else {
+                                        showOriginal = !showOriginal
+                                    }
+                                },
+                            ) {
+                                Text(
+                                    text = stringResource(
+                                        if (showOriginal) {
+                                            R.string.preview_show_preview
+                                        } else {
+                                            R.string.preview_show_original
+                                        },
+                                    ),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                    }
+                    if (originalError) {
+                        Text(
+                            text = stringResource(R.string.preview_original_failed),
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .navigationBarsPadding()
+                                .padding(bottom = 24.dp)
+                                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
+                }
             } else {
                 Column(
                     modifier = Modifier
@@ -500,6 +713,8 @@ fun PreviewDialog(
                         contentColor = contentColor,
                         showDetails = false,
                         showOrientation = false,
+                        showEdit = false,
+                        onEdit = {},
                         onDetails = onLongPress,
                         onToggleOrientation = {},
                         onClose = onClose,
@@ -520,9 +735,12 @@ fun PreviewDialog(
                         error = error,
                         contentColor = contentColor,
                         playerFactory = playerFactory,
+                        original = false,
+                        onOriginalError = {},
                         pagerEnabled = false,
                         onZoomChanged = {},
                         onLongPress = onLongPress,
+                        onImageTap = {},
                         onControlsVisibilityChanged = {},
                         modifier = Modifier
                             .weight(1f)
@@ -540,6 +758,8 @@ private fun PreviewTopBar(
     contentColor: Color,
     showDetails: Boolean,
     showOrientation: Boolean,
+    showEdit: Boolean,
+    onEdit: () -> Unit,
     onDetails: () -> Unit,
     onToggleOrientation: () -> Unit,
     onClose: () -> Unit,
@@ -572,20 +792,27 @@ private fun PreviewTopBar(
                 tint = contentColor,
             )
         }
-        Text(
-            text = entry.name,
-            color = contentColor,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        FileNameText(
+            name = entry.name,
             modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleMedium,
+            color = contentColor,
+            fontWeight = FontWeight.SemiBold,
         )
         if (showOrientation) {
             IconButton(onClick = onToggleOrientation) {
                 Icon(
                     painter = painterResource(R.drawable.ic_screen_rotation),
                     contentDescription = stringResource(R.string.preview_rotate),
+                    tint = contentColor,
+                )
+            }
+        }
+        if (showEdit) {
+            IconButton(onClick = onEdit) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_edit),
+                    contentDescription = stringResource(R.string.editor_edit),
                     tint = contentColor,
                 )
             }
@@ -619,9 +846,12 @@ private fun PreviewBody(
     error: String?,
     contentColor: Color,
     playerFactory: () -> ExoPlayer?,
+    original: Boolean,
+    onOriginalError: () -> Unit,
     pagerEnabled: Boolean,
     onZoomChanged: (Boolean) -> Unit,
     onLongPress: () -> Unit,
+    onImageTap: () -> Unit,
     onControlsVisibilityChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -647,45 +877,100 @@ private fun PreviewBody(
                     userScrollEnabled = pagerEnabled,
                     beyondViewportPageCount = 1,
                     key = { index ->
-                        val page = pages[index]
-                        "${page.name}:${page.modified}:${page.size}"
+                        val page = pages.getOrNull(index)
+                        if (page == null) {
+                            "missing:$index"
+                        } else {
+                            "${page.name}:${page.modified}:${page.size}"
+                        }
                     },
                     modifier = Modifier.fillMaxSize(),
                 ) { pageIndex ->
-                    val page = pages[pageIndex]
-                    val fullUrl = imageUrlFor(page) ?: downloadUrlFor(page)
-                    ZoomableImage(
-                        url = fullUrl.orEmpty(),
-                        thumbnailUrl = thumbnailUrlFor(page),
-                        imageLoader = imageLoader,
-                        resetSignal = pagerState.currentPage,
-                        onScaleChanged = onZoomChanged,
-                        onLongPress = onLongPress,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    val page = pages.getOrNull(pageIndex)
+                    if (page != null) {
+                        val fullUrl = if (original) {
+                            downloadUrlFor(page)
+                        } else {
+                            imageUrlFor(page) ?: downloadUrlFor(page)
+                        }
+                        ZoomableImage(
+                            url = fullUrl.orEmpty(),
+                            thumbnailUrl = if (original) null else thumbnailUrlFor(page),
+                            imageLoader = imageLoader,
+                            resetSignal = pagerState.currentPage,
+                            fullSize = original,
+                            onScaleChanged = onZoomChanged,
+                            onLongPress = onLongPress,
+                            onTap = onImageTap,
+                            onError = if (original) onOriginalError else null,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
-            (entry.kind == FileKind.Text || entry.kind == FileKind.Code || entry.isMarkdown) && text != null -> {
-                if (entry.isMarkdown) {
-                    MarkdownPreview(
-                        markdown = text.content,
-                        textColor = contentColor,
-                        linkColor = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    SelectionContainer {
+            text != null -> {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (text.lossy) {
                         Text(
-                            text = text.content,
-                            color = contentColor,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
-                            lineHeight = 19.sp,
+                            text = stringResource(R.string.text_lossy_hint),
+                            color = Color(0xFF3B2F00),
+                            style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(16.dp),
+                                .fillMaxWidth()
+                                .background(Color(0xFFFFE082))
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
+                    }
+                    val bodyModifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                    if (entry.isMarkdown) {
+                        MarkdownPreview(
+                            markdown = text.content,
+                            textColor = contentColor,
+                            linkColor = MaterialTheme.colorScheme.primary,
+                            modifier = bodyModifier,
+                        )
+                    } else if (entry.kind == FileKind.Code) {
+                        CodePreview(
+                            content = text.content,
+                            contentColor = contentColor,
+                            modifier = bodyModifier,
+                        )
+                    } else {
+                        val truncated = text.content.length > CODE_PREVIEW_MAX_CHARS
+                        val shown = if (truncated) {
+                            text.content.take(CODE_PREVIEW_MAX_CHARS)
+                        } else {
+                            text.content
+                        }
+                        Column(modifier = bodyModifier) {
+                            if (truncated) {
+                                Text(
+                                    text = stringResource(R.string.text_preview_truncated),
+                                    color = contentColor,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.White.copy(alpha = 0.12f))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                )
+                            }
+                            SelectionContainer {
+                                Text(
+                                    text = shown,
+                                    color = contentColor,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    lineHeight = 19.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(16.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -749,7 +1034,7 @@ private fun PreviewBody(
 }
 
 @Composable
-private fun MarkdownPreview(
+fun MarkdownPreview(
     markdown: String,
     textColor: Color,
     linkColor: Color,
@@ -812,48 +1097,156 @@ private fun PdfPreview(file: File) {
     }
 }
 
+private data class PdfPageBitmap(
+    val bitmap: Bitmap?,
+    val width: Int,
+    val height: Int,
+    val failed: Boolean = false,
+)
+
 @Composable
 private fun PdfPage(renderer: PdfRenderer, index: Int) {
-    val bitmap by produceState<Bitmap?>(initialValue = null, renderer, index) {
-        value = withContext(Dispatchers.IO) {
-            synchronized(renderer) {
-                runCatching {
-                    val page = renderer.openPage(index)
-                    try {
-                        val width = (page.width * 1.5f).toInt().coerceAtLeast(1)
-                        val height = (page.height * 1.5f).toInt().coerceAtLeast(1)
-                        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                        result.eraseColor(android.graphics.Color.WHITE)
-                        page.render(result, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        result
-                    } finally {
-                        page.close()
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val availableWidthPx = with(density) { maxWidth.toPx() }.toInt().coerceAtLeast(1)
+        val pageState by produceState<PdfPageBitmap?>(
+            initialValue = null,
+            renderer,
+            index,
+            availableWidthPx,
+        ) {
+            value = withContext(Dispatchers.IO) {
+                synchronized(renderer) {
+                    runCatching {
+                        val page = renderer.openPage(index)
+                        try {
+                            val pageWidth = page.width.coerceAtLeast(1)
+                            val pageHeight = page.height.coerceAtLeast(1)
+                            var scale = (availableWidthPx.toFloat() / pageWidth).coerceIn(0.5f, 3f)
+                            val maxPixels = 4096
+                            if (pageWidth * scale > maxPixels) {
+                                scale = maxPixels.toFloat() / pageWidth
+                            }
+                            val width = (pageWidth * scale).toInt().coerceAtLeast(1)
+                            val height = (pageHeight * scale).toInt().coerceAtLeast(1)
+                            val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                            result.eraseColor(android.graphics.Color.WHITE)
+                            page.render(result, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            PdfPageBitmap(result, pageWidth, pageHeight)
+                        } finally {
+                            page.close()
+                        }
+                    }.getOrElse {
+                        PdfPageBitmap(null, 1, 1, failed = true)
                     }
-                }.getOrNull()
+                }
+            }
+        }
+        val page = pageState
+        when {
+            page == null -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(color = Color.White)
+            }
+            page.failed || page.bitmap == null -> Text(
+                text = stringResource(R.string.preview_unsupported),
+                color = Color.White,
+                modifier = Modifier.padding(16.dp),
+            )
+            else -> {
+                DisposableEffect(page.bitmap) {
+                    onDispose { page.bitmap.recycle() }
+                }
+                Image(
+                    bitmap = page.bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(page.width.toFloat() / page.height)
+                        .padding(horizontal = 2.dp),
+                )
             }
         }
     }
-    val image = bitmap
-    if (image == null) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(220.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator(color = Color.White)
+}
+
+private const val CODE_PREVIEW_MAX_CHARS = 256 * 1024
+
+@Composable
+private fun CodePreview(
+    content: String,
+    contentColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val truncated = content.length > CODE_PREVIEW_MAX_CHARS
+    val shown = if (truncated) content.take(CODE_PREVIEW_MAX_CHARS) else content
+    val lineCount = shown.count { it == '\n' } + 1
+    val numbers = remember(shown) {
+        buildString {
+            for (index in 1..lineCount) {
+                if (index > 1) append('\n')
+                append(index)
+            }
         }
-    } else {
-        Image(
-            bitmap = image.asImageBitmap(),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
+    }
+    val vertical = rememberScrollState()
+    val horizontal = rememberScrollState()
+    val codeStyle = MaterialTheme.typography.bodySmall.copy(
+        fontFamily = FontFamily.Monospace,
+        fontSize = 13.sp,
+        lineHeight = 19.sp,
+    )
+    Column(modifier = modifier) {
+        if (truncated) {
+            Text(
+                text = stringResource(R.string.code_preview_truncated),
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White.copy(alpha = 0.12f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        }
+        Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-        )
+                .fillMaxSize()
+                .verticalScroll(vertical),
+        ) {
+            Text(
+                text = numbers,
+                style = codeStyle,
+                color = contentColor.copy(alpha = 0.55f),
+                textAlign = TextAlign.End,
+                softWrap = false,
+                modifier = Modifier
+                    .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(horizontal),
+            ) {
+                SelectionContainer {
+                    Text(
+                        text = shown,
+                        style = codeStyle,
+                        color = contentColor,
+                        softWrap = false,
+                        modifier = Modifier.padding(end = 16.dp, top = 12.dp, bottom = 12.dp),
+                    )
+                }
+            }
+        }
     }
 }
+
+private const val ORIGINAL_MAX_BYTES = 64L * 1024 * 1024
 
 @Composable
 private fun ZoomableImage(
@@ -861,8 +1254,11 @@ private fun ZoomableImage(
     thumbnailUrl: String?,
     imageLoader: ImageLoader,
     resetSignal: Any?,
+    fullSize: Boolean,
     onScaleChanged: (Boolean) -> Unit,
     onLongPress: () -> Unit,
+    onTap: () -> Unit,
+    onError: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -879,14 +1275,14 @@ private fun ZoomableImage(
         animationSpec = tween(200),
         label = "preview-image-alpha",
     )
-    val request = remember(url) {
+    val request = remember(url, fullSize) {
         ImageRequest.Builder(context)
             .data(url)
-            .size(2048)
+            .apply { if (!fullSize) size(2048) }
             .build()
     }
 
-    LaunchedEffect(resetSignal) {
+    LaunchedEffect(resetSignal, url) {
         zoomJob?.cancel()
         scale = 1f
         offset = Offset.Zero
@@ -954,18 +1350,24 @@ private fun ZoomableImage(
                 .onSizeChanged { containerSize = it }
                 .pointerInput(Unit) {
                     detectTapGestures(
+                        onTap = { onTap() },
                         onDoubleTap = { tap ->
                             zoomJob?.cancel()
                             if (scale > 1.01f) {
-                                animateZoom(1f, Offset.Zero) { onScaleChanged(false) }
+                                onScaleChanged(false)
+                                animateZoom(1f, Offset.Zero)
                             } else {
                                 val target = targetZoom(scale, imageSize, containerSize)
                                 val center = Offset(
                                     containerSize.width / 2f,
                                     containerSize.height / 2f,
                                 )
-                                val point = tap - center
-                                val targetOffset = point - (point - offset) * (target / scale)
+                                val targetOffset = clampOffset(
+                                    offset = tap - center - (tap - center - offset) * (target / scale),
+                                    scale = target,
+                                    imageSize = imageSize,
+                                    containerSize = containerSize,
+                                )
                                 onScaleChanged(true)
                                 animateZoom(target, targetOffset)
                             }
@@ -979,18 +1381,30 @@ private fun ZoomableImage(
                         do {
                             val event = awaitPointerEvent()
                             val pressed = event.changes.count { it.pressed }
+                            val center = Offset(
+                                containerSize.width / 2f,
+                                containerSize.height / 2f,
+                            )
                             if (pressed >= 2) {
                                 zoomJob?.cancel()
+                                val oldScale = scale
                                 val zoom = event.calculateZoom()
                                 val pan = event.calculatePan()
-                                scale = (scale * zoom).coerceIn(1f, 8f)
-                                if (scale > 1f) offset += pan
+                                val centroid = event.calculateCentroid(useCurrent = true)
+                                val newScale = (oldScale * zoom).coerceIn(1f, 8f)
+                                if (centroid != Offset.Unspecified && oldScale > 0f) {
+                                    offset += (centroid - center - offset) * (1f - newScale / oldScale)
+                                }
+                                offset += pan
+                                scale = newScale
+                                offset = clampOffset(offset, scale, imageSize, containerSize)
                                 event.changes.forEach { it.consume() }
+                                onScaleChanged(scale > 1.01f)
                             } else if (scale > 1f && pressed == 1) {
                                 zoomJob?.cancel()
                                 val pan = event.calculatePan()
                                 if (pan != Offset.Zero) {
-                                    offset += pan
+                                    offset = clampOffset(offset + pan, scale, imageSize, containerSize)
                                     event.changes.forEach { it.consume() }
                                 }
                             }
@@ -998,6 +1412,11 @@ private fun ZoomableImage(
                         if (scale <= 1.01f) {
                             scale = 1f
                             offset = Offset.Zero
+                        } else {
+                            val clamped = clampOffset(offset, scale, imageSize, containerSize)
+                            if (clamped != offset) {
+                                animateZoom(scale, clamped)
+                            }
                         }
                         onScaleChanged(scale > 1.01f)
                     }
@@ -1019,6 +1438,7 @@ private fun ZoomableImage(
                 onError = {
                     failed = true
                     loaded = false
+                    onError?.invoke()
                 },
                 modifier = Modifier
                     .fillMaxSize()
@@ -1044,7 +1464,32 @@ private fun targetZoom(scale: Float, imageSize: IntSize, containerSize: IntSize)
         containerSize.height.toFloat() / imageSize.height,
     )
     if (fit <= 0f) return 2f
-    return (1f / fit).coerceIn(1.5f, 8f)
+    return (1.5f / fit).coerceIn(1.5f, 8f)
+}
+
+private fun clampOffset(
+    offset: Offset,
+    scale: Float,
+    imageSize: IntSize,
+    containerSize: IntSize,
+): Offset {
+    if (scale <= 1f || imageSize.width <= 0 || imageSize.height <= 0 ||
+        containerSize.width <= 0 || containerSize.height <= 0
+    ) {
+        return Offset.Zero
+    }
+    val fit = minOf(
+        containerSize.width.toFloat() / imageSize.width,
+        containerSize.height.toFloat() / imageSize.height,
+    )
+    val contentWidth = imageSize.width * fit * scale
+    val contentHeight = imageSize.height * fit * scale
+    val maxX = ((contentWidth - containerSize.width) / 2f).coerceAtLeast(0f)
+    val maxY = ((contentHeight - containerSize.height) / 2f).coerceAtLeast(0f)
+    return Offset(
+        offset.x.coerceIn(-maxX, maxX),
+        offset.y.coerceIn(-maxY, maxY),
+    )
 }
 
 @Composable
@@ -1114,6 +1559,138 @@ fun TargetPathDialog(
 }
 
 @Composable
+fun ImagePropertiesSection(
+    properties: filehub.android.core.model.FileProperties?,
+    loading: Boolean,
+    error: String?,
+    onRetry: (() -> Unit)?,
+) {
+    when {
+        loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.size(8.dp))
+            Text(
+                text = stringResource(R.string.preview_loading),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        error != null -> Column {
+            Text(
+                text = error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (onRetry != null) {
+                TextButton(onClick = onRetry) {
+                    Text(stringResource(R.string.common_retry))
+                }
+            }
+        }
+        properties?.image != null -> {
+            val image = properties.image
+            if (image.width != null && image.height != null) {
+                DetailLine(
+                    label = stringResource(R.string.image_dimensions),
+                    value = "${image.width} × ${image.height}",
+                )
+            }
+            image.format?.let { format ->
+                DetailLine(label = stringResource(R.string.image_format), value = format)
+            }
+            Text(
+                text = stringResource(R.string.image_exif),
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            if (image.exif.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.image_no_exif),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    image.exif.forEach { (key, value) ->
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = exifLabel(key),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = exifValue(key, value),
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1.4f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        properties != null -> {
+            Text(
+                text = stringResource(R.string.image_no_exif),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(text = value, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun exifLabel(key: String): String = when (key.lowercase()) {
+    "make" -> stringResource(R.string.exif_make)
+    "model" -> stringResource(R.string.exif_model)
+    "lens" -> stringResource(R.string.exif_lens)
+    "taken_at" -> stringResource(R.string.exif_taken_at)
+    "exposure" -> stringResource(R.string.exif_exposure)
+    "f_number" -> stringResource(R.string.exif_aperture)
+    "iso" -> "ISO"
+    "focal_length" -> stringResource(R.string.exif_focal_length)
+    "orientation" -> stringResource(R.string.exif_orientation)
+    else -> key.replace('_', ' ').replaceFirstChar { it.uppercase() }
+}
+
+@Composable
+private fun exifValue(key: String, value: String): String {
+    if (key.lowercase() != "orientation") return value
+    return when (value.trim()) {
+        "1" -> stringResource(R.string.exif_orientation_normal)
+        "2" -> stringResource(R.string.exif_orientation_flip_h)
+        "3" -> stringResource(R.string.exif_orientation_180)
+        "4" -> stringResource(R.string.exif_orientation_flip_v)
+        "5" -> stringResource(R.string.exif_orientation_90_flip)
+        "6" -> stringResource(R.string.exif_orientation_90)
+        "7" -> stringResource(R.string.exif_orientation_270_flip)
+        "8" -> stringResource(R.string.exif_orientation_270)
+        else -> value
+    }
+}
+
+@Composable
 fun ImageActionsDialog(
     entry: FileEntry,
     properties: filehub.android.core.model.FileProperties?,
@@ -1134,42 +1711,12 @@ fun ImageActionsDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (loading) {
-                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                } else if (error != null) {
-                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                } else if (properties?.image != null) {
-                    val image = properties.image
-                    if (image.width != null && image.height != null) {
-                        Text(
-                            stringResource(R.string.image_dimensions) + ": ${image.width} × ${image.height}",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    if (image.exif.isNotEmpty()) {
-                        Text(
-                            stringResource(R.string.image_exif),
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                        image.exif.entries.take(12).forEach { (key, value) ->
-                            Row(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = key,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    text = value,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-                }
+                ImagePropertiesSection(
+                    properties = properties,
+                    loading = loading,
+                    error = error,
+                    onRetry = null,
+                )
             }
         },
         confirmButton = {

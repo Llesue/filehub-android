@@ -26,18 +26,47 @@ import filehub.android.data.api.DeletePreviewDto
 import filehub.android.data.api.TextFileDto
 import filehub.android.data.media.MediaPlayerFactory
 import filehub.android.data.media.PreviewDownloader
+import filehub.android.data.api.AudioInfoDto
+import filehub.android.data.api.ThumbStatusDto
+import filehub.android.data.playback.AudioPlayerController
+import filehub.android.data.playback.AudioTrack
 import filehub.android.data.media.ThumbnailLoaderFactory
+import filehub.android.data.transfer.TransferKind
 import filehub.android.data.transfer.TransferRepository
+import filehub.android.data.transfer.TransferStatus
 import filehub.android.data.api.FileHubApiException
 import filehub.android.data.toUserMessage
 import java.io.File
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
+sealed interface DirSizeState {
+    data object Loading : DirSizeState
+    data class Ready(val size: Long, val partial: Boolean) : DirSizeState
+    data object Failed : DirSizeState
+}
+
+data class AudioPickerState(
+    val entry: FileEntry,
+    val info: AudioInfoDto,
+)
+
+data class ActiveJob(
+    val id: String,
+    val label: String,
+    val status: String,
+    val progress: Int,
+    val total: Int,
+    val bytesDone: Long,
+    val bytesTotal: Long,
+)
 
 data class FileBrowserState(
     val profile: ServerProfile? = null,
@@ -61,6 +90,9 @@ data class FileBrowserState(
     val operationError: String? = null,
     val previewEntry: FileEntry? = null,
     val previewImages: List<FileEntry> = emptyList(),
+    val previewImagesPinned: Boolean = false,
+    val previewSession: Long = 0,
+    val previewAsText: Boolean = false,
     val textPreview: TextFileDto? = null,
     val pdfPreviewFile: File? = null,
     val previewLoading: Boolean = false,
@@ -73,9 +105,16 @@ data class FileBrowserState(
     val properties: FileProperties? = null,
     val propertiesLoading: Boolean = false,
     val propertiesError: String? = null,
+    val dirSizes: Map<String, DirSizeState> = emptyMap(),
+    val activeJobs: List<ActiveJob> = emptyList(),
+    val audioPicker: AudioPickerState? = null,
+    val thumbVersions: Map<String, Int> = emptyMap(),
+    val thumbStatus: ThumbStatusDto? = null,
 ) {
     val isEmpty: Boolean get() = !loading && error == null && entries.isEmpty()
     val selectionMode: Boolean get() = selected.isNotEmpty()
+    val offline: Boolean
+        get() = root?.let { it.isRemote && it.online == false } == true
 }
 
 class FilesViewModel(
@@ -87,6 +126,7 @@ class FilesViewModel(
     private val transferRepository: TransferRepository,
     private val shareRepository: ShareRepository,
     private val directoryCache: DirectoryCacheRepository,
+    private val audioPlayerController: AudioPlayerController,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileBrowserState())
@@ -98,10 +138,50 @@ class FilesViewModel(
     private var activeToken: String? = null
 
     private var loadJob: Job? = null
+    private var uploadRefreshJob: Job? = null
+    private val dirSizeJobs = mutableMapOf<String, Job>()
+    private var lastDeletePaths: List<String> = emptyList()
+    private val dirSizeLimit = kotlinx.coroutines.sync.Semaphore(3)
+    private val seenCompletedUploads = mutableSetOf<String>()
+    private var uploadsPrimed = false
+
+    init {
+        viewModelScope.launch {
+            transferRepository.items.collect { items ->
+                val completed = items.filter {
+                    it.kind == TransferKind.UPLOAD && it.status == TransferStatus.COMPLETED
+                }
+                if (!uploadsPrimed) {
+                    seenCompletedUploads += completed.map { it.id }
+                    uploadsPrimed = true
+                    return@collect
+                }
+                val fresh = completed.filter { it.id !in seenCompletedUploads }
+                if (fresh.isEmpty()) return@collect
+                seenCompletedUploads += fresh.map { it.id }
+                val current = _state.value
+                val affectsCurrent = fresh.any { item ->
+                    item.profileId == current.profile?.id &&
+                        item.rootId == current.root?.id &&
+                        item.remoteDir == current.path
+                }
+                if (affectsCurrent) scheduleUploadRefresh()
+            }
+        }
+    }
+
+    private fun scheduleUploadRefresh() {
+        uploadRefreshJob?.cancel()
+        uploadRefreshJob = viewModelScope.launch {
+            delay(400)
+            refresh()
+        }
+    }
 
     fun open(profile: ServerProfile, root: FileRoot, path: String = "") {
         val normalized = normalizePath(path)
         loadJob?.cancel()
+        cancelDirSizes()
         _state.value = FileBrowserState(
             profile = profile,
             root = root,
@@ -117,6 +197,50 @@ class FilesViewModel(
         load(path = normalized, append = false)
     }
 
+    fun dirSizeState(entry: FileEntry): DirSizeState? = _state.value.dirSizes[dirSizeKey(entry)]
+
+    fun requestDirSize(entry: FileEntry) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        if (!root.isRemote || !entry.isDir) return
+        val key = dirSizeKey(entry)
+        if (current.dirSizes[key] != null) return
+        _state.update { it.copy(dirSizes = it.dirSizes + (key to DirSizeState.Loading)) }
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        dirSizeJobs[key] = viewModelScope.launch {
+            val result = dirSizeLimit.withPermit {
+                kotlinx.coroutines.withTimeoutOrNull(15_000) {
+                    runCatching { repository.dirSize(profile, root.id, path) }.getOrNull()
+                }
+            }
+            _state.update {
+                val state = when {
+                    result == null -> DirSizeState.Failed
+                    result.error != null -> DirSizeState.Failed
+                    else -> DirSizeState.Ready(result.size, result.partial)
+                }
+                it.copy(dirSizes = it.dirSizes + (key to state))
+            }
+            dirSizeJobs.remove(key)
+        }
+    }
+
+    fun retryDirSize(entry: FileEntry) {
+        _state.update { it.copy(dirSizes = it.dirSizes - dirSizeKey(entry)) }
+        requestDirSize(entry)
+    }
+
+    private fun dirSizeKey(entry: FileEntry): String {
+        val current = _state.value
+        return "${current.root?.id ?: 0}:${current.path}:${entry.name}:${entry.modified}"
+    }
+
+    private fun cancelDirSizes() {
+        dirSizeJobs.values.forEach { it.cancel() }
+        dirSizeJobs.clear()
+    }
+
     fun refresh() {
         val current = _state.value
         if (current.root == null || current.profile == null) return
@@ -129,6 +253,7 @@ class FilesViewModel(
         val normalized = normalizePath(path)
         if (normalized == _state.value.path) return
         loadJob?.cancel()
+        cancelDirSizes()
         _state.update {
             it.copy(path = normalized, entries = emptyList(), nextCursor = null, loading = true, error = null)
         }
@@ -146,7 +271,54 @@ class FilesViewModel(
     }
 
     fun showDetails(entry: FileEntry) {
-        _state.update { it.copy(selectedEntry = entry) }
+        _state.update {
+            it.copy(
+                selectedEntry = entry,
+                thumbStatus = null,
+                properties = null,
+                propertiesError = null,
+            )
+        }
+        if (entry.kind == FileKind.Image) loadProperties(entry)
+        if (entry.hasPreview && (entry.kind == FileKind.Image || entry.kind == FileKind.Video)) {
+            val current = _state.value
+            val profile = current.profile ?: return
+            val root = current.root ?: return
+            val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+            viewModelScope.launch {
+                runCatching { repository.thumbStatus(profile, root.id, path) }
+                    .onSuccess { status -> _state.update { it.copy(thumbStatus = status) } }
+            }
+        }
+    }
+
+    fun dismissSelected() {
+        _state.update { it.copy(selectedEntry = null, thumbStatus = null) }
+    }
+
+    fun retryThumbnail(entry: FileEntry) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        val key = "$path:${entry.modified}"
+        viewModelScope.launch {
+            runCatching { repository.retryThumb(profile, root.id, path) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            thumbVersions = it.thumbVersions +
+                                (key to (it.thumbVersions[key] ?: 0) + 1),
+                            thumbStatus = ThumbStatusDto(state = "missing"),
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(operationError = error.toUserMessage(application))
+                    }
+                }
+        }
     }
 
     fun toggleSelection(entry: FileEntry) {
@@ -203,6 +375,7 @@ class FilesViewModel(
         val paths = entries.map { entry ->
             if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
         }
+        lastDeletePaths = paths
         _state.update {
             it.copy(
                 selected = entries.map(FileEntry::name).toSet(),
@@ -215,6 +388,27 @@ class FilesViewModel(
                 .onSuccess { preview ->
                     _state.update {
                         it.copy(operationLoading = false, deletePreview = preview, operationError = null)
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(operationLoading = false, operationError = error.toUserMessage(application))
+                    }
+                }
+        }
+    }
+
+    fun refreshDeletePreview() {
+        if (lastDeletePaths.isEmpty()) return
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        _state.update { it.copy(operationLoading = true, operationError = null) }
+        viewModelScope.launch {
+            runCatching { repository.deletePreview(profile, root.id, lastDeletePaths) }
+                .onSuccess { preview ->
+                    _state.update {
+                        it.copy(operationLoading = false, deletePreview = preview)
                     }
                 }
                 .onFailure { error ->
@@ -274,23 +468,26 @@ class FilesViewModel(
         }
     }
 
-    fun showPreview(entry: FileEntry) {
+    fun showPreview(entry: FileEntry, pinImages: Boolean = false) {
         val current = _state.value
         val profile = current.profile ?: return
         val root = current.root ?: return
         val needsText = entry.kind == FileKind.Text || entry.kind == FileKind.Code
         val needsPdf = entry.kind == FileKind.Pdf
         val needsMedia = entry.kind == FileKind.Video || entry.kind == FileKind.Audio
-        val images = if (entry.kind == FileKind.Image) {
-            current.entries.filter { it.kind == FileKind.Image }
+        val images = when {
+            entry.kind != FileKind.Image -> emptyList()
+            pinImages -> listOf(entry)
+            else -> current.entries.filter { it.kind == FileKind.Image }
                 .ifEmpty { listOf(entry) }
-        } else {
-            emptyList()
         }
         _state.update {
             it.copy(
                 previewEntry = entry,
                 previewImages = images,
+                previewImagesPinned = pinImages,
+                previewSession = it.previewSession + 1,
+                previewAsText = false,
                 textPreview = null,
                 pdfPreviewFile = null,
                 previewLoading = needsText || needsPdf || needsMedia,
@@ -341,6 +538,76 @@ class FilesViewModel(
         }
     }
 
+    fun openAsText(entry: FileEntry) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        _state.update {
+            it.copy(
+                previewEntry = entry,
+                previewImages = emptyList(),
+                previewImagesPinned = true,
+                previewSession = it.previewSession + 1,
+                previewAsText = true,
+                textPreview = null,
+                pdfPreviewFile = null,
+                previewLoading = true,
+                previewMediaReady = 0,
+                previewError = null,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { repository.probeText(profile, root.id, path) }
+                .onSuccess { probe ->
+                    when {
+                        !probe.isText -> _state.update {
+                            it.copy(
+                                previewLoading = false,
+                                previewError = probeErrorMessage(probe.reason),
+                            )
+                        }
+                        probe.size > MAX_TEXT_EDIT_BYTES -> _state.update {
+                            it.copy(
+                                previewLoading = false,
+                                previewError = application.getString(R.string.text_too_large),
+                            )
+                        }
+                        else -> runCatching {
+                            repository.readText(profile, root.id, path)
+                        }.onSuccess { text ->
+                            _state.update {
+                                it.copy(textPreview = text, previewLoading = false)
+                            }
+                        }.onFailure { error ->
+                            _state.update {
+                                it.copy(
+                                    previewLoading = false,
+                                    previewError = error.toUserMessage(application),
+                                )
+                            }
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    val message = if (error is FileHubApiException && error.statusCode == 404) {
+                        application.getString(R.string.text_editor_disabled)
+                    } else {
+                        error.toUserMessage(application)
+                    }
+                    _state.update { it.copy(previewLoading = false, previewError = message) }
+                }
+        }
+    }
+
+    private fun probeErrorMessage(reason: String): String = when (reason) {
+        "too_large" -> application.getString(R.string.text_too_large)
+        "binary" -> application.getString(R.string.text_not_text)
+        "lossy" -> application.getString(R.string.text_lossy_hint)
+        "not_utf8" -> application.getString(R.string.text_encoding_unsupported)
+        else -> application.getString(R.string.text_not_text)
+    }
+
     fun previewPage(entry: FileEntry) {
         _state.update { it.copy(previewEntry = entry) }
     }
@@ -355,6 +622,8 @@ class FilesViewModel(
             it.copy(
                 previewEntry = null,
                 previewImages = emptyList(),
+                previewImagesPinned = false,
+                previewAsText = false,
                 textPreview = null,
                 pdfPreviewFile = null,
                 previewError = null,
@@ -398,10 +667,6 @@ class FilesViewModel(
             _state.update { it.copy(sort = sort, order = SortOrder.Asc) }
         }
         refresh()
-    }
-
-    fun dismissSelected() {
-        _state.update { it.copy(selectedEntry = null) }
     }
 
     fun openShare(entry: FileEntry) {
@@ -488,9 +753,9 @@ class FilesViewModel(
         _state.update { it.copy(operationLoading = true, operationError = null) }
         viewModelScope.launch {
             runCatching { repository.archiveZip(profile, root.id, current.path, names, name) }
-                .onSuccess {
+                .onSuccess { job ->
                     _state.update { it.copy(operationLoading = false, selected = emptySet()) }
-                    refresh()
+                    trackJob(profile, job.jobId, name)
                 }
                 .onFailure { error ->
                     _state.update {
@@ -508,7 +773,10 @@ class FilesViewModel(
         _state.update { it.copy(operationLoading = true, operationError = null) }
         viewModelScope.launch {
             runCatching { repository.archiveUnzip(profile, root.id, path) }
-                .onSuccess { _state.update { it.copy(operationLoading = false) } }
+                .onSuccess { job ->
+                    _state.update { it.copy(operationLoading = false) }
+                    trackJob(profile, job.jobId, entry.name)
+                }
                 .onFailure { error ->
                     _state.update {
                         it.copy(operationLoading = false, operationError = error.toUserMessage(application))
@@ -535,9 +803,13 @@ class FilesViewModel(
                 } else {
                     repository.copy(profile, root.id, paths, destRootId, destPath)
                 }
-            }.onSuccess {
+            }.onSuccess { job ->
                 _state.update { it.copy(operationLoading = false, selected = emptySet()) }
-                refresh()
+                trackJob(
+                    profile = profile,
+                    jobId = job.jobId,
+                    label = paths.firstOrNull() ?: "",
+                )
             }.onFailure { error ->
                 _state.update {
                     it.copy(operationLoading = false, operationError = error.toUserMessage(application))
@@ -546,14 +818,243 @@ class FilesViewModel(
         }
     }
 
-    fun enqueueUploads(uris: List<Uri>) {
+    private fun trackJob(
+        profile: ServerProfile,
+        jobId: String,
+        label: String,
+    ) {
+        if (jobId.isBlank()) {
+            refresh()
+            return
+        }
+        val initial = ActiveJob(
+            id = jobId,
+            label = label,
+            status = "queued",
+            progress = 0,
+            total = 0,
+            bytesDone = 0,
+            bytesTotal = 0,
+        )
+        _state.update { it.copy(activeJobs = it.activeJobs + initial) }
+        viewModelScope.launch {
+            while (true) {
+                delay(1500)
+                val job = runCatching { repository.jobStatus(profile, jobId) }.getOrNull()
+                if (job == null) {
+                    _state.update {
+                        it.copy(
+                            activeJobs = it.activeJobs.filterNot { item -> item.id == jobId },
+                            operationError = application.getString(R.string.operation_error),
+                        )
+                    }
+                    break
+                }
+                val active = ActiveJob(
+                    id = job.id,
+                    label = label,
+                    status = job.status,
+                    progress = job.progress,
+                    total = job.total,
+                    bytesDone = job.bytesDone,
+                    bytesTotal = job.bytesTotal,
+                )
+                _state.update {
+                    it.copy(
+                        activeJobs = it.activeJobs.map { item ->
+                            if (item.id == jobId) active else item
+                        },
+                    )
+                }
+                if (job.status == "completed" || job.status == "failed" || job.status == "cancelled") {
+                    if (job.status == "completed") {
+                        refresh()
+                    } else if (job.status == "failed") {
+                        _state.update {
+                            it.copy(
+                                operationError = job.error
+                                    ?: application.getString(R.string.operation_error),
+                            )
+                        }
+                    }
+                    delay(1200)
+                    _state.update {
+                        it.copy(activeJobs = it.activeJobs.filterNot { item -> item.id == jobId })
+                    }
+                    break
+                }
+            }
+        }
+    }
+
+    fun cancelJob(jobId: String) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        viewModelScope.launch {
+            runCatching { repository.cancelJob(profile, jobId) }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(operationError = error.toUserMessage(application))
+                    }
+                }
+        }
+    }
+
+    fun requestAudioPlay(entry: FileEntry) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        if (entry.kind != FileKind.Audio) return
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        _state.update { it.copy(operationLoading = true, operationError = null) }
+        viewModelScope.launch {
+            val info = runCatching { repository.audioInfo(profile, root.id, path) }.getOrNull()
+            _state.update { it.copy(operationLoading = false) }
+            when {
+                info == null -> playAudio(profile, root.id, entry, path, info, 0)
+                info.tracks.size > 1 -> _state.update {
+                    it.copy(audioPicker = AudioPickerState(entry, info))
+                }
+                else -> {
+                    val track = info.defaultTrack
+                        ?: info.tracks.firstOrNull()?.index
+                        ?: 0
+                    playAudio(profile, root.id, entry, path, info, track)
+                }
+            }
+        }
+    }
+
+    fun chooseAudioTrack(trackIndex: Int) {
+        val picker = _state.value.audioPicker ?: return
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val path = if (current.path.isEmpty()) {
+            picker.entry.name
+        } else {
+            "${current.path}/${picker.entry.name}"
+        }
+        _state.update { it.copy(audioPicker = null) }
+        playAudio(profile, root.id, picker.entry, path, picker.info, trackIndex)
+    }
+
+    fun dismissAudioPicker() {
+        _state.update { it.copy(audioPicker = null) }
+    }
+
+    private fun playAudio(
+        profile: ServerProfile,
+        rootId: Long,
+        entry: FileEntry,
+        path: String,
+        info: AudioInfoDto?,
+        trackIndex: Int,
+    ) {
+        viewModelScope.launch {
+            val track = info?.tracks?.firstOrNull { it.index == trackIndex }
+            var url = downloadUrl(entry)
+            if (track != null && !track.supported) {
+                if (info?.ffmpeg != true) {
+                    _state.update {
+                        it.copy(
+                            operationError = application.getString(R.string.audio_ffmpeg_missing),
+                        )
+                    }
+                    return@launch
+                }
+                _state.update { it.copy(operationLoading = true) }
+                val result = runCatching {
+                    var response = repository.transcode(profile, rootId, path, trackIndex)
+                    if (!response.ready) {
+                        val jobId = response.jobId
+                        if (jobId != null) {
+                            repeat(120) {
+                                kotlinx.coroutines.delay(1000)
+                                val job = runCatching {
+                                    repository.jobStatus(profile, jobId)
+                                }.getOrNull()
+                                if (job == null) return@runCatching null
+                                if (job.status == "completed") {
+                                    return@runCatching repository.transcodedUrl(
+                                        profile,
+                                        rootId,
+                                        path,
+                                        trackIndex,
+                                    )
+                                }
+                                if (job.status == "failed" || job.status == "cancelled") {
+                                    return@runCatching null
+                                }
+                            }
+                            return@runCatching null
+                        }
+                    }
+                    repository.transcodedUrl(profile, rootId, path, trackIndex)
+                }.getOrNull()
+                _state.update { it.copy(operationLoading = false) }
+                if (result == null) {
+                    _state.update {
+                        it.copy(
+                            operationError = application.getString(R.string.audio_transcode_failed),
+                        )
+                    }
+                    return@launch
+                }
+                url = result
+            }
+            if (url == null) return@launch
+            val queue = audioTracks(entry) ?: return@launch
+            val tracks = queue.first.map { item ->
+                if (item.path == path) item.copy(url = url) else item
+            }
+            audioPlayerController.playQueue(profile.id, tracks, queue.second)
+        }
+    }
+
+    fun audioTracks(entry: FileEntry): Pair<List<AudioTrack>, Int>? {
+        val current = _state.value
+        val profile = current.profile ?: return null
+        val root = current.root ?: return null
+        if (entry.kind != FileKind.Audio) return null
+        val tracks = current.entries
+            .filter { it.kind == FileKind.Audio }
+            .mapNotNull { audio ->
+                val path = if (current.path.isEmpty()) audio.name else "${current.path}/${audio.name}"
+                val url = downloadUrl(audio) ?: return@mapNotNull null
+                AudioTrack(
+                    id = path,
+                    title = audio.name,
+                    url = url,
+                    mimeType = audio.mimeType,
+                    rootId = root.id,
+                    path = path,
+                )
+            }
+        if (tracks.isEmpty()) return null
+        val index = tracks.indexOfFirst { it.path == (if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}") }
+        return tracks to index.coerceAtLeast(0)
+    }
+
+    fun enqueueUploads(
+        uris: List<Uri>,
+        directory: String? = null,
+        mtime: Long? = null,
+    ) {
         val current = _state.value
         val profile = current.profile ?: return
         val root = current.root ?: return
         if (uris.isEmpty()) return
+        val targetDir = directory ?: current.path
         viewModelScope.launch {
             uris.forEach { uri ->
-                transferRepository.enqueueUpload(profile, root.id, current.path, uri)
+                transferRepository.enqueueUpload(
+                    profile = profile,
+                    rootId = root.id,
+                    remoteDir = targetDir,
+                    uri = uri,
+                    mtimeOverride = mtime,
+                )
             }
         }
     }
@@ -611,6 +1112,10 @@ class FilesViewModel(
             .addQueryParameter("edge", "2048")
             .addQueryParameter("wait", "1")
             .addQueryParameter("v", entry.modified.toString())
+            .addQueryParameter(
+                "r",
+                (_state.value.thumbVersions["$remotePath:${entry.modified}"] ?: 0).toString(),
+            )
             .build()
             .toString()
     }
@@ -629,17 +1134,23 @@ class FilesViewModel(
             .addQueryParameter("w", width.toString())
             .addQueryParameter("wait", "1")
             .addQueryParameter("v", entry.modified.toString())
+            .addQueryParameter(
+                "r",
+                (_state.value.thumbVersions["$guestPath:${entry.modified}"] ?: 0).toString(),
+            )
             .build()
             .toString()
     }
 
     fun clear() {
         loadJob?.cancel()
+        cancelDirSizes()
         _state.value = FileBrowserState()
     }
 
     fun release() {
         loadJob?.cancel()
+        cancelDirSizes()
         val profileId = _state.value.profile?.id
         if (profileId != null) thumbnailLoaderFactory.close(profileId)
         activeToken = null
@@ -712,7 +1223,7 @@ class FilesViewModel(
                 _state.update {
                     val previewEntry = it.previewEntry
                     val previewImages = if (
-                        !append && cursor == null &&
+                        !append && cursor == null && !it.previewImagesPinned &&
                         previewEntry?.kind == FileKind.Image && it.previewImages.size <= 1
                     ) {
                         val images = listing.entries.filter { entry -> entry.kind == FileKind.Image }
@@ -759,6 +1270,8 @@ class FilesViewModel(
         path.trim('/').replace(Regex("/+"), "/")
 
     companion object {
+        const val MAX_TEXT_EDIT_BYTES = 2L * 1024 * 1024
+
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = application as FileHubApplication
@@ -771,6 +1284,7 @@ class FilesViewModel(
                     app.container.transferRepository,
                     app.container.shareRepository,
                     app.container.directoryCacheRepository,
+                    app.container.audioPlayerController,
                 )
             }
         }

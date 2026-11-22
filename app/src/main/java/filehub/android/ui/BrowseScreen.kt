@@ -35,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,6 +54,8 @@ fun BrowseScreen(
     onAddServer: () -> Unit,
     onRetry: () -> Unit,
     onSearch: (Long?) -> Unit,
+    onEditText: (filehub.android.core.model.FileEntry) -> Unit,
+    onPauseAudio: () -> Unit,
 ) {
     val active = state.active
     val files by filesViewModel.state.collectAsStateWithLifecycle()
@@ -98,6 +101,8 @@ fun BrowseScreen(
             viewModel = filesViewModel,
             roots = state.roots,
             onSearch = onSearch,
+            onEditText = onEditText,
+            onPauseAudio = onPauseAudio,
             onBack = {
                 if (files.path.isEmpty()) {
                     filesViewModel.clear()
@@ -236,6 +241,16 @@ private fun RootCard(root: FileRoot, onClick: () -> Unit) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (root.readOnly) Badge(stringResource(R.string.browse_root_read_only))
                         if (root.isRemote) Badge(stringResource(R.string.browse_root_remote))
+                        if (root.isRemote) {
+                            when (root.online) {
+                                true -> Badge(stringResource(R.string.browse_root_online))
+                                false -> StatusBadge(
+                                    text = stringResource(R.string.browse_root_offline),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                null -> Badge(stringResource(R.string.browse_root_unknown))
+                            }
+                        }
                     }
                 }
             }
@@ -246,6 +261,11 @@ private fun RootCard(root: FileRoot, onClick: () -> Unit) {
 
 @Composable
 private fun Badge(text: String) {
+    StatusBadge(text = text, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun StatusBadge(text: String, color: Color) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(6.dp),
@@ -253,7 +273,7 @@ private fun Badge(text: String) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = color,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
     }

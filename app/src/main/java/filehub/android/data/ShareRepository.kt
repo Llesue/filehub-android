@@ -26,6 +26,25 @@ class ShareRepository(
 
     suspend fun url(profile: ServerProfile, id: Long): ShareCreated = api(profile).shareUrl(id)
 
+    suspend fun update(
+        profile: ServerProfile,
+        id: Long,
+        readOnly: Boolean? = null,
+        expiresAt: Long? = null,
+        clearExpires: Boolean = false,
+        password: String? = null,
+        clearPassword: Boolean = false,
+        revoked: Boolean? = null,
+    ) = api(profile).updateShare(
+        id = id,
+        readOnly = readOnly,
+        expiresAt = expiresAt,
+        clearExpires = clearExpires,
+        password = password,
+        clearPassword = clearPassword,
+        revoked = revoked,
+    )
+
     suspend fun rotate(profile: ServerProfile, id: Long): ShareCreated = api(profile).rotateShare(id)
 
     suspend fun revoke(profile: ServerProfile, id: Long) = api(profile).revokeShare(id)

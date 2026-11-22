@@ -169,12 +169,10 @@ private fun TransferCard(
                 }
                 Spacer(Modifier.size(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = item.name,
+                    FileNameText(
+                        name = item.name,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = statusLabel(item.status) +

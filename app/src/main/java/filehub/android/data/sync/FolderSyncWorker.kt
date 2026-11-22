@@ -93,15 +93,25 @@ class FolderSyncWorker(
                 }
                 return fail(repo, config, error.toUserMessage(applicationContext))
             }
-        if (roots.none { it.id == config.rootId }) {
+        val root = roots.firstOrNull { it.id == config.rootId }
+        if (root == null) {
             return failPermanently(
                 repo,
                 config,
                 applicationContext.getString(R.string.sync_root_missing),
             )
         }
+        if (root.isRemote && root.online == false) {
+            return fail(repo, config, applicationContext.getString(R.string.sync_remote_offline))
+        }
         val remoteDirs = RemoteDirEnsurer(api, config.rootId)
-        remoteDirs.ensure(config.remotePath)
+        try {
+            remoteDirs.ensure(config.remotePath)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            return syncFailure(repo, config, error)
+        }
 
         val localResult = withContext(Dispatchers.IO) {
             SafScanner.scan(applicationContext, Uri.parse(config.localTreeUri))
@@ -200,6 +210,9 @@ class FolderSyncWorker(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: FileHubApiException) {
+                if (error.code == "REMOTE_OFFLINE") {
+                    return fail(repo, config, applicationContext.getString(R.string.sync_remote_offline))
+                }
                 failed += 1
                 repo.saveEntry(
                     (entry ?: blankEntry(profileId, path)).copy(
@@ -632,6 +645,25 @@ class FolderSyncWorker(
             config.serverName,
             config.profileId,
         )
+    }
+
+    private suspend fun syncFailure(
+        repo: FolderSyncRepository,
+        config: FolderSyncConfigEntity,
+        error: Throwable,
+    ): Result {
+        val code = (error as? FileHubApiException)?.code
+        val message = error.toUserMessage(applicationContext)
+        return if (code == "REMOTE_TOKEN_INVALID" ||
+            code == "REMOTE_GRANT_REVOKED" ||
+            code == "UNAUTHORIZED" ||
+            code == "TOKEN_REVOKED" ||
+            code == "TOKEN_EXPIRED"
+        ) {
+            failPermanently(repo, config, message)
+        } else {
+            fail(repo, config, message)
+        }
     }
 
     private suspend fun fail(

@@ -24,6 +24,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -105,6 +106,7 @@ internal data class RootDto(
     @SerialName("read_only") val readOnly: Boolean = false,
     val kind: String? = null,
     @SerialName("mount_id") val mountId: Long? = null,
+    val online: Boolean? = null,
 )
 
 @Serializable
@@ -207,6 +209,151 @@ data class TextFileDto(
     val modified: Long = 0,
     @SerialName("line_ending") val lineEnding: String = "lf",
     val writable: Boolean = false,
+    @SerialName("read_only_reason") val readOnlyReason: String? = null,
+    val encoding: String? = null,
+    val bom: Boolean = false,
+    val lossy: Boolean = false,
+)
+
+@Serializable
+data class TextProbeDto(
+    @SerialName("is_text") val isText: Boolean = false,
+    val reason: String = "",
+    val size: Long = 0,
+    val encoding: String? = null,
+    val bom: Boolean = false,
+    val lossy: Boolean = false,
+)
+
+@Serializable
+internal data class SaveTextRequest(
+    val content: String,
+    val encoding: String? = null,
+    val bom: Boolean = false,
+    val force: Boolean = false,
+)
+
+@Serializable
+data class VersionDto(
+    val version: String = "",
+    val latest: String? = null,
+    @SerialName("update_available") val updateAvailable: Boolean = false,
+    @SerialName("check_enabled") val checkEnabled: Boolean = true,
+)
+
+@Serializable
+data class IndexStatusDto(
+    val status: String = "",
+    @SerialName("entry_count") val entryCount: Long = 0,
+    @SerialName("indexed_at") val indexedAt: Long? = null,
+    @SerialName("total_size_bytes") val totalSizeBytes: Long = 0,
+    val partial: Boolean = false,
+    val job: JobDto? = null,
+)
+
+@Serializable
+internal data class IndexRequest(
+    val root: Long,
+    val path: String? = null,
+    val recursive: Boolean? = null,
+)
+
+@Serializable
+data class ThumbStatusDto(
+    val state: String = "",
+    val reason: String? = null,
+    val message: String? = null,
+)
+
+@Serializable
+internal data class ThumbRetryRequest(
+    val root: Long,
+    val path: String,
+    val edge: Int,
+)
+
+@Serializable
+data class AudioTrackDto(
+    val index: Int = 0,
+    val codec: String = "",
+    val channels: Int = 0,
+    val language: String? = null,
+    val default: Boolean = false,
+    val supported: Boolean = false,
+)
+
+@Serializable
+data class AudioInfoDto(
+    val ffmpeg: Boolean = false,
+    val tracks: List<AudioTrackDto> = emptyList(),
+    @SerialName("default_track") val defaultTrack: Int? = null,
+    @SerialName("has_supported_track") val hasSupportedTrack: Boolean = true,
+)
+
+@Serializable
+internal data class TranscodeRequest(
+    val root: Long,
+    val path: String,
+    val track: Int,
+)
+
+@Serializable
+data class TranscodeDto(
+    @SerialName("job_id") val jobId: String? = null,
+    val ready: Boolean = false,
+    val path: String = "",
+    val track: Int = 0,
+)
+
+@Serializable
+data class UsageDto(
+    @SerialName("quota_bytes") val quotaBytes: Long? = null,
+    @SerialName("used_bytes") val usedBytes: Long? = null,
+    @SerialName("entry_count") val entryCount: Long? = null,
+    @SerialName("max_entries") val maxEntries: Long? = null,
+    val disks: List<JsonElement> = emptyList(),
+    @SerialName("computed_at") val computedAt: Long? = null,
+    val stale: Boolean = false,
+    val computing: Boolean = false,
+)
+
+@Serializable
+data class JobDto(
+    val id: String = "",
+    val kind: String = "",
+    val status: String = "",
+    val progress: Int = 0,
+    val total: Int = 0,
+    @SerialName("bytes_done") val bytesDone: Long = 0,
+    @SerialName("bytes_total") val bytesTotal: Long = 0,
+    val result: JsonElement? = null,
+    val error: String? = null,
+    @SerialName("created_at") val createdAt: Long = 0,
+    @SerialName("started_at") val startedAt: Long? = null,
+    @SerialName("finished_at") val finishedAt: Long? = null,
+)
+
+@Serializable
+data class JobListDto(val jobs: List<JobDto> = emptyList())
+
+@Serializable
+data class JobAcceptedDto(
+    @SerialName("job_id") val jobId: String = "",
+    val status: String = "",
+)
+
+@Serializable
+data class DirSizeDto(
+    val status: String = "",
+    val size: Long = 0,
+    val partial: Boolean = false,
+    val error: String? = null,
+)
+
+@Serializable
+data class SaveTextResultDto(
+    val etag: String = "",
+    val size: Long = 0,
 )
 
 @Serializable
@@ -394,6 +541,7 @@ class FileHubApi(
                 readOnly = it.readOnly,
                 kind = it.kind,
                 mountId = it.mountId,
+                online = it.online,
             )
         }
     }
@@ -465,21 +613,29 @@ class FileHubApi(
         )
     }
 
-    suspend fun copy(rootId: Long, paths: List<String>, destRoot: Long, destPath: String) {
-        postJson(
-            path = "fs/copy",
-            body = TransferRequest(rootId, paths, destRoot, destPath),
-            serializer = TransferRequest.serializer(),
-        )
-    }
+    suspend fun copy(
+        rootId: Long,
+        paths: List<String>,
+        destRoot: Long,
+        destPath: String,
+    ): JobAcceptedDto = postJson(
+        path = "fs/copy",
+        body = TransferRequest(rootId, paths, destRoot, destPath),
+        serializer = TransferRequest.serializer(),
+        deserializer = JobAcceptedDto.serializer(),
+    )
 
-    suspend fun move(rootId: Long, paths: List<String>, destRoot: Long, destPath: String) {
-        postJson(
-            path = "fs/move",
-            body = TransferRequest(rootId, paths, destRoot, destPath),
-            serializer = TransferRequest.serializer(),
-        )
-    }
+    suspend fun move(
+        rootId: Long,
+        paths: List<String>,
+        destRoot: Long,
+        destPath: String,
+    ): JobAcceptedDto = postJson(
+        path = "fs/move",
+        body = TransferRequest(rootId, paths, destRoot, destPath),
+        serializer = TransferRequest.serializer(),
+        deserializer = JobAcceptedDto.serializer(),
+    )
 
     suspend fun deletePreview(rootId: Long, paths: List<String>): DeletePreviewDto =
         postJson(
@@ -529,11 +685,51 @@ class FileHubApi(
         return response.entries.map { it.toSearchResult(rootId) }
     }
 
-    suspend fun readText(rootId: Long, path: String): TextFileDto = getJson(
-        path = "file",
-        deserializer = TextFileDto.serializer(),
+    suspend fun probeText(rootId: Long, path: String): TextProbeDto = getJson(
+        path = "file/probe",
+        deserializer = TextProbeDto.serializer(),
         query = mapOf("root" to rootId.toString(), "path" to path),
     )
+
+    suspend fun readText(
+        rootId: Long,
+        path: String,
+        encoding: String? = null,
+    ): TextFileDto = getJson(
+        path = "file",
+        deserializer = TextFileDto.serializer(),
+        query = buildMap {
+            put("root", rootId.toString())
+            put("path", path)
+            encoding?.takeIf { it.isNotBlank() }?.let { put("encoding", it) }
+        },
+    )
+
+    suspend fun saveText(
+        rootId: Long,
+        path: String,
+        content: String,
+        encoding: String?,
+        bom: Boolean,
+        etag: String?,
+        force: Boolean,
+    ): SaveTextResultDto {
+        val body = JSON.encodeToString(
+            SaveTextRequest.serializer(),
+            SaveTextRequest(content, encoding, bom, force),
+        ).toByteArray(Charsets.UTF_8)
+        return requestJson(
+            path = "file",
+            method = "PUT",
+            body = body,
+            csrfToken = null,
+            deserializer = SaveTextResultDto.serializer(),
+            query = mapOf("root" to rootId.toString(), "path" to path),
+            headers = etag?.takeIf { it.isNotBlank() }
+                ?.let { mapOf("If-Match" to it) }
+                .orEmpty(),
+        )
+    }
 
     suspend fun createUpload(
         rootId: Long,
@@ -631,6 +827,28 @@ class FileHubApi(
         return ShareCreated(id, response.token, response.url, null)
     }
 
+    suspend fun updateShare(
+        id: Long,
+        readOnly: Boolean? = null,
+        expiresAt: Long? = null,
+        clearExpires: Boolean = false,
+        password: String? = null,
+        clearPassword: Boolean = false,
+        revoked: Boolean? = null,
+    ) {
+        val body = UpdateShareRequest(
+            readOnly = readOnly,
+            expiresAt = expiresAt,
+            clearExpires = clearExpires.takeIf { it },
+            password = password,
+            clearPassword = clearPassword.takeIf { it },
+            revoked = revoked,
+        )
+        val bytes = JSON.encodeToString(UpdateShareRequest.serializer(), body)
+            .toByteArray(Charsets.UTF_8)
+        requestUnit(path = "shares/$id", method = "PUT", body = bytes, csrfToken = null)
+    }
+
     suspend fun rotateShare(id: Long): ShareCreated {
         val response = postJsonEmpty("shares/$id/rotate", ShareUrlDto.serializer())
         return ShareCreated(id, response.token, response.url, null)
@@ -640,21 +858,119 @@ class FileHubApi(
         requestUnit("shares/$id", "DELETE", body = null, csrfToken = null)
     }
 
-    suspend fun archiveZip(rootId: Long, dir: String, paths: List<String>, name: String) {
+    suspend fun archiveZip(
+        rootId: Long,
+        dir: String,
+        paths: List<String>,
+        name: String,
+    ): JobAcceptedDto = postJson(
+        path = "archive/zip",
+        body = ArchiveZipRequest(rootId, dir, paths, name),
+        serializer = ArchiveZipRequest.serializer(),
+        deserializer = JobAcceptedDto.serializer(),
+    )
+
+    suspend fun archiveUnzip(
+        rootId: Long,
+        path: String,
+        target: String? = null,
+    ): JobAcceptedDto = postJson(
+        path = "archive/unzip",
+        body = ArchiveUnzipRequest(rootId, path, target),
+        serializer = ArchiveUnzipRequest.serializer(),
+        deserializer = JobAcceptedDto.serializer(),
+    )
+
+    suspend fun thumbStatus(rootId: Long, path: String, edge: Int = 320): ThumbStatusDto = getJson(
+        path = "thumb/status",
+        deserializer = ThumbStatusDto.serializer(),
+        query = mapOf(
+            "root" to rootId.toString(),
+            "path" to path,
+            "edge" to edge.toString(),
+        ),
+    )
+
+    suspend fun retryThumb(rootId: Long, path: String, edge: Int = 320) {
         postJson(
-            path = "archive/zip",
-            body = ArchiveZipRequest(rootId, dir, paths, name),
-            serializer = ArchiveZipRequest.serializer(),
+            path = "thumb/retry",
+            body = ThumbRetryRequest(rootId, path, edge),
+            serializer = ThumbRetryRequest.serializer(),
         )
     }
 
-    suspend fun archiveUnzip(rootId: Long, path: String, target: String? = null) {
-        postJson(
-            path = "archive/unzip",
-            body = ArchiveUnzipRequest(rootId, path, target),
-            serializer = ArchiveUnzipRequest.serializer(),
-        )
+    suspend fun audioInfo(rootId: Long, path: String): AudioInfoDto = getJson(
+        path = "media/audio-info",
+        deserializer = AudioInfoDto.serializer(),
+        query = mapOf("root" to rootId.toString(), "path" to path),
+    )
+
+    suspend fun transcode(rootId: Long, path: String, track: Int): TranscodeDto = postJson(
+        path = "media/transcode",
+        body = TranscodeRequest(rootId, path, track),
+        serializer = TranscodeRequest.serializer(),
+        deserializer = TranscodeDto.serializer(),
+    )
+
+    fun transcodedUrl(rootId: Long, path: String, track: Int): String? {
+        val base = baseUrl.toHttpUrlOrNull() ?: return null
+        return base.newBuilder()
+            .addPathSegments("api/v1/media/transcoded")
+            .addQueryParameter("root", rootId.toString())
+            .addQueryParameter("path", path)
+            .addQueryParameter("track", track.toString())
+            .build()
+            .toString()
     }
+
+    suspend fun version(): VersionDto = getJson(
+        path = "version",
+        deserializer = VersionDto.serializer(),
+    )
+
+    suspend fun indexStatus(rootId: Long, path: String): IndexStatusDto = getJson(
+        path = "index/status",
+        deserializer = IndexStatusDto.serializer(),
+        query = mapOf("root" to rootId.toString(), "path" to path),
+    )
+
+    suspend fun startIndex(rootId: Long, path: String, recursive: Boolean): JobAcceptedDto =
+        postJson(
+            path = "index",
+            body = IndexRequest(rootId, path, recursive),
+            serializer = IndexRequest.serializer(),
+            deserializer = JobAcceptedDto.serializer(),
+        )
+
+    suspend fun usage(): UsageDto = getJson(
+        path = "usage",
+        deserializer = UsageDto.serializer(),
+    )
+
+    suspend fun listJobs(since: Long = 0): List<JobDto> = getJson(
+        path = "jobs",
+        deserializer = JobListDto.serializer(),
+        query = mapOf("since" to since.toString()),
+    ).jobs
+
+    suspend fun jobStatus(id: String): JobDto = getJson(
+        path = "jobs/$id",
+        deserializer = JobDto.serializer(),
+    )
+
+    suspend fun cancelJob(id: String): JobDto = requestJson(
+        path = "jobs/$id",
+        method = "DELETE",
+        body = null,
+        csrfToken = null,
+        deserializer = JobDto.serializer(),
+    )
+
+    suspend fun dirSize(rootId: Long, path: String): DirSizeDto = getJson(
+        path = "fs/dir-size",
+        deserializer = DirSizeDto.serializer(),
+        query = mapOf("root" to rootId.toString(), "path" to path),
+    )
 
     suspend fun properties(rootId: Long, path: String): FileProperties {
         val response = getJson(
@@ -677,7 +993,7 @@ class FileHubApi(
                     height = image.height,
                     format = image.format,
                     exif = image.exif.orEmpty().mapValues { (_, value) ->
-                        value.toString().trim('"')
+                        (value as? JsonPrimitive)?.content ?: value.toString()
                     },
                 )
             },
@@ -795,8 +1111,9 @@ class FileHubApi(
         csrfToken: String?,
         deserializer: DeserializationStrategy<T>,
         query: Map<String, String> = emptyMap(),
+        headers: Map<String, String> = emptyMap(),
     ): T {
-        val responseBody = execute(buildRequest(path, method, body, csrfToken, query))
+        val responseBody = execute(buildRequest(path, method, body, csrfToken, query, headers))
         return runCatching {
             JSON.decodeFromString(deserializer, responseBody)
         }.getOrElse { error ->
@@ -825,6 +1142,7 @@ class FileHubApi(
         body: ByteArray?,
         csrfToken: String?,
         query: Map<String, String> = emptyMap(),
+        headers: Map<String, String> = emptyMap(),
         contentType: MediaType? = JSON_MEDIA_TYPE,
     ): Request {
         val requestBody = when {
@@ -842,6 +1160,7 @@ class FileHubApi(
             .apply {
                 token?.let { header("Authorization", "Bearer $it") }
                 csrfToken?.let { header("X-CSRF-Token", it) }
+                headers.forEach { (name, value) -> header(name, value) }
             }
             .build()
     }

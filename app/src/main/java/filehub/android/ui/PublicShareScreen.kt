@@ -279,12 +279,17 @@ private fun PublicShareEntry.kind(): FileKind {
 }
 
 private fun download(context: Context, entry: PublicShareEntry, url: String) {
+    val directory = when (entry.kind()) {
+        FileKind.Image -> Environment.DIRECTORY_PICTURES
+        FileKind.Video -> Environment.DIRECTORY_MOVIES
+        else -> Environment.DIRECTORY_DOWNLOADS
+    }
     val request = DownloadManager.Request(Uri.parse(url))
         .setTitle(entry.name)
         .setDescription("FileHub share")
         .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
         .setDestinationInExternalPublicDir(
-            Environment.DIRECTORY_DOWNLOADS,
+            directory,
             "FileHub/${entry.name}",
         )
     val manager = context.getSystemService(DownloadManager::class.java)

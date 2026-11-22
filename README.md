@@ -4,10 +4,10 @@
 
 Native Android client for [FileHub](https://github.com/Llesue/filehub).
 
-Status: **v0.1.0** — first public release. Download: [GitHub Releases](https://github.com/Llesue/filehub-android/releases/latest).
+Status: **v0.1.1 in development**. Latest published release: [v0.1.0](https://github.com/Llesue/filehub-android/releases/tag/v0.1.0).
 
 - Kotlin + Jetpack Compose (Material 3), `minSdk 26`, `compileSdk 37.1`, `targetSdk 36`
-- OkHttp + kotlinx.serialization, Room, WorkManager, Media3, Coil
+- OkHttp + kotlinx.serialization, Room, WorkManager, Media3 (background audio session), Coil
 - Builds run on a remote Linux host; local builds require a JDK and Android SDK
 
 ## Features
@@ -15,9 +15,9 @@ Status: **v0.1.0** — first public release. Download: [GitHub Releases](https:/
 - Multiple FileHub instances, password login → per-device API token (Android Keystore)
 - Multi-address failover; addresses are tried in the configured order (put LAN first)
 - Roots + remote mounts, compact file rows, folder sizes, cursor paging, thumbnails
-- File operations: create, rename, delete with confirmation code, copy/move, ZIP
-- Search across all roots / current root
-- Image preview with swipe-to-page, double-tap 1:1 zoom, persistent blurred backdrop, EXIF and download
+- File operations: create, rename, delete with confirmation code and countdown, copy/move, ZIP, with async job progress and cancel
+- Search across all roots / current root, with index status and one-tap indexing
+- Image preview with swipe-to-page, anchored pinch zoom, single-tap chrome toggle, original/preview switch, EXIF and download
 - Media3 video/audio preview; title and landscape button follow player controls
 - Markdown preview with tables, task lists, strikethrough and links
 - Resumable background uploads/downloads, notifications, transfer center
@@ -65,9 +65,10 @@ Signing certificate SHA-256:
 ## Docs
 
 - [`PLAN.md`](PLAN.md) — scope, architecture, milestones
-- [`AGENTS.md`](AGENTS.md) — engineering constraints
 - [`docs/ui-spec.md`](docs/ui-spec.md) — UI proposal
 - [`docs/sync-spec.md`](docs/sync-spec.md) — photo/directory sync design
 - [`docs/app-icon.svg`](docs/app-icon.svg) — source logo
-- [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md) — release notes
+- [`docs/api-notes.md`](docs/api-notes.md) — API notes and contract quirks
+- [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md) — 0.1.0 release notes
+- [`docs/release-notes/v0.1.1.md`](docs/release-notes/v0.1.1.md) — 0.1.1 release notes
 - [`CHANGELOG.md`](CHANGELOG.md)
