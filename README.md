@@ -8,7 +8,7 @@ Status: **v0.1.0** — first public release. Download: [GitHub Releases](https:/
 
 - Kotlin + Jetpack Compose (Material 3), `minSdk 26`, `compileSdk 37.1`, `targetSdk 36`
 - OkHttp + kotlinx.serialization, Room, WorkManager, Media3, Coil
-- Builds run on the remote `parasite` host; local builds are not supported
+- Builds run on a remote Linux host; local builds require a JDK and Android SDK
 
 ## Features
 

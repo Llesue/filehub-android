@@ -1,7 +1,7 @@
 # FileHub Android 客户端 — 实施计划
 
 > 状态：草案 v0.1（2026-11-22），待确认
-> 后端契约：`filehub-server/docs/openapi.yaml` + FileHub 0.2.x 实际实现
+> 后端契约：服务端仓库的 `docs/openapi.yaml` + FileHub 0.2.x 实际实现
 > 仓库：`filehub-android`（当前为空目录）
 
 ---
@@ -12,7 +12,7 @@
 - **只做移动端最值钱的四件事**：可靠浏览/预览、可恢复的后台传输、自动同步（相册/目录）、分享（含公开分享页）。
 - **鉴权不采用 cookie + CSRF**：登录一次后自动创建本机专用 API Token（`scope=write`），之后全部请求走 `Authorization: Bearer`。原因：FileHub session 默认 TTL 只有 24h（示例配置 168h），移动端每周重登不可接受；而 token 无 CSRF 负担、可在服务端按设备撤销。
 - **不引入 Retrofit / Hilt / Firebase**：OkHttp + kotlinx.serialization + 手写轻量 DI，减少构建复杂度与不透明行为；传输、Range、SSE、chunk PUT 都需要直接控制 OkHttp。
-- **构建在 parasite + GitHub Actions**：本机无 JDK、无 KVM（不能跑模拟器）、磁盘只剩 ~5G。parasite 有 JDK 21、8 核、40G 可用空间，装 Android SDK 即可；真机为Android device（Android 16 / API 36），无线 adb 验收。
+- **构建在远程 Linux 构建机 + GitHub Actions**：本机无 JDK、无 KVM（不能跑模拟器），磁盘空间有限。构建机需 JDK 21 和 Android SDK；真机为 Android 16 / API 36，无线 adb 验收。
 - **分 7 个里程碑，约 5–6.5 周（AI 辅助、含真机调试）**：M0 工具链与骨架 → M1 服务器/浏览 → M2 文件操作/搜索/预览 → M3 传输引擎 → M4 相册同步 → M5 目录同步（上传/下载/双向）→ M6 分享/设置/适配与发布。
 - **必须同步补契约**：现有 `openapi.yaml` 缺不少客户端要用的字段和端点（见 §2.4），实施时在 filehub 仓库补文档并用契约测试兜底。
 
@@ -451,7 +451,7 @@ app/src/main/java/filehub/android/
 
 ### 6.2 测试矩阵
 
-- 真机：Android device（Android 16 / API 36）无线 adb；低版本（API 26–28）暂无真机，用 Robolectric 覆盖，发布前借旧机或云真机做一次冒烟。
+- 真机：Android 16 / API 36 无线 adb；低版本（API 26–28）暂无真机，用 Robolectric 覆盖，发布前借旧机或云真机做一次冒烟。
 - 系统：API 26（最低）、29（Scoped Storage 分界）、33（通知/媒体权限）、35/36（前台服务与 edge-to-edge）。
 - 网络：Wi-Fi、4G/5G、断网重连、高延迟、代理、HTTP、HTTPS、自签名（预期失败提示）。
 - 服务器：FileHub 0.2.x 最新、缺少部分能力的旧版本、只读 root、配额满、未建索引、公开分享（密码/过期/撤销）。
@@ -491,8 +491,8 @@ filehub-android/
   app/
   gradle/libs.versions.toml
   scripts/
-    provision-sdk.sh      # parasite 安装 cmdline-tools/platform 37.1/build-tools（幂等）
-    build-remote.sh       # rsync → parasite Gradle 构建 → 拉回 APK
+    provision-sdk.sh      # 构建机安装 cmdline-tools/platform 37.1/build-tools（幂等）
+    build-remote.sh       # rsync → 构建机 Gradle 构建 → 拉回 APK
     dev-server.sh         # 起临时 FileHub 实例做契约测试
   docs/
     api-notes.md
@@ -511,7 +511,7 @@ filehub-android/
 
 本机：无 JDK、无 KVM、磁盘紧张 → **不在本机构建**（已写入 `AGENTS.md`）。
 
-parasite（默认构建机）：
+默认构建机：
 
 ```bash
 # JDK 21 已装；只装 SDK（约 3G）
@@ -530,9 +530,9 @@ latest/bin/sdkmanager "platform-tools" "platforms;android-37.1" "build-tools;36.
 ./scripts/build-remote.sh check        # lint + unit test，不拉 APK
 ```
 
-脚本行为：`rsync --delete` 同步源码（排除 `.git`/`app/build`/`.gradle`）→ 远端 `./gradlew` → 拉回 `app/build/outputs/apk/**` 到本地 `dist/`；远端保留 `~/.gradle` 与 `app/build` 做增量。SSH 默认 `build-host`，可用 `FILEHUB_ANDROID_BUILD_HOST` 覆盖。
+脚本行为：`rsync --delete` 同步源码（排除 `.git`/`app/build`/`.gradle`）→ 远端 `./gradlew` → 拉回 `app/build/outputs/apk/**` 到本地 `dist/`；远端保留 `~/.gradle` 与 `app/build` 做增量。SSH 主机默认读取本地 ssh config，可用 `FILEHUB_ANDROID_BUILD_HOST` 覆盖。
 
-Gradle 内存：parasite 当前约 1.8GiB（上限 10GiB），设置 `org.gradle.jvmargs=-Xmx2g`、`kotlin.daemon.jvmargs=-Xmx1g`、`org.gradle.workers.max=4`；OOM 时优先调 Hyper-V 内存或改用 GitHub Actions，不降并发硬扛。
+Gradle 内存：构建机内存有限，设置 `org.gradle.jvmargs=-Xmx2g`、`kotlin.daemon.jvmargs=-Xmx1g`、`org.gradle.workers.max=4`；OOM 时优先调 Hyper-V 内存或改用 GitHub Actions，不降并发硬扛。
 
 本地命令（仅适用于 CI/有 JDK 的环境）：
 
@@ -561,7 +561,7 @@ Gradle 内存：parasite 当前约 1.8GiB（上限 10GiB），设置 `org.gradle
 - **最终形态交付**：边界、失败路径、并发、权限、资源上限一次考虑清楚；不做"先凑合"。
 - **不换技术栈**：要换先改本计划并确认。
 - **失败协议**：同一问题失败 2 次，先查官方文档/issue，再找用户，附证据。
-- **重活远程**：构建、测试、截图、真机安装走 parasite 或 CI；本机只做编辑与 git。构建脚本与内存限制见 §7.2。
+- **重活远程**：构建、测试、截图、真机安装走远程构建机或 CI；本机只做编辑与 git。构建脚本与内存限制见 §7.2。
 - **验证门禁**：`lintDebug + testDebugUnitTest + assembleDebug` 全绿才算完成；UI 改动过 Roborazzi 视觉 QA；安全敏感模块（token/上传/下载/分享/FileProvider/深链）单独 review。
 - **不擅自 commit/push/tag**；未验收不发版。Conventional Commits（英文），SemVer + `CHANGELOG.md`，发布物附 SHA-256。
 - **契约优先**：以 FileHub 源码实际行为为准；开放 API 缺口先记录 `docs/api-notes.md`，改 `openapi.yaml` 需确认。
@@ -575,7 +575,7 @@ Gradle 内存：parasite 当前约 1.8GiB（上限 10GiB），设置 `org.gradle
 
 | 阶段 | 交付物 | 退出标准 | 估时 |
 |---|---|---|---|
-| **M0 工具链/骨架** | parasite SDK、`build-remote.sh`、Gradle 工程、版本目录、主题骨架、CI、登录+token、MockWebServer 基建 | Hello Compose APK 可安装；能登录演示站；CI 绿 | 1–1.5d |
+| **M0 工具链/骨架** | 远程构建机 SDK、`build-remote.sh`、Gradle 工程、版本目录、主题骨架、CI、登录+token、MockWebServer 基建 | Hello Compose APK 可安装；能登录演示站；CI 绿 | 1–1.5d |
 | **M1 服务器/浏览** | 服务器 tab（多实例/切换/添加）、登录、位置页（root + 远程目录卡片行）、文件 tile 卡片行/紧凑列表、面包屑、排序、分页、刷新、缩略图、只读态 | 多服务器切换；1000 条目录流畅滚动；缩略图 pending 正确重试 | 3–4d |
 | **M2 操作/搜索/预览** | mkdir/touch/rename/delete/copy/move、属性、ZIP 任务、搜索+筛选、图片/视频/PDF/文本预览、拍照上传 | 全操作闭环；删除二次确认；搜索定位；预览不 OOM | 3–4d |
 | **M3 传输** | 上传/下载引擎、WorkManager、通知、进度胶囊、暂停/恢复、进程死亡恢复、MediaStore/SAF | 断网/杀进程可恢复；屏幕关闭继续；大文件不 OOM | 3–4d |
@@ -592,7 +592,7 @@ Gradle 内存：parasite 当前约 1.8GiB（上限 10GiB），设置 `org.gradle
 | 风险 | 影响 | 对策 |
 |---|---|---|
 | AGP 9.5 内置 Kotlin + Compose BOM 2026.11 较新 | M0 卡构建 | 先用最小 Hello Compose 验证；失败则回退 AGP 8.13 + Kotlin 2.2.20 + BOM 2026.09（compileSdk 36/37），记录决策 |
-| 无模拟器（无 `/dev/kvm`），真机只有Android device（Android 16 / API 36） | 低版本/厂商 ROM 行为差异漏测 | 低版本用 Robolectric 覆盖；发布前借旧机或云真机跑一次 API 26 冒烟；HyperOS 后台限制单独验证 |
+| 无模拟器（无 `/dev/kvm`），真机只有一台 Android 16 设备 | 低版本/厂商 ROM 行为差异漏测 | 低版本用 Robolectric 覆盖；发布前借旧机或云真机跑一次 API 26 冒烟；HyperOS 后台限制单独验证 |
 | 同步的后台限制 | 周期任务不精确、长任务被系统停止、HyperOS 杀进程 | WorkManager + 前台服务 + 断点；引导用户关闭电池限制/允许自启动；不承诺实时 |
 | 相册权限只有"部分照片" | 用户以为全量备份，实际只传了一部分 | 权限页明示；扫描前检测授权范围；提供"选择更多照片"入口 |
 | 上传 mtime 依赖 FileHub 0.2.1 | 服务端未升级时相册时间线失真，或字段不被接受 | 版本检测；旧版降级并提示升级；若字段报错自动不带 mtime 重试一次 |
@@ -600,7 +600,7 @@ Gradle 内存：parasite 当前约 1.8GiB（上限 10GiB），设置 `org.gradle
 | SAF 大目录枚举慢 | 首次同步耗时长、耗电 | 显示扫描进度；限制并发；忽略规则；可暂停；后续增量 |
 | 服务器端无批量 stat/递归列表 | 同步大量文件时 API 调用多 | 本地缓存远端树；按目录增量拉取；限制并发；失败重试 |
 | 同步冲突处理 | 重名/双方修改可能丢数据 | 双向用 base/local/remote 三方比较；冲突不覆盖、逐文件解决；删除同步默认关；改名 v1 按删+增 |
-| parasite 内存 1.8GiB | Gradle/Kotlin daemon OOM | 限制 worker/heap；调 Hyper-V 内存；CI 兜底 |
+| 构建机内存不足 | Gradle/Kotlin daemon OOM | 限制 worker/heap；调 Hyper-V 内存；CI 兜底 |
 | 自托管常见 HTTP/自签名证书 | 登录被系统拦截 | HTTP 允许 + 风险提示；自签名 P1 TOFU；绝不静默忽略证书 |
 | SSE 只支持 session，token 用不了 | 无法实时刷新/缩略图事件 | v1 轮询 + 操作后刷新；P1 评估保留短期 session 或纯轮询 |
 | 服务端上传冲突策略是账号级偏好 | 用户以为能按次选择 | UI 明示"当前策略：重命名/覆盖/跳过"，设置页可改并提示影响 Web 端 |
@@ -625,9 +625,9 @@ Gradle 内存：parasite 当前约 1.8GiB（上限 10GiB），设置 `org.gradle
 - 公开分享查看器：v1 必做。
 - 鉴权：登录一次 → 自动创建 1 年期 `write` token，之后全走 Bearer。
 - 分发：只发 GitHub Releases APK（不上架应用商店 / 不适配 F-Droid）。
-- 契约补丁：允许修改 `filehub-server/docs/openapi.yaml`，只补文档。
+- 契约补丁：允许修改服务端仓库的 `docs/openapi.yaml`，只补文档。
 - 仓库：`Llesue/filehub-android`（本地 `origin` 已接）。
-- 真机：Android device，Android 16 / API 36。
+- 真机：Android 16 / API 36。
 
 **我按"看情况"定的默认值（可推翻）**
 

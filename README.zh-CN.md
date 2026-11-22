@@ -8,7 +8,7 @@
 
 - Kotlin + Jetpack Compose（Material 3），`minSdk 26`、`compileSdk 37.1`、`targetSdk 36`
 - OkHttp + kotlinx.serialization、Room、WorkManager、Media3、Coil
-- 构建在远程 `parasite` 主机执行，不支持本机构建
+- 构建在远程 Linux 主机执行，本机构建需自备 JDK 和 Android SDK
 
 ## 功能
 
