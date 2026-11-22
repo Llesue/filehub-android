@@ -75,6 +75,7 @@ import filehub.android.BuildConfig
 import java.io.File
 import filehub.android.R
 import filehub.android.core.model.FileEntry
+import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileKind
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.SortOrder
@@ -90,6 +91,7 @@ import filehub.android.ui.theme.FileHubFileTeal
 @Composable
 fun FileBrowserScreen(
     viewModel: FilesViewModel,
+    roots: List<FileRoot>,
     onSearch: (Long?) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -100,6 +102,9 @@ fun FileBrowserScreen(
     var newFolder by remember { mutableStateOf(false) }
     var newFile by remember { mutableStateOf(false) }
     var renameEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var transferEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var transferMove by remember { mutableStateOf(true) }
+    var zipDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -375,6 +380,16 @@ fun FileBrowserScreen(
                             requestNotificationPermission()
                             viewModel.enqueueDownload(entry)
                         },
+                        onShare = { viewModel.openShare(entry) },
+                        onMove = {
+                            transferEntry = entry
+                            transferMove = true
+                        },
+                        onCopy = {
+                            transferEntry = entry
+                            transferMove = false
+                        },
+                        onExtract = { viewModel.unzip(entry) },
                     )
                 }
                 state.nextCursor?.let { cursor ->
@@ -401,6 +416,7 @@ fun FileBrowserScreen(
                     requestNotificationPermission()
                     viewModel.downloadSelected()
                 },
+                onZip = { zipDialog = true },
                 onClear = viewModel::clearSelection,
             )
         }
@@ -440,6 +456,49 @@ fun FileBrowserScreen(
             },
         )
     }
+    transferEntry?.let { entry ->
+        TargetPathDialog(
+            title = stringResource(if (transferMove) R.string.move_to else R.string.copy_to),
+            roots = roots,
+            initialRootId = state.root?.id,
+            initialPath = state.path,
+            onDismiss = { transferEntry = null },
+            onConfirm = { rootId, path ->
+                if (transferMove) {
+                    viewModel.moveEntry(entry, rootId, path)
+                } else {
+                    viewModel.copyEntry(entry, rootId, path)
+                }
+                transferEntry = null
+            },
+        )
+    }
+    if (zipDialog) {
+        TextInputDialog(
+            title = stringResource(R.string.zip_create),
+            initialValue = "archive.zip",
+            confirmLabel = stringResource(R.string.dialog_create),
+            onDismiss = { zipDialog = false },
+            onConfirm = { name ->
+                zipDialog = false
+                viewModel.zipSelected(name)
+            },
+        )
+    }
+    state.shareEntry?.let { entry ->
+        if (state.shareCreated == null) {
+            ShareCreateDialog(
+                entryName = entry.name,
+                loading = state.shareLoading,
+                error = state.shareError,
+                onDismiss = viewModel::dismissShare,
+                onCreate = viewModel::createShare,
+            )
+        }
+    }
+    state.shareCreated?.let { created ->
+        ShareLinkDialog(link = created.url, onDismiss = viewModel::dismissShare)
+    }
     state.deletePreview?.let { preview ->
         DeleteConfirmDialog(
             preview = preview,
@@ -473,6 +532,7 @@ private fun SelectionBar(
     count: Int,
     onDelete: () -> Unit,
     onDownload: () -> Unit,
+    onZip: () -> Unit,
     onClear: () -> Unit,
 ) {
     Surface(
@@ -498,6 +558,9 @@ private fun SelectionBar(
                 }
                 TextButton(onClick = onDownload) {
                     Text(stringResource(R.string.transfer_download_action))
+                }
+                TextButton(onClick = onZip) {
+                    Text(stringResource(R.string.zip_create))
                 }
                 TextButton(onClick = onDelete) {
                     Text(
@@ -608,6 +671,10 @@ private fun FileCard(
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onDownload: () -> Unit,
+    onShare: () -> Unit,
+    onMove: () -> Unit,
+    onCopy: () -> Unit,
+    onExtract: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -712,6 +779,36 @@ private fun FileCard(
                             onDetails()
                         },
                     )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.share_create)) },
+                        onClick = {
+                            menuOpen = false
+                            onShare()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.move_to)) },
+                        onClick = {
+                            menuOpen = false
+                            onMove()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.copy_to)) },
+                        onClick = {
+                            menuOpen = false
+                            onCopy()
+                        },
+                    )
+                    if (entry.name.endsWith(".zip", ignoreCase = true)) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.extract)) },
+                            onClick = {
+                                menuOpen = false
+                                onExtract()
+                            },
+                        )
+                    }
                     if (!entry.isDir) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.transfer_download_action)) },

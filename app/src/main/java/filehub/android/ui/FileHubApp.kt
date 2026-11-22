@@ -29,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,6 +41,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import filehub.android.FileHubApplication
 import filehub.android.R
+import filehub.android.data.api.PublicLink
 import filehub.android.data.transfer.TransferStatus
 
 enum class MainTab(
@@ -90,8 +92,10 @@ fun FileHubApp(viewModel: AppViewModel) {
     val transferViewModel: TransferViewModel = viewModel(factory = TransferViewModel.factory(application))
     val photoSyncViewModel: PhotoSyncViewModel = viewModel(factory = PhotoSyncViewModel.factory(application))
     val folderSyncViewModel: FolderSyncViewModel = viewModel(factory = FolderSyncViewModel.factory(application))
+    val shareViewModel: ShareViewModel = viewModel(factory = ShareViewModel.factory(application))
     var tab by rememberSaveable { mutableStateOf(MainTab.Servers) }
     val session by viewModel.session.collectAsStateWithLifecycle()
+    val theme by viewModel.theme.collectAsStateWithLifecycle()
     val transfers by transferViewModel.items.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
@@ -160,6 +164,9 @@ fun FileHubApp(viewModel: AppViewModel) {
                             onTransfers = { navController.navigate("transfers") },
                             onPhotoSync = { navController.navigate("photoSync") },
                             onFolderSync = { navController.navigate("folderSync") },
+                            onShares = { navController.navigate("shares") },
+                            theme = theme,
+                            onThemeChange = viewModel::setTheme,
                         )
                     }
                 }
@@ -194,6 +201,30 @@ fun FileHubApp(viewModel: AppViewModel) {
                     navController.popBackStack()
                 },
             )
+        }
+        composable("shares") {
+            SharesScreen(
+                viewModel = shareViewModel,
+                onBack = { navController.popBackStack() },
+                onOpenPublic = { link ->
+                    navController.navigate(
+                        "publicShare/${Uri.encode(link.baseUrl)}/${Uri.encode(link.token)}",
+                    )
+                },
+            )
+        }
+        composable("publicShare/{base}/{token}") { entry ->
+            val base = entry.arguments?.getString("base")
+            val token = entry.arguments?.getString("token")
+            if (base != null && token != null) {
+                val publicViewModel: PublicShareViewModel = viewModel(
+                    factory = PublicShareViewModel.factory(PublicLink(base, token)),
+                )
+                PublicShareScreen(
+                    viewModel = publicViewModel,
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
         composable("folderSync") {
             FolderSyncScreen(

@@ -7,6 +7,8 @@ import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.SortOrder
 import filehub.android.core.model.SearchResult
+import filehub.android.core.model.ShareCreated
+import filehub.android.core.model.ShareInfo
 import filehub.android.core.model.LoginResult
 import filehub.android.core.model.ServerProfile
 import java.io.IOException
@@ -239,6 +241,79 @@ data class UploadCompleteDto(
 )
 
 @Serializable
+internal data class ShareInfoDto(
+    val id: Long,
+    val kind: String = "single",
+    @SerialName("item_count") val itemCount: Int = 0,
+    @SerialName("real_path") val realPath: String = "",
+    @SerialName("is_dir") val isDir: Boolean = false,
+    @SerialName("has_password") val hasPassword: Boolean = false,
+    @SerialName("expires_at") val expiresAt: Long? = null,
+    val expired: Boolean = false,
+    @SerialName("read_only") val readOnly: Boolean = true,
+    val revoked: Boolean = false,
+    @SerialName("created_at") val createdAt: Long = 0,
+    @SerialName("visit_count") val visitCount: Int = 0,
+)
+
+@Serializable
+internal data class ShareListDto(
+    val shares: List<ShareInfoDto> = emptyList(),
+    @SerialName("next_cursor") val nextCursor: String? = null,
+)
+
+@Serializable
+internal data class CreateShareRequest(
+    val root: Long,
+    val path: String? = null,
+    val paths: List<String>? = null,
+    val password: String? = null,
+    @SerialName("expires_at") val expiresAt: Long? = null,
+    @SerialName("read_only") val readOnly: Boolean = true,
+)
+
+@Serializable
+internal data class ShareCreatedDto(
+    val id: Long,
+    val token: String = "",
+    val url: String = "",
+    @SerialName("expires_at") val expiresAt: Long? = null,
+    val kind: String = "single",
+    @SerialName("item_count") val itemCount: Int = 0,
+)
+
+@Serializable
+internal data class ShareUrlDto(
+    val token: String = "",
+    val url: String = "",
+)
+
+@Serializable
+internal data class UpdateShareRequest(
+    @SerialName("read_only") val readOnly: Boolean? = null,
+    @SerialName("expires_at") val expiresAt: Long? = null,
+    @SerialName("clear_expires") val clearExpires: Boolean? = null,
+    val password: String? = null,
+    @SerialName("clear_password") val clearPassword: Boolean? = null,
+    val revoked: Boolean? = null,
+)
+
+@Serializable
+internal data class ArchiveZipRequest(
+    val root: Long,
+    val dir: String,
+    val paths: List<String>,
+    val name: String,
+)
+
+@Serializable
+internal data class ArchiveUnzipRequest(
+    val root: Long,
+    val path: String,
+    val target: String? = null,
+)
+
+@Serializable
 internal data class ErrorEnvelope(
     val error: ErrorDto? = null,
 )
@@ -464,6 +539,84 @@ class FileHubApi(
             method = "DELETE",
             body = null,
             csrfToken = null,
+        )
+    }
+
+    suspend fun listShares(limit: Int = 100, cursor: String? = null): Pair<List<ShareInfo>, String?> {
+        val params = buildMap {
+            put("limit", limit.toString())
+            cursor?.takeIf { it.isNotBlank() }?.let { put("cursor", it) }
+        }
+        val response = getJson("shares", ShareListDto.serializer(), params)
+        return response.shares.map {
+            ShareInfo(
+                id = it.id,
+                kind = it.kind,
+                itemCount = it.itemCount,
+                realPath = it.realPath,
+                isDir = it.isDir,
+                hasPassword = it.hasPassword,
+                expiresAt = it.expiresAt,
+                expired = it.expired,
+                readOnly = it.readOnly,
+                revoked = it.revoked,
+                createdAt = it.createdAt,
+                visitCount = it.visitCount,
+            )
+        } to response.nextCursor
+    }
+
+    suspend fun createShare(
+        rootId: Long,
+        paths: List<String>,
+        password: String? = null,
+        expiresAt: Long? = null,
+        readOnly: Boolean = true,
+    ): ShareCreated {
+        val body = CreateShareRequest(
+            root = rootId,
+            path = paths.singleOrNull(),
+            paths = paths.takeIf { it.size > 1 },
+            password = password,
+            expiresAt = expiresAt,
+            readOnly = readOnly,
+        )
+        val response = postJson(
+            path = "shares",
+            body = body,
+            serializer = CreateShareRequest.serializer(),
+            deserializer = ShareCreatedDto.serializer(),
+        )
+        return ShareCreated(response.id, response.token, response.url, response.expiresAt)
+    }
+
+    suspend fun shareUrl(id: Long): ShareCreated {
+        val response = getJson("shares/$id/url", ShareUrlDto.serializer())
+        return ShareCreated(id, response.token, response.url, null)
+    }
+
+    suspend fun rotateShare(id: Long): ShareCreated {
+        val response = postJsonEmpty("shares/$id/rotate", ShareUrlDto.serializer())
+        return ShareCreated(id, response.token, response.url, null)
+    }
+
+    suspend fun revokeShare(id: Long) {
+        requestUnit("shares/$id", "DELETE", body = null, csrfToken = null)
+    }
+
+    suspend fun archiveZip(rootId: Long, dir: String, paths: List<String>, name: String) {
+        postJson(
+            path = "archive/zip",
+            body = ArchiveZipRequest(rootId, dir, paths, name),
+            serializer = ArchiveZipRequest.serializer(),
+        )
+    }
+
+    suspend fun archiveUnzip(rootId: Long, path: String, target: String? = null) {
+        postJson(
+            path = "archive/unzip",
+            body = ArchiveUnzipRequest(rootId, path, target),
+            serializer = ArchiveUnzipRequest.serializer(),
         )
     }
 

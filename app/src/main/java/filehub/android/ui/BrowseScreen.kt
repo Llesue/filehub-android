@@ -94,6 +94,7 @@ fun BrowseScreen(
     if (root != null) {
         FileBrowserScreen(
             viewModel = filesViewModel,
+            roots = state.roots,
             onSearch = onSearch,
             onBack = {
                 if (files.path.isEmpty()) {

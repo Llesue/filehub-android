@@ -103,6 +103,47 @@ data class DirectoryListing(
     val stale: Boolean,
 )
 
+data class ShareInfo(
+    val id: Long,
+    val kind: String,
+    val itemCount: Int,
+    val realPath: String,
+    val isDir: Boolean,
+    val hasPassword: Boolean,
+    val expiresAt: Long?,
+    val expired: Boolean,
+    val readOnly: Boolean,
+    val revoked: Boolean,
+    val createdAt: Long,
+    val visitCount: Int,
+)
+
+data class ShareCreated(
+    val id: Long,
+    val token: String,
+    val url: String,
+    val expiresAt: Long?,
+)
+
+data class PublicShareEntry(
+    val name: String,
+    val isDir: Boolean,
+    val size: Long,
+    val modified: Long,
+    val mimeType: String,
+    val hasPreview: Boolean,
+)
+
+data class PublicShareMeta(
+    val name: String,
+    val path: String,
+    val isDir: Boolean,
+    val readOnly: Boolean,
+    val entries: List<PublicShareEntry>,
+    val nextCursor: String?,
+    val collection: Boolean,
+)
+
 private fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKind {
     if (isDir) return FileKind.Folder
     val mime = mimeType.lowercase()

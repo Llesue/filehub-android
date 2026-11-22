@@ -83,6 +83,12 @@ class FilesRepository(
         kind: String? = null,
     ): List<SearchResult> = api(profile).search(rootId, query, kind = kind)
 
+    suspend fun archiveZip(profile: ServerProfile, rootId: Long, dir: String, paths: List<String>, name: String) =
+        api(profile).archiveZip(rootId, dir, paths, name)
+
+    suspend fun archiveUnzip(profile: ServerProfile, rootId: Long, path: String, target: String? = null) =
+        api(profile).archiveUnzip(rootId, path, target)
+
     suspend fun readText(
         profile: ServerProfile,
         rootId: Long,

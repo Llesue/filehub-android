@@ -10,10 +10,13 @@ import filehub.android.FileHubApplication
 import filehub.android.R
 import filehub.android.data.SessionRepository
 import filehub.android.data.SessionState
+import filehub.android.data.local.SettingsStore
 import filehub.android.data.api.FileHubApiException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -26,9 +29,15 @@ data class LoginUiState(
 class AppViewModel(
     private val application: Application,
     private val repository: SessionRepository,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     val session: StateFlow<SessionState> = repository.state
+    val theme: StateFlow<String> = settingsStore.theme.stateIn(
+        scope = viewModelScope,
+        started = kotlinx.coroutines.flow.SharingStarted.Eagerly,
+        initialValue = "system",
+    )
 
     private val _login = MutableStateFlow(LoginUiState())
     val login: StateFlow<LoginUiState> = _login.asStateFlow()
@@ -90,6 +99,10 @@ class AppViewModel(
         viewModelScope.launch { repository.removeProfile(profileId) }
     }
 
+    fun setTheme(value: String) {
+        viewModelScope.launch { settingsStore.setTheme(value) }
+    }
+
     fun clearSessionError() {
         repository.clearError()
     }
@@ -102,7 +115,7 @@ class AppViewModel(
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = application as FileHubApplication
-                AppViewModel(app, app.container.sessionRepository)
+                AppViewModel(app, app.container.sessionRepository, app.container.settingsStore)
             }
         }
     }

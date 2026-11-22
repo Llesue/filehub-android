@@ -17,6 +17,8 @@ import filehub.android.core.model.FileSort
 import filehub.android.core.model.ServerProfile
 import filehub.android.core.model.SortOrder
 import filehub.android.data.FilesRepository
+import filehub.android.data.ShareRepository
+import filehub.android.core.model.ShareCreated
 import filehub.android.data.api.DeletePreviewDto
 import filehub.android.data.api.TextFileDto
 import filehub.android.data.media.MediaPlayerFactory
@@ -60,6 +62,10 @@ data class FileBrowserState(
     val previewLoading: Boolean = false,
     val previewMediaReady: Int = 0,
     val previewError: String? = null,
+    val shareEntry: FileEntry? = null,
+    val shareCreated: ShareCreated? = null,
+    val shareLoading: Boolean = false,
+    val shareError: String? = null,
 ) {
     val isEmpty: Boolean get() = !loading && error == null && entries.isEmpty()
     val selectionMode: Boolean get() = selected.isNotEmpty()
@@ -71,6 +77,7 @@ class FilesViewModel(
     private val mediaPlayerFactory: MediaPlayerFactory,
     private val previewDownloader: PreviewDownloader,
     private val transferRepository: TransferRepository,
+    private val shareRepository: ShareRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileBrowserState())
@@ -350,6 +357,148 @@ class FilesViewModel(
         _state.update { it.copy(selectedEntry = null) }
     }
 
+    fun openShare(entry: FileEntry) {
+        _state.update {
+            it.copy(shareEntry = entry, shareCreated = null, shareError = null)
+        }
+    }
+
+    fun dismissShare() {
+        _state.update {
+            it.copy(shareEntry = null, shareCreated = null, shareError = null, shareLoading = false)
+        }
+    }
+
+    fun createShare(password: String?, expiresAt: Long?, readOnly: Boolean) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val entry = current.shareEntry ?: return
+        if (current.shareLoading) return
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        _state.update { it.copy(shareLoading = true, shareError = null) }
+        viewModelScope.launch {
+            runCatching {
+                shareRepository.create(
+                    profile = profile,
+                    rootId = root.id,
+                    paths = listOf(path),
+                    password = password?.takeIf { it.isNotBlank() },
+                    expiresAt = expiresAt,
+                    readOnly = readOnly,
+                )
+            }.onSuccess { created ->
+                _state.update {
+                    it.copy(
+                        shareLoading = false,
+                        shareCreated = created.copy(
+                            url = ShareViewModel.absoluteUrl(profile.baseUrl, created.url),
+                        ),
+                    )
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(shareLoading = false, shareError = error.toUserMessage())
+                }
+            }
+        }
+    }
+
+    fun moveEntry(entry: FileEntry, destRootId: Long, destPath: String) {
+        transferPaths(listOf(entry.name), destRootId, destPath, move = true)
+    }
+
+    fun copyEntry(entry: FileEntry, destRootId: Long, destPath: String) {
+        transferPaths(listOf(entry.name), destRootId, destPath, move = false)
+    }
+
+    fun moveSelected(destRootId: Long, destPath: String) {
+        val current = _state.value
+        transferPaths(
+            current.entries.filter { it.name in current.selected }.map { it.name },
+            destRootId,
+            destPath,
+            move = true,
+        )
+    }
+
+    fun copySelected(destRootId: Long, destPath: String) {
+        val current = _state.value
+        transferPaths(
+            current.entries.filter { it.name in current.selected }.map { it.name },
+            destRootId,
+            destPath,
+            move = false,
+        )
+    }
+
+    fun zipSelected(name: String) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val names = current.entries.filter { it.name in current.selected }.map { it.name }
+        if (names.isEmpty()) return
+        _state.update { it.copy(operationLoading = true, operationError = null) }
+        viewModelScope.launch {
+            runCatching { repository.archiveZip(profile, root.id, current.path, names, name) }
+                .onSuccess {
+                    _state.update { it.copy(operationLoading = false, selected = emptySet()) }
+                    refresh()
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                    }
+                }
+        }
+    }
+
+    fun unzip(entry: FileEntry) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        _state.update { it.copy(operationLoading = true, operationError = null) }
+        viewModelScope.launch {
+            runCatching { repository.archiveUnzip(profile, root.id, path) }
+                .onSuccess { _state.update { it.copy(operationLoading = false) } }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(operationLoading = false, operationError = error.toUserMessage())
+                    }
+                }
+        }
+    }
+
+    private fun transferPaths(
+        paths: List<String>,
+        destRootId: Long,
+        destPath: String,
+        move: Boolean,
+    ) {
+        if (paths.isEmpty()) return
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        _state.update { it.copy(operationLoading = true, operationError = null) }
+        viewModelScope.launch {
+            runCatching {
+                if (move) {
+                    repository.move(profile, root.id, paths, destRootId, destPath)
+                } else {
+                    repository.copy(profile, root.id, paths, destRootId, destPath)
+                }
+            }.onSuccess {
+                _state.update { it.copy(operationLoading = false, selected = emptySet()) }
+                refresh()
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(operationLoading = false, operationError = error.toUserMessage())
+                }
+            }
+        }
+    }
+
     fun enqueueUploads(uris: List<Uri>) {
         val current = _state.value
         val profile = current.profile ?: return
@@ -505,6 +654,7 @@ class FilesViewModel(
                     app.container.mediaPlayerFactory,
                     app.container.previewDownloader,
                     app.container.transferRepository,
+                    app.container.shareRepository,
                 )
             }
         }

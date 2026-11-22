@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.viewModels
 import filehub.android.ui.AppViewModel
 import filehub.android.ui.FileHubApp
@@ -18,7 +21,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            FileHubTheme {
+            val theme by viewModel.theme.collectAsStateWithLifecycle()
+            FileHubTheme(
+                darkTheme = when (theme) {
+                    "dark" -> true
+                    "light" -> false
+                    else -> isSystemInDarkTheme()
+                },
+            ) {
                 FileHubApp(viewModel)
             }
         }

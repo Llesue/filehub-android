@@ -2,8 +2,10 @@ package filehub.android
 
 import android.content.Context
 import filehub.android.data.FilesRepository
+import filehub.android.data.ShareRepository
 import filehub.android.data.SessionRepository
 import filehub.android.data.local.ProfileStore
+import filehub.android.data.local.SettingsStore
 import filehub.android.data.local.TokenVault
 import filehub.android.data.media.MediaPlayerFactory
 import filehub.android.data.media.PreviewDownloader
@@ -20,9 +22,11 @@ class AppContainer(context: Context) {
     private val appContext = context.applicationContext
 
     val profileStore: ProfileStore = ProfileStore(appContext)
+    val settingsStore: SettingsStore = SettingsStore(appContext)
     val tokenVault: TokenVault = TokenVault()
     val sessionRepository: SessionRepository = SessionRepository(profileStore, tokenVault)
     val filesRepository: FilesRepository = FilesRepository(sessionRepository)
+    val shareRepository: ShareRepository = ShareRepository(sessionRepository)
     val thumbnailLoaderFactory: ThumbnailLoaderFactory = ThumbnailLoaderFactory(appContext)
     val mediaPlayerFactory: MediaPlayerFactory = MediaPlayerFactory(appContext)
     val previewDownloader: PreviewDownloader = PreviewDownloader(appContext.cacheDir)

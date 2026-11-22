@@ -17,6 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -48,6 +50,9 @@ fun MyScreen(
     onTransfers: () -> Unit,
     onPhotoSync: () -> Unit,
     onFolderSync: () -> Unit,
+    onShares: () -> Unit,
+    theme: String,
+    onThemeChange: (String) -> Unit,
 ) {
     val profile = state.active
     var confirmRemove by remember { mutableStateOf(false) }
@@ -153,6 +158,7 @@ fun MyScreen(
             InfoRow(stringResource(R.string.my_security_note), "")
         }
 
+        ThemeCard(theme = theme, onChange = onThemeChange)
         InfoCard(title = stringResource(R.string.my_version_format, BuildConfig.VERSION_NAME)) {
             Text(
                 text = stringResource(R.string.my_version_body),
@@ -179,6 +185,12 @@ fun MyScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(stringResource(R.string.folder_sync_screen))
+        }
+        OutlinedButton(
+            onClick = onShares,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.shares_title))
         }
         OutlinedButton(
             onClick = onRefresh,
@@ -225,6 +237,43 @@ fun MyScreen(
             },
         )
     }
+}
+
+@Composable
+private fun ThemeCard(theme: String, onChange: (String) -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    InfoCard(title = stringResource(R.string.appearance)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.theme),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Box {
+                TextButton(onClick = { menu = true }) {
+                    Text(themeLabel(theme))
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    listOf("system", "light", "dark").forEach { value ->
+                        DropdownMenuItem(
+                            text = { Text(themeLabel(value)) },
+                            onClick = {
+                                onChange(value)
+                                menu = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun themeLabel(value: String): String = when (value) {
+    "light" -> stringResource(R.string.theme_light)
+    "dark" -> stringResource(R.string.theme_dark)
+    else -> stringResource(R.string.theme_system)
 }
 
 @Composable

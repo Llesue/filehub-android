@@ -25,7 +25,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -179,6 +182,92 @@ fun DeleteConfirmDialog(
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+fun ShareCreateDialog(
+    entryName: String,
+    loading: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onCreate: (password: String?, expiresAt: Long?, readOnly: Boolean) -> Unit,
+) {
+    var readOnly by remember { mutableStateOf(true) }
+    var password by remember { mutableStateOf("") }
+    var expiryDays by remember { mutableStateOf<Int?>(7) }
+    var expiryMenu by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.share_create)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(entryName, style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.share_read_only),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Switch(checked = readOnly, onCheckedChange = { readOnly = it })
+                }
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(stringResource(R.string.share_password_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Box {
+                    TextButton(onClick = { expiryMenu = true }) {
+                        Text(
+                            stringResource(R.string.share_expiry) + ": " + expiryLabel(expiryDays),
+                        )
+                    }
+                    DropdownMenu(expanded = expiryMenu, onDismissRequest = { expiryMenu = false }) {
+                        listOf(1, 7, 30, null).forEach { days ->
+                            DropdownMenuItem(
+                                text = { Text(expiryLabel(days)) },
+                                onClick = {
+                                    expiryDays = days
+                                    expiryMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
+                if (error != null) {
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val expiresAt = expiryDays?.let {
+                        System.currentTimeMillis() / 1000 + it * 86_400L
+                    }
+                    onCreate(password.takeIf { it.isNotBlank() }, expiresAt, readOnly)
+                },
+                enabled = !loading,
+            ) {
+                Text(stringResource(R.string.share_create))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.common_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun expiryLabel(days: Int?): String = when (days) {
+    1 -> stringResource(R.string.share_expiry_1d)
+    7 -> stringResource(R.string.share_expiry_7d)
+    30 -> stringResource(R.string.share_expiry_30d)
+    else -> stringResource(R.string.share_expiry_never)
+}
+
 @Composable
 fun PreviewDialog(
     entry: FileEntry,
@@ -414,4 +503,68 @@ private fun ZoomableImage(url: String, imageLoader: ImageLoader) {
                 ),
         )
     }
+}
+
+@Composable
+fun TargetPathDialog(
+    title: String,
+    roots: List<filehub.android.core.model.FileRoot>,
+    initialRootId: Long?,
+    initialPath: String,
+    onDismiss: () -> Unit,
+    onConfirm: (rootId: Long, path: String) -> Unit,
+) {
+    var rootId by remember(initialRootId) { mutableStateOf(initialRootId ?: roots.firstOrNull()?.id) }
+    var path by remember(initialPath) { mutableStateOf(initialPath) }
+    var menu by remember { mutableStateOf(false) }
+    val root = roots.firstOrNull { it.id == rootId }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box {
+                    TextButton(onClick = { menu = true }) {
+                        Text(
+                            stringResource(R.string.target_root) + ": " + (root?.alias ?: "—"),
+                        )
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        roots.forEach { item ->
+                            DropdownMenuItem(
+                                text = { Text(item.alias) },
+                                onClick = {
+                                    rootId = item.id
+                                    menu = false
+                                },
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = path,
+                    onValueChange = { path = it },
+                    label = { Text(stringResource(R.string.target_path)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    rootId?.let { onConfirm(it, path.trim('/')) }
+                },
+                enabled = rootId != null,
+            ) {
+                Text(stringResource(R.string.dialog_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.common_cancel))
+            }
+        },
+    )
 }
