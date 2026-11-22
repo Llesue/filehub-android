@@ -148,6 +148,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                                 tab = MainTab.Browse
                             },
                             onRemove = viewModel::removeProfile,
+                            onEdit = { id -> navController.navigate("editServer/$id") },
                         )
                         MainTab.Browse -> BrowseScreen(
                             state = session,
@@ -245,6 +246,20 @@ fun FileHubApp(viewModel: AppViewModel) {
                 viewModel = transferViewModel,
                 onBack = { navController.popBackStack() },
             )
+        }
+        composable("editServer/{id}") { entry ->
+            val id = entry.arguments?.getString("id")
+            if (id != null) {
+                ServerEditScreen(
+                    session = session,
+                    profileId = id,
+                    onSave = { name, addresses ->
+                        viewModel.updateProfile(id, name, addresses)
+                        navController.popBackStack()
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
         composable("addServer") {
             AddServerScreen(

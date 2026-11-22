@@ -12,6 +12,8 @@ data class ServerProfile(
     val tokenId: Long,
     val tokenExpiresAt: Long?,
     val createdAt: Long,
+    val addresses: List<String> = emptyList(),
+    val iconUrl: String? = null,
     val lastRootId: Long? = null,
     val lastPath: String = "",
 )
@@ -55,6 +57,9 @@ enum class FileKind {
     Audio,
     Pdf,
     Text,
+    Document,
+    Sheet,
+    Slide,
     Archive,
     Code,
     File,
@@ -71,6 +76,8 @@ data class FileEntry(
     val symlinkState: String?,
 ) {
     val kind: FileKind by lazy { detectKind(name, mimeType, isDir) }
+    val isMarkdown: Boolean
+        get() = !isDir && (name.endsWith(".md", true) || name.endsWith(".markdown", true))
 }
 
 data class SearchResult(
@@ -94,6 +101,25 @@ data class SearchResult(
         symlinkState = null,
     )
 }
+
+data class FileProperties(
+    val name: String,
+    val path: String,
+    val isDir: Boolean,
+    val size: Long,
+    val mimeType: String,
+    val created: Long?,
+    val modified: Long?,
+    val mode: String?,
+    val image: ImageProperties?,
+)
+
+data class ImageProperties(
+    val width: Int?,
+    val height: Int?,
+    val format: String?,
+    val exif: Map<String, String>,
+)
 
 data class DirectoryListing(
     val entries: List<FileEntry>,
@@ -153,7 +179,16 @@ private fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKind
         mime.startsWith("video/") -> FileKind.Video
         mime.startsWith("audio/") -> FileKind.Audio
         mime == "application/pdf" || ext == "pdf" -> FileKind.Pdf
-        ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz") -> FileKind.Archive
+        ext in setOf("doc", "docx", "rtf", "odt", "docm", "dotm", "dotx", "wps", "caj") -> FileKind.Document
+        ext in setOf("xls", "xlsx", "xlsb", "xlsm", "csv", "tsv", "ods", "et") -> FileKind.Sheet
+        ext in setOf("ppt", "pptx", "pptm", "potm", "potx", "ppsx", "odp", "dps", "key") -> FileKind.Slide
+        mime.startsWith("application/msword") -> FileKind.Document
+        mime.startsWith("application/vnd.openxmlformats-officedocument.wordprocessingml") -> FileKind.Document
+        mime.startsWith("application/vnd.ms-excel") -> FileKind.Sheet
+        mime.startsWith("application/vnd.openxmlformats-officedocument.spreadsheetml") -> FileKind.Sheet
+        mime.startsWith("application/vnd.ms-powerpoint") -> FileKind.Slide
+        mime.startsWith("application/vnd.openxmlformats-officedocument.presentationml") -> FileKind.Slide
+        ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "cab", "tgz") -> FileKind.Archive
         ext in setOf(
             "kt", "kts", "java", "rs", "go", "py", "js", "ts", "tsx", "jsx",
             "c", "h", "cpp", "hpp", "cs", "rb", "php", "sh", "zsh", "sql",

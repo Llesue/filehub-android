@@ -1,11 +1,13 @@
 package filehub.android.data
 
+import filehub.android.core.model.Branding
 import filehub.android.core.model.FileRoot
 import filehub.android.core.model.ServerProfile
 import filehub.android.data.api.FileHubApi
 import filehub.android.data.api.FileHubApiException
 import filehub.android.data.local.ProfileStore
 import filehub.android.data.local.TokenVault
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -77,8 +79,39 @@ class SessionRepository(
     suspend fun select(profileId: String) {
         val profile = _state.value.profiles.firstOrNull { it.id == profileId } ?: return
         store.setActive(profileId)
-        _state.update { it.copy(active = profile, roots = emptyList(), error = null, needsLogin = false) }
+        _state.update {
+            it.copy(active = profile, roots = emptyList(), error = null, needsLogin = false)
+        }
         refreshRoots(profile)
+    }
+
+    suspend fun updateProfile(
+        profileId: String,
+        displayName: String,
+        addresses: List<String>,
+    ): Result<ServerProfile> = runCatching {
+        val current = _state.value.profiles.firstOrNull { it.id == profileId }
+            ?: error("服务器不存在")
+        val normalized = addresses
+            .mapNotNull { raw -> runCatching { FileHubApi.normalizeBaseUrl(raw) }.getOrNull() }
+            .distinct()
+        require(normalized.isNotEmpty()) { "至少保留一个服务器地址" }
+        val base = current.baseUrl.takeIf { it in normalized } ?: normalized.first()
+        val updated = current.copy(
+            displayName = displayName.trim().ifEmpty { current.displayName },
+            addresses = normalized,
+            baseUrl = base,
+        )
+        val profiles = _state.value.profiles.map { if (it.id == profileId) updated else it }
+        store.saveProfiles(profiles)
+        _state.update {
+            it.copy(
+                profiles = profiles,
+                active = if (it.active?.id == profileId) updated else it.active,
+            )
+        }
+        if (_state.value.active?.id == profileId) refreshRoots(updated)
+        updated
     }
 
     suspend fun refreshRoots() {
@@ -93,25 +126,88 @@ class SessionRepository(
             return
         }
         _state.update { it.copy(rootsLoading = true, error = null) }
-        try {
-            val roots = FileHubApi(profile.baseUrl, token).roots()
+        val reachable = probe(profile, token)
+        if (reachable == null) {
             _state.update {
-                it.copy(roots = roots, rootsLoading = false, needsLogin = false, error = null)
+                it.copy(rootsLoading = false, error = "无法连接该服务器的任何地址")
             }
-        } catch (error: FileHubApiException) {
-            val needsLogin = error.statusCode == 401
-            _state.update {
-                it.copy(
-                    rootsLoading = false,
-                    needsLogin = needsLogin,
-                    error = if (needsLogin) null else error.toUserMessage(),
-                )
-            }
-        } catch (error: Exception) {
-            _state.update {
-                it.copy(rootsLoading = false, error = error.toUserMessage())
-            }
+            return
         }
+        if (reachable.unauthorized) {
+            _state.update { it.copy(rootsLoading = false, needsLogin = true, error = null) }
+            return
+        }
+        val working = reachable.working ?: run {
+            _state.update {
+                it.copy(rootsLoading = false, error = reachable.error?.toUserMessage() ?: "连接失败")
+            }
+            return
+        }
+        val addresses = normalizedAddresses(profile)
+        val iconUrl = resolveIcon(working.address, reachable.branding?.iconUrl)
+        val updated = profile.copy(
+            baseUrl = working.address,
+            addresses = addresses,
+            iconUrl = iconUrl ?: profile.iconUrl,
+        )
+        val profiles = _state.value.profiles.map { if (it.id == profile.id) updated else it }
+        store.saveProfiles(profiles)
+        _state.update {
+            it.copy(
+                profiles = profiles,
+                active = if (it.active?.id == profile.id) updated else it.active,
+                roots = working.roots,
+                rootsLoading = false,
+                needsLogin = false,
+                error = null,
+            )
+        }
+    }
+
+    private data class WorkingAddress(
+        val address: String,
+        val roots: List<FileRoot>,
+    )
+
+    private data class ProbeResult(
+        val working: WorkingAddress?,
+        val branding: Branding?,
+        val unauthorized: Boolean,
+        val error: Throwable?,
+    )
+
+    private suspend fun probe(profile: ServerProfile, token: String): ProbeResult? {
+        var lastError: Throwable? = null
+        var unauthorized = false
+        for (address in normalizedAddresses(profile)) {
+            val api = FileHubApi(address, token)
+            val roots = runCatching { api.roots() }.getOrElse { error ->
+                lastError = error
+                if (error is FileHubApiException && error.statusCode == 401) unauthorized = true
+                null
+            } ?: continue
+            val branding = runCatching { api.branding() }.getOrNull()?.let { Branding(it.name, it.iconUrl) }
+            return ProbeResult(
+                working = WorkingAddress(address, roots),
+                branding = branding,
+                unauthorized = false,
+                error = null,
+            )
+        }
+        return ProbeResult(null, null, unauthorized, lastError)
+    }
+
+    private fun normalizedAddresses(profile: ServerProfile): List<String> =
+        (profile.addresses.ifEmpty { listOf(profile.baseUrl) })
+            .mapNotNull { raw -> runCatching { FileHubApi.normalizeBaseUrl(raw) }.getOrNull() }
+            .distinct()
+
+    private fun resolveIcon(baseUrl: String, raw: String?): String? {
+        if (raw.isNullOrBlank()) {
+            return "${baseUrl.trimEnd('/')}/favicon.ico"
+        }
+        return raw.toHttpUrlOrNull()?.toString()
+            ?: baseUrl.toHttpUrlOrNull()?.resolve(raw)?.toString()
     }
 
     suspend fun logout(removeProfile: Boolean) {

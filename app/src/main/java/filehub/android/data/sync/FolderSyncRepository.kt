@@ -8,6 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.Flow
 
@@ -15,35 +16,36 @@ class FolderSyncRepository(
     private val context: Context,
     private val dao: FolderSyncDao,
 ) {
-    val config: Flow<FolderSyncConfigEntity?> = dao.configFlow()
+    fun configFlow(profileId: String): Flow<FolderSyncConfigEntity?> = dao.configFlow(profileId)
 
-    suspend fun config(): FolderSyncConfigEntity? = dao.config()
+    suspend fun config(profileId: String): FolderSyncConfigEntity? = dao.config(profileId)
 
     suspend fun save(config: FolderSyncConfigEntity) {
         dao.saveConfig(config)
         if (config.enabled) {
             FolderSyncScheduler.schedulePeriodic(context, config)
         } else {
-            FolderSyncScheduler.cancelPeriodic(context)
+            FolderSyncScheduler.cancelPeriodic(context, config.profileId)
         }
     }
 
     suspend fun updateConfig(config: FolderSyncConfigEntity) = dao.saveConfig(config)
 
-    suspend fun setEnabled(enabled: Boolean) {
-        val current = dao.config() ?: return
+    suspend fun setEnabled(profileId: String, enabled: Boolean) {
+        val current = dao.config(profileId) ?: return
         save(current.copy(enabled = enabled))
     }
 
-    suspend fun syncNow() = FolderSyncScheduler.enqueueNow(context)
+    suspend fun syncNow(profileId: String) = FolderSyncScheduler.enqueueNow(context, profileId)
 
-    suspend fun cancel() = FolderSyncScheduler.cancelAll(context)
+    suspend fun cancel(profileId: String) = FolderSyncScheduler.cancelAll(context, profileId)
 
-    suspend fun entries(): List<FolderSyncEntryEntity> = dao.entries()
+    suspend fun entries(profileId: String): List<FolderSyncEntryEntity> = dao.entries(profileId)
 
     suspend fun saveEntry(entry: FolderSyncEntryEntity) = dao.saveEntry(entry)
 
     suspend fun updateEntry(
+        profileId: String,
         relativePath: String,
         localUri: String,
         localSize: Long,
@@ -63,6 +65,7 @@ class FolderSyncRepository(
         conflict: String?,
     ) {
         dao.updateEntry(
+            profileId = profileId,
             relativePath = relativePath,
             localUri = localUri,
             localSize = localSize,
@@ -84,18 +87,18 @@ class FolderSyncRepository(
         )
     }
 
-    suspend fun deleteEntry(relativePath: String) = dao.deleteEntry(relativePath)
+    suspend fun deleteEntry(profileId: String, relativePath: String) = dao.deleteEntry(profileId, relativePath)
 
-    suspend fun pendingCount(): Int = dao.pendingCount()
+    suspend fun pendingCount(profileId: String): Int = dao.pendingCount(profileId)
 
-    suspend fun conflictCount(): Int = dao.conflictCount()
+    suspend fun conflictCount(profileId: String): Int = dao.conflictCount(profileId)
 
-    suspend fun clearEntries() = dao.clearEntries()
+    suspend fun clearEntries(profileId: String) = dao.clearEntries(profileId)
 }
 
 object FolderSyncScheduler {
-    private const val PERIODIC = "folder-sync-periodic"
-    private const val NOW = "folder-sync-now"
+    private fun periodicName(profileId: String) = "folder-sync-periodic-$profileId"
+    private fun nowName(profileId: String) = "folder-sync-now-$profileId"
 
     fun schedulePeriodic(context: Context, config: FolderSyncConfigEntity) {
         val interval = when (config.schedule) {
@@ -110,29 +113,33 @@ object FolderSyncScheduler {
             .build()
         val request = PeriodicWorkRequestBuilder<FolderSyncWorker>(interval, TimeUnit.MINUTES)
             .setConstraints(constraints)
+            .setInputData(workDataOf("profileId" to config.profileId))
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            PERIODIC,
+            periodicName(config.profileId),
             ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }
 
-    fun enqueueNow(context: Context) {
+    fun enqueueNow(context: Context, profileId: String) {
         val request = OneTimeWorkRequestBuilder<FolderSyncWorker>()
-            .setConstraints(
-                Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build(),
-            )
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setInputData(workDataOf("profileId" to profileId))
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(NOW, ExistingWorkPolicy.REPLACE, request)
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            nowName(profileId),
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
     }
 
-    fun cancelPeriodic(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(PERIODIC)
+    fun cancelPeriodic(context: Context, profileId: String) {
+        WorkManager.getInstance(context).cancelUniqueWork(periodicName(profileId))
     }
 
-    fun cancelAll(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(PERIODIC)
-        WorkManager.getInstance(context).cancelUniqueWork(NOW)
+    fun cancelAll(context: Context, profileId: String) {
+        WorkManager.getInstance(context).cancelUniqueWork(periodicName(profileId))
+        WorkManager.getInstance(context).cancelUniqueWork(nowName(profileId))
     }
 }

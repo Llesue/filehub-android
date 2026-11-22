@@ -105,6 +105,7 @@ fun FileBrowserScreen(
     var transferEntry by remember { mutableStateOf<FileEntry?>(null) }
     var transferMove by remember { mutableStateOf(true) }
     var zipDialog by remember { mutableStateOf(false) }
+    var imageMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -362,7 +363,7 @@ fun FileBrowserScreen(
                     top = 10.dp,
                     bottom = 24.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.entries, key = { it.name + it.modified + it.size }) { entry ->
                     FileCard(
@@ -519,8 +520,32 @@ fun FileBrowserScreen(
             mediaReady = state.previewMediaReady,
             error = state.previewError,
             playerFactory = viewModel::createPlayer,
+            onLongPress = {
+                imageMenu = true
+                viewModel.loadProperties(entry)
+            },
             onClose = viewModel::closePreview,
         )
+    }
+    if (imageMenu) {
+        state.previewEntry?.let { entry ->
+            ImageActionsDialog(
+                entry = entry,
+                properties = state.properties,
+                loading = state.propertiesLoading,
+                error = state.propertiesError,
+                onDownload = {
+                    requestNotificationPermission()
+                    viewModel.enqueueDownload(entry)
+                    imageMenu = false
+                    viewModel.clearProperties()
+                },
+                onDismiss = {
+                    imageMenu = false
+                    viewModel.clearProperties()
+                },
+            )
+        }
     }
     state.selectedEntry?.let { entry ->
         FileDetailsDialog(entry = entry, path = state.path, onDismiss = viewModel::dismissSelected)
@@ -708,7 +733,7 @@ private fun FileCard(
         ),
     ) {
         Row(
-            modifier = Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
@@ -719,9 +744,9 @@ private fun FileCard(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    painter = painterResource(iconFor(entry.kind)),
+                    painter = painterResource(fileIconRes(entry.kind)),
                     contentDescription = null,
-                    tint = colorFor(entry.kind),
+                    tint = fileIconColor(entry.kind),
                     modifier = Modifier.size(26.dp),
                 )
                 if (thumbnailUrl != null && imageLoader != null) {
@@ -952,7 +977,7 @@ private fun SkeletonList() {
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         repeat(7) {
             Surface(
@@ -993,25 +1018,4 @@ private fun SkeletonList() {
     }
 }
 
-private fun iconFor(kind: FileKind): Int = when (kind) {
-    FileKind.Folder -> R.drawable.ic_file_folder
-    FileKind.Image -> R.drawable.ic_file_image
-    FileKind.Video -> R.drawable.ic_file_video
-    FileKind.Audio -> R.drawable.ic_file_audio
-    FileKind.Pdf -> R.drawable.ic_file_pdf
-    FileKind.Archive -> R.drawable.ic_file_archive
-    FileKind.Code -> R.drawable.ic_file_code
-    FileKind.Text, FileKind.File -> R.drawable.ic_file_document
-}
 
-private fun colorFor(kind: FileKind) = when (kind) {
-    FileKind.Folder -> FileHubFileGray
-    FileKind.Image -> FileHubFilePurple
-    FileKind.Video -> FileHubFileOrange
-    FileKind.Audio -> FileHubFileTeal
-    FileKind.Pdf -> FileHubFileRed
-    FileKind.Archive -> FileHubFileBrown
-    FileKind.Code -> FileHubFileCyan
-    FileKind.Text -> FileHubFileBlue
-    FileKind.File -> FileHubFileGray
-}

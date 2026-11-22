@@ -30,7 +30,8 @@ class FolderSyncWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as FileHubApplication
         val repo = app.container.folderSyncRepository
-        val config = repo.config() ?: return Result.success()
+        val profileId = inputData.getString("profileId") ?: return Result.success()
+        val config = repo.config(profileId) ?: return Result.success()
         if (!config.enabled) return Result.success()
         if (config.localTreeUri.isBlank()) {
             repo.updateConfig(config.copy(lastError = "请选择本地文件夹", lastRunAt = now()))
@@ -38,7 +39,11 @@ class FolderSyncWorker(
         }
 
         try {
-            setForeground(FolderSyncNotifications.foregroundInfo(applicationContext, 0, 0, ""))
+            setForeground(
+                FolderSyncNotifications.foregroundInfo(
+                    applicationContext, 0, 0, "", notificationId(profileId),
+                ),
+            )
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
@@ -63,7 +68,7 @@ class FolderSyncWorker(
                 return fail(repo, config, error.toUserMessage())
             }
         val remoteFiles = remoteNodes.filterNot { it.value.isDir }.mapValues { it.value }
-        val entries = repo.entries().associateBy { it.relativePath }.toMutableMap()
+        val entries = repo.entries(profileId).associateBy { it.relativePath }.toMutableMap()
         val paths = (localFiles.keys + remoteFiles.keys + entries.keys).toSortedSet()
         var done = 0
         var conflicts = 0
@@ -81,16 +86,17 @@ class FolderSyncWorker(
             try {
                 when (action) {
                     Action.REMOVE -> {
-                        repo.deleteEntry(path)
+                        repo.deleteEntry(profileId, path)
                         entries.remove(path)
                     }
                     Action.IGNORE -> {
                         if (local != null && remote != null) {
                             repo.saveEntry(
-                                syncedEntry(path, local, remote, entry),
+                                syncedEntry(profileId, path, local, remote, entry),
                             )
                         } else if (entry != null) {
                             repo.updateEntry(
+                                profileId = profileId,
                                 relativePath = path,
                                 localUri = entry.localUri,
                                 localSize = entry.localSize,
@@ -114,31 +120,31 @@ class FolderSyncWorker(
                     Action.CONFLICT -> {
                         conflicts += 1
                         repo.saveEntry(
-                            conflictEntry(path, local, remote, entry),
+                            conflictEntry(profileId, path, local, remote, entry),
                         )
                     }
                     Action.UPLOAD -> {
                         if (local == null) continue
-                        uploadFile(api, config, local, entry, repo)
-                        entries[path] = local.toEntry(config, remote)
+                        uploadFile(api, profileId, config, local, entry, repo)
+                        entries[path] = local.toEntry(profileId, config, remote)
                         done += 1
                     }
                     Action.DOWNLOAD -> {
                         if (remote == null) continue
-                        downloadFile(api, config, path, remote, repo)
+                        downloadFile(api, config, profileId, path, remote, repo)
                         done += 1
                     }
                     Action.DELETE_REMOTE -> {
                         remoteFull(config, path)?.let { full ->
                             deleteRemote(api, config.rootId, full)
                         }
-                        repo.deleteEntry(path)
+                        repo.deleteEntry(profileId, path)
                         entries.remove(path)
                         done += 1
                     }
                     Action.DELETE_LOCAL -> {
                         local?.let { SafScanner.delete(applicationContext, it.uri) }
-                        repo.deleteEntry(path)
+                        repo.deleteEntry(profileId, path)
                         entries.remove(path)
                         done += 1
                     }
@@ -148,7 +154,7 @@ class FolderSyncWorker(
             } catch (error: FileHubApiException) {
                 failed += 1
                 repo.saveEntry(
-                    (entry ?: blankEntry(path)).copy(
+                    (entry ?: blankEntry(profileId, path)).copy(
                         status = "error",
                         error = error.toUserMessage(),
                         updatedAt = now(),
@@ -161,14 +167,16 @@ class FolderSyncWorker(
             } catch (error: Exception) {
                 failed += 1
                 repo.saveEntry(
-                    (entry ?: blankEntry(path)).copy(
+                    (entry ?: blankEntry(profileId, path)).copy(
                         status = "error",
                         error = error.toUserMessage(),
                         updatedAt = now(),
                     ),
                 )
             }
-            FolderSyncNotifications.update(applicationContext, done + failed + conflicts, paths.size, path)
+            FolderSyncNotifications.update(
+                applicationContext, done + failed + conflicts, paths.size, path, notificationId(profileId),
+            )
         }
 
         finish(repo, config, done, paths.size, conflicts, failed)
@@ -177,6 +185,7 @@ class FolderSyncWorker(
 
     private suspend fun uploadFile(
         api: FileHubApi,
+        profileId: String,
         config: FolderSyncConfigEntity,
         local: LocalNode,
         existing: FolderSyncEntryEntity?,
@@ -206,7 +215,7 @@ class FolderSyncWorker(
             uploadId = created.uploadId
             chunkSize = created.chunkSize
         }
-        repo.saveEntry(local.toEntry(config, null).copy(status = "uploading", uploadId = uploadId))
+        repo.saveEntry(local.toEntry(profileId, config, null).copy(status = "uploading", uploadId = uploadId))
         val chunks = if (local.size == 0L) 0 else ((local.size + chunkSize - 1) / chunkSize).toInt()
         var received = runCatching { api.uploadStatus(uploadId!!).receivedChunks }
             .getOrDefault(emptyList())
@@ -220,6 +229,7 @@ class FolderSyncWorker(
             api.uploadChunk(uploadId!!, index, data)
             received = received + index
             repo.updateEntry(
+                profileId = profileId,
                 relativePath = local.relativePath,
                 localUri = local.uri,
                 localSize = local.size,
@@ -241,7 +251,7 @@ class FolderSyncWorker(
         }
         val complete = api.completeUpload(uploadId!!)
         repo.saveEntry(
-            local.toEntry(config, null).copy(
+            local.toEntry(profileId, config, null).copy(
                 remotePath = complete.path,
                 remoteSize = local.size,
                 remoteMtime = local.mtime,
@@ -263,6 +273,7 @@ class FolderSyncWorker(
     private suspend fun downloadFile(
         api: FileHubApi,
         config: FolderSyncConfigEntity,
+        profileId: String,
         path: String,
         remote: RemoteNode,
         repo: FolderSyncRepository,
@@ -307,6 +318,7 @@ class FolderSyncWorker(
         val localMtime = file.lastModified().coerceAtLeast(0) / 1000
         repo.saveEntry(
             FolderSyncEntryEntity(
+                profileId = profileId,
                 relativePath = path,
                 localUri = file.uri.toString(),
                 localSize = remote.size,
@@ -452,9 +464,11 @@ class FolderSyncWorker(
     }
 
     private fun LocalNode.toEntry(
+        profileId: String,
         config: FolderSyncConfigEntity,
         remote: RemoteNode?,
     ): FolderSyncEntryEntity = FolderSyncEntryEntity(
+        profileId = profileId,
         relativePath = relativePath,
         localUri = uri,
         localSize = size,
@@ -472,11 +486,13 @@ class FolderSyncWorker(
     )
 
     private fun syncedEntry(
+        profileId: String,
         path: String,
         local: LocalNode,
         remote: RemoteNode,
         existing: FolderSyncEntryEntity?,
     ): FolderSyncEntryEntity = FolderSyncEntryEntity(
+        profileId = profileId,
         relativePath = path,
         localUri = local.uri,
         localSize = local.size,
@@ -494,11 +510,13 @@ class FolderSyncWorker(
     )
 
     private fun conflictEntry(
+        profileId: String,
         path: String,
         local: LocalNode?,
         remote: RemoteNode?,
         existing: FolderSyncEntryEntity?,
     ): FolderSyncEntryEntity = FolderSyncEntryEntity(
+        profileId = profileId,
         relativePath = path,
         localUri = local?.uri ?: existing?.localUri.orEmpty(),
         localSize = local?.size ?: existing?.localSize ?: 0,
@@ -516,7 +534,8 @@ class FolderSyncWorker(
         updatedAt = now(),
     )
 
-    private fun blankEntry(path: String): FolderSyncEntryEntity = FolderSyncEntryEntity(relativePath = path)
+    private fun blankEntry(profileId: String, path: String): FolderSyncEntryEntity =
+        FolderSyncEntryEntity(profileId = profileId, relativePath = path)
 
     private fun remoteFull(config: FolderSyncConfigEntity, path: String): String =
         join(config.remotePath, path)
@@ -548,10 +567,10 @@ class FolderSyncWorker(
                 lastRunAt = now(),
                 lastResult = result,
                 lastError = if (failed > 0) "$failed failed" else null,
-                pendingCount = repo.pendingCount(),
+                pendingCount = repo.pendingCount(config.profileId),
             ),
         )
-        FolderSyncNotifications.finished(applicationContext, result)
+        FolderSyncNotifications.finished(applicationContext, result, notificationId(config.profileId))
     }
 
     private suspend fun fail(
@@ -560,9 +579,12 @@ class FolderSyncWorker(
         message: String,
     ): Result {
         repo.updateConfig(config.copy(lastError = message, lastRunAt = now()))
-        FolderSyncNotifications.finished(applicationContext, message)
+        FolderSyncNotifications.finished(applicationContext, message, notificationId(config.profileId))
         return Result.retry()
     }
+
+    private fun notificationId(profileId: String): Int =
+        5401 + (profileId.hashCode() and 0x0FFFFF)
 
     private fun now(): Long = System.currentTimeMillis() / 1000
 

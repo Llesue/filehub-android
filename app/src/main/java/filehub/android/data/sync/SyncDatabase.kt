@@ -12,9 +12,8 @@ import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "photo_sync_config")
 data class PhotoSyncConfigEntity(
-    @PrimaryKey val id: Int = 1,
+    @PrimaryKey val profileId: String,
     val enabled: Boolean = false,
-    val profileId: String = "",
     val serverName: String = "",
     val rootId: Long = 0,
     val rootAlias: String = "",
@@ -31,9 +30,10 @@ data class PhotoSyncConfigEntity(
     val pendingCount: Int = 0,
 )
 
-@Entity(tableName = "photo_sync_entries")
+@Entity(tableName = "photo_sync_entries", primaryKeys = ["profileId", "signature"])
 data class PhotoSyncEntryEntity(
-    @PrimaryKey val signature: String,
+    val profileId: String,
+    val signature: String,
     val localId: Long,
     val bucketId: Long,
     val album: String,
@@ -51,9 +51,8 @@ data class PhotoSyncEntryEntity(
 
 @Entity(tableName = "folder_sync_config")
 data class FolderSyncConfigEntity(
-    @PrimaryKey val id: Int = 1,
+    @PrimaryKey val profileId: String,
     val enabled: Boolean = false,
-    val profileId: String = "",
     val serverName: String = "",
     val rootId: Long = 0,
     val rootAlias: String = "",
@@ -71,9 +70,10 @@ data class FolderSyncConfigEntity(
     val pendingCount: Int = 0,
 )
 
-@Entity(tableName = "folder_sync_entries")
+@Entity(tableName = "folder_sync_entries", primaryKeys = ["profileId", "relativePath"])
 data class FolderSyncEntryEntity(
-    @PrimaryKey val relativePath: String,
+    val profileId: String,
+    val relativePath: String,
     val localUri: String = "",
     val localSize: Long = 0,
     val localMtime: Long = 0,
@@ -95,20 +95,20 @@ data class FolderSyncEntryEntity(
 
 @Dao
 interface FolderSyncDao {
-    @Query("SELECT * FROM folder_sync_config WHERE id = 1")
-    fun configFlow(): Flow<FolderSyncConfigEntity?>
+    @Query("SELECT * FROM folder_sync_config WHERE profileId = :profileId")
+    fun configFlow(profileId: String): Flow<FolderSyncConfigEntity?>
 
-    @Query("SELECT * FROM folder_sync_config WHERE id = 1")
-    suspend fun config(): FolderSyncConfigEntity?
+    @Query("SELECT * FROM folder_sync_config WHERE profileId = :profileId")
+    suspend fun config(profileId: String): FolderSyncConfigEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveConfig(config: FolderSyncConfigEntity)
 
-    @Query("DELETE FROM folder_sync_config")
-    suspend fun clearConfig()
+    @Query("DELETE FROM folder_sync_config WHERE profileId = :profileId")
+    suspend fun clearConfig(profileId: String)
 
-    @Query("SELECT * FROM folder_sync_entries")
-    suspend fun entries(): List<FolderSyncEntryEntity>
+    @Query("SELECT * FROM folder_sync_entries WHERE profileId = :profileId")
+    suspend fun entries(profileId: String): List<FolderSyncEntryEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveEntry(entry: FolderSyncEntryEntity)
@@ -120,9 +120,11 @@ interface FolderSyncDao {
             "baseLocalMtime = :baseLocalMtime, baseRemoteSize = :baseRemoteSize, " +
             "baseRemoteMtime = :baseRemoteMtime, hasBase = :hasBase, status = :status, " +
             "uploadId = :uploadId, bytesDone = :bytesDone, error = :error, " +
-            "conflict = :conflict, updatedAt = :updatedAt WHERE relativePath = :relativePath",
+            "conflict = :conflict, updatedAt = :updatedAt " +
+            "WHERE profileId = :profileId AND relativePath = :relativePath",
     )
     suspend fun updateEntry(
+        profileId: String,
         relativePath: String,
         localUri: String,
         localSize: Long,
@@ -143,38 +145,38 @@ interface FolderSyncDao {
         updatedAt: Long,
     )
 
-    @Query("DELETE FROM folder_sync_entries WHERE relativePath = :relativePath")
-    suspend fun deleteEntry(relativePath: String)
+    @Query("DELETE FROM folder_sync_entries WHERE profileId = :profileId AND relativePath = :relativePath")
+    suspend fun deleteEntry(profileId: String, relativePath: String)
 
-    @Query("DELETE FROM folder_sync_entries")
-    suspend fun clearEntries()
+    @Query("DELETE FROM folder_sync_entries WHERE profileId = :profileId")
+    suspend fun clearEntries(profileId: String)
 
-    @Query("SELECT COUNT(*) FROM folder_sync_entries WHERE status = 'conflict'")
-    suspend fun conflictCount(): Int
+    @Query("SELECT COUNT(*) FROM folder_sync_entries WHERE profileId = :profileId AND status = 'conflict'")
+    suspend fun conflictCount(profileId: String): Int
 
-    @Query("SELECT COUNT(*) FROM folder_sync_entries WHERE status NOT IN ('synced')")
-    suspend fun pendingCount(): Int
+    @Query("SELECT COUNT(*) FROM folder_sync_entries WHERE profileId = :profileId AND status NOT IN ('synced')")
+    suspend fun pendingCount(profileId: String): Int
 }
 
 @Dao
 interface PhotoSyncDao {
-    @Query("SELECT * FROM photo_sync_config WHERE id = 1")
-    fun configFlow(): Flow<PhotoSyncConfigEntity?>
+    @Query("SELECT * FROM photo_sync_config WHERE profileId = :profileId")
+    fun configFlow(profileId: String): Flow<PhotoSyncConfigEntity?>
 
-    @Query("SELECT * FROM photo_sync_config WHERE id = 1")
-    suspend fun config(): PhotoSyncConfigEntity?
+    @Query("SELECT * FROM photo_sync_config WHERE profileId = :profileId")
+    suspend fun config(profileId: String): PhotoSyncConfigEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveConfig(config: PhotoSyncConfigEntity)
 
-    @Query("DELETE FROM photo_sync_config")
-    suspend fun clearConfig()
+    @Query("DELETE FROM photo_sync_config WHERE profileId = :profileId")
+    suspend fun clearConfig(profileId: String)
 
-    @Query("SELECT * FROM photo_sync_entries")
-    suspend fun entries(): List<PhotoSyncEntryEntity>
+    @Query("SELECT * FROM photo_sync_entries WHERE profileId = :profileId")
+    suspend fun entries(profileId: String): List<PhotoSyncEntryEntity>
 
-    @Query("SELECT * FROM photo_sync_entries WHERE signature = :signature")
-    suspend fun entry(signature: String): PhotoSyncEntryEntity?
+    @Query("SELECT * FROM photo_sync_entries WHERE profileId = :profileId AND signature = :signature")
+    suspend fun entry(profileId: String, signature: String): PhotoSyncEntryEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveEntry(entry: PhotoSyncEntryEntity)
@@ -182,9 +184,10 @@ interface PhotoSyncDao {
     @Query(
         "UPDATE photo_sync_entries SET status = :status, uploadId = :uploadId, " +
             "bytesDone = :bytesDone, remotePath = :remotePath, error = :error, " +
-            "updatedAt = :updatedAt WHERE signature = :signature",
+            "updatedAt = :updatedAt WHERE profileId = :profileId AND signature = :signature",
     )
     suspend fun updateEntry(
+        profileId: String,
         signature: String,
         status: String,
         uploadId: String?,
@@ -194,11 +197,11 @@ interface PhotoSyncDao {
         updatedAt: Long,
     )
 
-    @Query("DELETE FROM photo_sync_entries")
-    suspend fun clearEntries()
+    @Query("DELETE FROM photo_sync_entries WHERE profileId = :profileId")
+    suspend fun clearEntries(profileId: String)
 
-    @Query("SELECT COUNT(*) FROM photo_sync_entries WHERE status != 'done'")
-    suspend fun pendingCount(): Int
+    @Query("SELECT COUNT(*) FROM photo_sync_entries WHERE profileId = :profileId AND status != 'done'")
+    suspend fun pendingCount(profileId: String): Int
 }
 
 @Database(
@@ -208,7 +211,7 @@ interface PhotoSyncDao {
         FolderSyncConfigEntity::class,
         FolderSyncEntryEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class SyncDatabase : RoomDatabase() {

@@ -244,5 +244,16 @@
     <string name="theme_system">Follow system</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
+    <string name="image_dimensions">Dimensions</string>
+    <string name="image_exif">EXIF</string>
+    <string name="image_no_exif">No EXIF data</string>
+    <string name="image_download">Download image</string>
+    <string name="server_edit">Edit server</string>
+    <string name="server_display_name">Display name</string>
+    <string name="server_addresses">Server addresses</string>
+    <string name="server_add_address">Add address</string>
+    <string name="server_save">Save</string>
+    <string name="server_address">Address</string>
+    <string name="server_addresses_hint">Tried from top to bottom until one responds</string>
 </resources>
 

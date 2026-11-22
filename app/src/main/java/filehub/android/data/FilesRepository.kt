@@ -1,6 +1,7 @@
 package filehub.android.data
 
 import filehub.android.core.model.DirectoryListing
+import filehub.android.core.model.FileProperties
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.SearchResult
 import filehub.android.core.model.ServerProfile
@@ -88,6 +89,9 @@ class FilesRepository(
 
     suspend fun archiveUnzip(profile: ServerProfile, rootId: Long, path: String, target: String? = null) =
         api(profile).archiveUnzip(rootId, path, target)
+
+    suspend fun properties(profile: ServerProfile, rootId: Long, path: String): FileProperties =
+        api(profile).properties(rootId, path)
 
     suspend fun readText(
         profile: ServerProfile,

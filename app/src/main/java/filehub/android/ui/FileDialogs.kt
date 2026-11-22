@@ -5,6 +5,7 @@ import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -62,8 +65,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import android.text.format.Formatter
+import android.text.method.ScrollingMovementMethod
+import android.widget.TextView
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
+import io.noties.markwon.Markwon
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -268,6 +274,7 @@ private fun expiryLabel(days: Int?): String = when (days) {
     else -> stringResource(R.string.share_expiry_never)
 }
 
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun PreviewDialog(
     entry: FileEntry,
@@ -279,8 +286,16 @@ fun PreviewDialog(
     mediaReady: Int,
     error: String?,
     playerFactory: () -> ExoPlayer?,
+    onLongPress: () -> Unit,
     onClose: () -> Unit,
 ) {
+    val isMedia = entry.kind == FileKind.Image ||
+        entry.kind == FileKind.Video ||
+        entry.kind == FileKind.Audio ||
+        entry.kind == FileKind.Pdf
+    val background = if (isMedia) Color.Black else MaterialTheme.colorScheme.background
+    val contentColor = if (isMedia) Color.White else MaterialTheme.colorScheme.onBackground
+
     Dialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -288,7 +303,7 @@ fun PreviewDialog(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
+                .background(background)
                 .statusBarsPadding(),
         ) {
             Row(
@@ -301,18 +316,27 @@ fun PreviewDialog(
                     Icon(
                         Icons.Filled.Close,
                         contentDescription = stringResource(R.string.preview_close),
-                        tint = Color.White,
+                        tint = contentColor,
                     )
                 }
                 Text(
                     text = entry.name,
-                    color = Color.White,
+                    color = contentColor,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (entry.kind == FileKind.Image) {
+                    IconButton(onClick = onLongPress) {
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = stringResource(R.string.file_details),
+                            tint = contentColor,
+                        )
+                    }
+                }
             }
 
             when {
@@ -320,7 +344,7 @@ fun PreviewDialog(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(color = Color.White)
+                    CircularProgressIndicator(color = contentColor)
                 }
                 error != null -> Box(
                     modifier = Modifier
@@ -328,24 +352,32 @@ fun PreviewDialog(
                         .padding(24.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(text = error, color = Color.White)
+                    Text(text = error, color = contentColor)
                 }
                 entry.kind == FileKind.Image && downloadUrl != null && imageLoader != null -> {
-                    ZoomableImage(url = downloadUrl, imageLoader = imageLoader)
+                    ZoomableImage(url = downloadUrl, imageLoader = imageLoader, onLongPress = onLongPress)
                 }
-                (entry.kind == FileKind.Text || entry.kind == FileKind.Code) && text != null -> {
-                    SelectionContainer {
-                        Text(
-                            text = text.content,
-                            color = Color.White,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
-                            lineHeight = 19.sp,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(16.dp),
+                (entry.kind == FileKind.Text || entry.kind == FileKind.Code || entry.isMarkdown) && text != null -> {
+                    if (entry.isMarkdown) {
+                        MarkdownPreview(
+                            markdown = text.content,
+                            textColor = contentColor,
+                            linkColor = MaterialTheme.colorScheme.primary,
                         )
+                    } else {
+                        SelectionContainer {
+                            Text(
+                                text = text.content,
+                                color = contentColor,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp,
+                                lineHeight = 19.sp,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(16.dp),
+                            )
+                        }
                     }
                 }
                 entry.kind == FileKind.Pdf && pdfFile != null -> {
@@ -379,7 +411,7 @@ fun PreviewDialog(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(text = stringResource(R.string.preview_unsupported), color = Color.White)
+                            Text(text = stringResource(R.string.preview_unsupported), color = contentColor)
                         }
                     }
                 }
@@ -391,12 +423,39 @@ fun PreviewDialog(
                 ) {
                     Text(
                         text = stringResource(R.string.preview_unsupported),
-                        color = Color.White,
+                        color = contentColor,
                     )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun MarkdownPreview(
+    markdown: String,
+    textColor: Color,
+    linkColor: Color,
+) {
+    val context = LocalContext.current
+    val markwon = remember(context) { Markwon.builder(context).build() }
+    val density = context.resources.displayMetrics.density
+    val padding = (16 * density).toInt()
+    AndroidView(
+        factory = { ctx ->
+            TextView(ctx).apply {
+                setTextColor(textColor.toArgb())
+                setLinkTextColor(linkColor.toArgb())
+                textSize = 15f
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                setPadding(padding, padding, padding, padding)
+                movementMethod = ScrollingMovementMethod()
+                setTextIsSelectable(true)
+            }
+        },
+        update = { markwon.setMarkdown(it, markdown) },
+        modifier = Modifier.fillMaxSize(),
+    )
 }
 
 @Composable
@@ -473,13 +532,16 @@ private fun PdfPage(renderer: PdfRenderer, index: Int) {
 }
 
 @Composable
-private fun ZoomableImage(url: String, imageLoader: ImageLoader) {
+private fun ZoomableImage(url: String, imageLoader: ImageLoader, onLongPress: () -> Unit) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(onLongPress = { onLongPress() })
+            }
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
                     scale = (scale * zoom).coerceIn(1f, 5f)
@@ -564,6 +626,84 @@ fun TargetPathDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.common_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+fun ImageActionsDialog(
+    entry: FileEntry,
+    properties: filehub.android.core.model.FileProperties?,
+    loading: Boolean,
+    error: String?,
+    onDownload: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.file_details)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(entry.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    Formatter.formatShortFileSize(context, entry.size),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (loading) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                } else if (error != null) {
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                } else if (properties?.image != null) {
+                    val image = properties.image
+                    if (image.width != null && image.height != null) {
+                        Text(
+                            stringResource(R.string.image_dimensions) + ": ${image.width} × ${image.height}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.image_exif),
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    if (image.exif.isEmpty()) {
+                        Text(
+                            stringResource(R.string.image_no_exif),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        image.exif.entries.take(12).forEach { (key, value) ->
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = key,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    text = value,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDownload) {
+                Text(stringResource(R.string.image_download))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.file_close))
             }
         },
     )

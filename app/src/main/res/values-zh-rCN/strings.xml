@@ -244,5 +244,16 @@
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">浅色</string>
     <string name="theme_dark">深色</string>
+    <string name="image_dimensions">尺寸</string>
+    <string name="image_exif">EXIF</string>
+    <string name="image_no_exif">没有 EXIF 信息</string>
+    <string name="image_download">下载图片</string>
+    <string name="server_edit">编辑服务器</string>
+    <string name="server_display_name">显示名称</string>
+    <string name="server_addresses">服务器地址</string>
+    <string name="server_add_address">添加地址</string>
+    <string name="server_save">保存</string>
+    <string name="server_address">地址</string>
+    <string name="server_addresses_hint">从上到下依次尝试，直到有一个可用</string>
 </resources>
 

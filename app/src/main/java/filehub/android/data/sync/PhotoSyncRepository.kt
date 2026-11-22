@@ -8,6 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.decodeFromString
@@ -18,43 +19,40 @@ class PhotoSyncRepository(
     private val context: Context,
     private val dao: PhotoSyncDao,
 ) {
-    val config: Flow<PhotoSyncConfigEntity?> = dao.configFlow()
+    fun configFlow(profileId: String): Flow<PhotoSyncConfigEntity?> = dao.configFlow(profileId)
 
-    suspend fun config(): PhotoSyncConfigEntity? = dao.config()
+    suspend fun config(profileId: String): PhotoSyncConfigEntity? = dao.config(profileId)
 
     suspend fun save(config: PhotoSyncConfigEntity) {
         dao.saveConfig(config)
         if (config.enabled) {
             PhotoSyncScheduler.schedulePeriodic(context, config)
         } else {
-            PhotoSyncScheduler.cancelPeriodic(context)
+            PhotoSyncScheduler.cancelPeriodic(context, config.profileId)
         }
-    }
-
-    suspend fun setEnabled(enabled: Boolean) {
-        val current = dao.config() ?: return
-        save(current.copy(enabled = enabled))
     }
 
     suspend fun updateConfig(config: PhotoSyncConfigEntity) = dao.saveConfig(config)
 
-    suspend fun syncNow() {
-        PhotoSyncScheduler.enqueueNow(context)
+    suspend fun setEnabled(profileId: String, enabled: Boolean) {
+        val current = dao.config(profileId) ?: return
+        save(current.copy(enabled = enabled))
     }
 
-    suspend fun cancel() {
-        PhotoSyncScheduler.cancelAll(context)
-    }
+    suspend fun syncNow(profileId: String) = PhotoSyncScheduler.enqueueNow(context, profileId)
 
-    suspend fun pendingCount(): Int = dao.pendingCount()
+    suspend fun cancel(profileId: String) = PhotoSyncScheduler.cancelAll(context, profileId)
 
-    suspend fun clearEntries() = dao.clearEntries()
+    suspend fun pendingCount(profileId: String): Int = dao.pendingCount(profileId)
 
-    suspend fun entries(): List<PhotoSyncEntryEntity> = dao.entries()
+    suspend fun clearEntries(profileId: String) = dao.clearEntries(profileId)
+
+    suspend fun entries(profileId: String): List<PhotoSyncEntryEntity> = dao.entries(profileId)
 
     suspend fun saveEntry(entry: PhotoSyncEntryEntity) = dao.saveEntry(entry)
 
     suspend fun updateEntry(
+        profileId: String,
         signature: String,
         status: String,
         uploadId: String?,
@@ -63,6 +61,7 @@ class PhotoSyncRepository(
         error: String?,
     ) {
         dao.updateEntry(
+            profileId = profileId,
             signature = signature,
             status = status,
             uploadId = uploadId,
@@ -83,8 +82,8 @@ class PhotoSyncRepository(
 }
 
 object PhotoSyncScheduler {
-    private const val PERIODIC = "photo-sync-periodic"
-    private const val NOW = "photo-sync-now"
+    private fun periodicName(profileId: String) = "photo-sync-periodic-$profileId"
+    private fun nowName(profileId: String) = "photo-sync-now-$profileId"
 
     fun schedulePeriodic(context: Context, config: PhotoSyncConfigEntity) {
         val interval = when (config.schedule) {
@@ -97,39 +96,35 @@ object PhotoSyncScheduler {
             .setRequiredNetworkType(if (config.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
             .setRequiresCharging(config.chargingOnly)
             .build()
-        val request = PeriodicWorkRequestBuilder<PhotoSyncWorker>(
-            interval,
-            TimeUnit.MINUTES,
-        )
+        val request = PeriodicWorkRequestBuilder<PhotoSyncWorker>(interval, TimeUnit.MINUTES)
             .setConstraints(constraints)
+            .setInputData(workDataOf("profileId" to config.profileId))
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            PERIODIC,
+            periodicName(config.profileId),
             ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }
 
-    fun enqueueNow(context: Context) {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
+    fun enqueueNow(context: Context, profileId: String) {
         val request = OneTimeWorkRequestBuilder<PhotoSyncWorker>()
-            .setConstraints(constraints)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setInputData(workDataOf("profileId" to profileId))
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
-            NOW,
+            nowName(profileId),
             ExistingWorkPolicy.REPLACE,
             request,
         )
     }
 
-    fun cancelPeriodic(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(PERIODIC)
+    fun cancelPeriodic(context: Context, profileId: String) {
+        WorkManager.getInstance(context).cancelUniqueWork(periodicName(profileId))
     }
 
-    fun cancelAll(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(PERIODIC)
-        WorkManager.getInstance(context).cancelUniqueWork(NOW)
+    fun cancelAll(context: Context, profileId: String) {
+        WorkManager.getInstance(context).cancelUniqueWork(periodicName(profileId))
+        WorkManager.getInstance(context).cancelUniqueWork(nowName(profileId))
     }
 }

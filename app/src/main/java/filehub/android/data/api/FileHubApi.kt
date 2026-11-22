@@ -3,7 +3,9 @@ package filehub.android.data.api
 import android.os.Build
 import filehub.android.core.model.DirectoryListing
 import filehub.android.core.model.FileEntry
+import filehub.android.core.model.FileProperties
 import filehub.android.core.model.FileRoot
+import filehub.android.core.model.ImageProperties
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.SortOrder
 import filehub.android.core.model.SearchResult
@@ -21,6 +23,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -311,6 +314,27 @@ internal data class ArchiveUnzipRequest(
     val root: Long,
     val path: String,
     val target: String? = null,
+)
+
+@Serializable
+internal data class ImagePropertiesDto(
+    val width: Int? = null,
+    val height: Int? = null,
+    val format: String? = null,
+    val exif: Map<String, JsonElement>? = null,
+)
+
+@Serializable
+internal data class PropertiesDto(
+    val name: String = "",
+    val path: String = "",
+    @SerialName("is_dir") val isDir: Boolean = false,
+    val size: Long = 0,
+    @SerialName("mime_type") val mimeType: String = "",
+    val created: Long? = null,
+    val modified: Long? = null,
+    val mode: String? = null,
+    val image: ImagePropertiesDto? = null,
 )
 
 @Serializable
@@ -620,6 +644,34 @@ class FileHubApi(
         )
     }
 
+    suspend fun properties(rootId: Long, path: String): FileProperties {
+        val response = getJson(
+            path = "properties",
+            deserializer = PropertiesDto.serializer(),
+            query = mapOf("root" to rootId.toString(), "path" to path),
+        )
+        return FileProperties(
+            name = response.name,
+            path = response.path,
+            isDir = response.isDir,
+            size = response.size,
+            mimeType = response.mimeType,
+            created = response.created,
+            modified = response.modified,
+            mode = response.mode,
+            image = response.image?.let { image ->
+                ImageProperties(
+                    width = image.width,
+                    height = image.height,
+                    format = image.format,
+                    exif = image.exif.orEmpty().mapValues { (_, value) ->
+                        value.toString().trim('"')
+                    },
+                )
+            },
+        )
+    }
+
     suspend fun deleteToken(tokenId: Long) {
         requestUnit(
             path = "auth/tokens/$tokenId",
@@ -896,6 +948,10 @@ class FileHubApi(
             val roots = tokenApi.roots()
             val host = normalized.toHttpUrlOrNull()?.host ?: normalized
             val displayName = branding?.name?.takeIf { it.isNotBlank() } ?: host
+            val iconUrl = branding?.iconUrl?.let { raw ->
+                raw.toHttpUrlOrNull()?.toString()
+                    ?: normalized.toHttpUrlOrNull()?.resolve(raw)?.toString()
+            } ?: "$normalized/favicon.ico"
             val profile = ServerProfile(
                 id = UUID.randomUUID().toString(),
                 baseUrl = normalized,
@@ -905,6 +961,8 @@ class FileHubApi(
                 tokenId = tokenResponse.id,
                 tokenExpiresAt = tokenResponse.expiresAt,
                 createdAt = System.currentTimeMillis() / 1000,
+                addresses = listOf(normalized),
+                iconUrl = iconUrl,
             )
             return LoginResult(profile = profile, token = tokenResponse.token, roots = roots)
         }

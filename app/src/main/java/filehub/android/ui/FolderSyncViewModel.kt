@@ -11,9 +11,14 @@ import filehub.android.R
 import filehub.android.core.model.FileRoot
 import filehub.android.core.model.ServerProfile
 import filehub.android.data.sync.FolderSyncConfigEntity
+import filehub.android.data.SessionRepository
 import filehub.android.data.sync.FolderSyncRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -30,21 +35,27 @@ data class FolderSyncUiState(
 class FolderSyncViewModel(
     private val application: Application,
     private val repository: FolderSyncRepository,
+    private val sessionRepository: SessionRepository,
 ) : ViewModel() {
 
-    val config: StateFlow<FolderSyncConfigEntity?> = repository.config.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = null,
-    )
+    val config: StateFlow<FolderSyncConfigEntity?> = sessionRepository.state
+        .map { it.active?.id }
+        .distinctUntilChanged()
+        .flatMapLatest { id -> if (id == null) flowOf(null) else repository.configFlow(id) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
 
     private val _state = MutableStateFlow(FolderSyncUiState())
     val state: StateFlow<FolderSyncUiState> = _state.asStateFlow()
 
     fun refreshStats() {
+        val id = sessionRepository.state.value.active?.id ?: return
         viewModelScope.launch {
-            val pending = repository.pendingCount()
-            val conflicts = repository.conflictCount()
+            val pending = repository.pendingCount(id)
+            val conflicts = repository.conflictCount(id)
             _state.value = _state.value.copy(pending = pending, conflicts = conflicts)
         }
     }
@@ -99,11 +110,15 @@ class FolderSyncViewModel(
     }
 
     fun syncNow() {
-        viewModelScope.launch { repository.syncNow() }
+        sessionRepository.state.value.active?.id?.let { id ->
+            viewModelScope.launch { repository.syncNow(id) }
+        }
     }
 
     fun setEnabled(enabled: Boolean) {
-        viewModelScope.launch { repository.setEnabled(enabled) }
+        sessionRepository.state.value.active?.id?.let { id ->
+            viewModelScope.launch { repository.setEnabled(id, enabled) }
+        }
     }
 
     fun resetSaved() {
@@ -114,7 +129,7 @@ class FolderSyncViewModel(
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = application as FileHubApplication
-                FolderSyncViewModel(app, app.container.folderSyncRepository)
+                FolderSyncViewModel(app, app.container.folderSyncRepository, app.container.sessionRepository)
             }
         }
     }

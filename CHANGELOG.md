@@ -15,6 +15,9 @@
 - Folder sync: SAF folder, upload/download/two-way, three-way base state, conflicts kept without overwrite, optional deletion sync.
 - Shares: create from a file/folder, password/expiry/read-only, QR code, revoke/rotate, public share viewer with ticket unlock and downloads.
 - Theme override (system/light/dark), Chinese and English resources, edge-to-edge UI.
+- Server favicons (branding icon with favicon fallback), editable server profiles, multi-address failover with per-server background sync.
+- FileHub-matched colored file icons (yellow folders), 8dp card rhythm, theme-aware text preview and Markdown rendering.
+- Image long-press/more menu with properties, EXIF metadata and download.
 
 ### Notes
 

@@ -82,6 +82,7 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.documentfile)
     implementation(libs.zxing.core)
+    implementation(libs.markwon.core)
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.compose.ui)

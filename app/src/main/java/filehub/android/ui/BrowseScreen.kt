@@ -38,8 +38,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import filehub.android.R
+import filehub.android.core.model.FileKind
 import filehub.android.core.model.FileRoot
 import filehub.android.data.SessionState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,8 +59,8 @@ fun BrowseScreen(
 
     LaunchedEffect(active?.id) {
         val currentProfile = filesViewModel.state.value.profile
-        if (active == null || (currentProfile != null && currentProfile.id != active.id)) {
-            filesViewModel.clear()
+        if (currentProfile != null && (active == null || currentProfile.id != active.id)) {
+            filesViewModel.release()
         }
     }
 
@@ -179,7 +181,7 @@ fun BrowseScreen(
                     top = 8.dp,
                     bottom = 24.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.roots, key = { it.id }) { item ->
                     RootCard(
@@ -205,7 +207,7 @@ private fun RootCard(root: FileRoot, onClick: () -> Unit) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
@@ -215,9 +217,9 @@ private fun RootCard(root: FileRoot, onClick: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Filled.Home,
+                    painter = painterResource(R.drawable.ic_file_folder),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = fileIconColor(FileKind.Folder),
                 )
             }
             Spacer(Modifier.size(12.dp))

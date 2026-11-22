@@ -34,26 +34,32 @@ object PhotoSyncNotifications {
         )
     }
 
-    fun foregroundInfo(context: Context, done: Int, total: Int, current: String): ForegroundInfo {
+    fun foregroundInfo(
+        context: Context,
+        done: Int,
+        total: Int,
+        current: String,
+        id: Int = ID,
+    ): ForegroundInfo {
         ensureChannel(context)
         val notification = notification(context, done, total, current)
         return if (Build.VERSION.SDK_INT >= 29) {
-            ForegroundInfo(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            ForegroundInfo(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
-            ForegroundInfo(ID, notification)
+            ForegroundInfo(id, notification)
         }
     }
 
     @SuppressLint("MissingPermission") // guarded by canNotify()
-    fun update(context: Context, done: Int, total: Int, current: String) {
+    fun update(context: Context, done: Int, total: Int, current: String, id: Int = ID) {
         if (!canNotify(context)) return
         runCatching {
-            NotificationManagerCompat.from(context).notify(ID, notification(context, done, total, current))
+            NotificationManagerCompat.from(context).notify(id, notification(context, done, total, current))
         }
     }
 
     @SuppressLint("MissingPermission")
-    fun finished(context: Context, message: String) {
+    fun finished(context: Context, message: String, id: Int = ID) {
         if (!canNotify(context)) return
         ensureChannel(context)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -63,7 +69,7 @@ object PhotoSyncNotifications {
             .setContentIntent(intent(context))
             .setAutoCancel(true)
             .build()
-        runCatching { NotificationManagerCompat.from(context).notify(ID + 1, notification) }
+        runCatching { NotificationManagerCompat.from(context).notify(id + 1, notification) }
     }
 
     private fun notification(context: Context, done: Int, total: Int, current: String): Notification {

@@ -39,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import filehub.android.R
 import filehub.android.core.model.ServerProfile
@@ -50,6 +52,7 @@ fun ServersScreen(
     onAddServer: () -> Unit,
     onSelect: (String) -> Unit,
     onRemove: (String) -> Unit,
+    onEdit: (String) -> Unit,
 ) {
     var pendingRemoval by remember { mutableStateOf<ServerProfile?>(null) }
 
@@ -118,6 +121,7 @@ fun ServersScreen(
                         needsLogin = state.active?.id == profile.id && state.needsLogin,
                         onClick = { onSelect(profile.id) },
                         onRemove = { pendingRemoval = profile },
+                        onEdit = { onEdit(profile.id) },
                     )
                 }
             }
@@ -160,6 +164,7 @@ private fun ServerCard(
     needsLogin: Boolean,
     onClick: () -> Unit,
     onRemove: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
 
@@ -190,6 +195,14 @@ private fun ServerCard(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
                 )
+                profile.iconUrl?.let { icon ->
+                    AsyncImage(
+                        model = icon,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
             Spacer(Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -241,6 +254,13 @@ private fun ServerCard(
                     Icon(Icons.Filled.MoreVert, contentDescription = null)
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.server_edit)) },
+                        onClick = {
+                            menuOpen = false
+                            onEdit()
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.servers_remove)) },
                         onClick = {

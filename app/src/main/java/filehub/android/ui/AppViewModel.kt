@@ -99,6 +99,10 @@ class AppViewModel(
         viewModelScope.launch { repository.removeProfile(profileId) }
     }
 
+    fun updateProfile(profileId: String, displayName: String, addresses: List<String>) {
+        viewModelScope.launch { repository.updateProfile(profileId, displayName, addresses) }
+    }
+
     fun setTheme(value: String) {
         viewModelScope.launch { settingsStore.setTheme(value) }
     }

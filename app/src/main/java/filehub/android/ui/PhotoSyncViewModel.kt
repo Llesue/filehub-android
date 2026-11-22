@@ -12,10 +12,15 @@ import filehub.android.core.model.ServerProfile
 import filehub.android.data.sync.MediaBucket
 import filehub.android.data.sync.MediaScanner
 import filehub.android.data.sync.PhotoSyncConfigEntity
+import filehub.android.data.SessionRepository
 import filehub.android.data.sync.PhotoSyncRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -33,13 +38,18 @@ data class PhotoSyncUiState(
 class PhotoSyncViewModel(
     private val application: Application,
     private val repository: PhotoSyncRepository,
+    private val sessionRepository: SessionRepository,
 ) : ViewModel() {
 
-    val config: StateFlow<PhotoSyncConfigEntity?> = repository.config.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = null,
-    )
+    val config: StateFlow<PhotoSyncConfigEntity?> = sessionRepository.state
+        .map { it.active?.id }
+        .distinctUntilChanged()
+        .flatMapLatest { id -> if (id == null) flowOf(null) else repository.configFlow(id) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
 
     private val _state = MutableStateFlow(PhotoSyncUiState())
     val state: StateFlow<PhotoSyncUiState> = _state.asStateFlow()
@@ -98,11 +108,15 @@ class PhotoSyncViewModel(
     }
 
     fun syncNow() {
-        viewModelScope.launch { repository.syncNow() }
+        sessionRepository.state.value.active?.id?.let { id ->
+            viewModelScope.launch { repository.syncNow(id) }
+        }
     }
 
     fun setEnabled(enabled: Boolean) {
-        viewModelScope.launch { repository.setEnabled(enabled) }
+        sessionRepository.state.value.active?.id?.let { id ->
+            viewModelScope.launch { repository.setEnabled(id, enabled) }
+        }
     }
 
     fun resetSaved() {
@@ -113,7 +127,7 @@ class PhotoSyncViewModel(
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = application as FileHubApplication
-                PhotoSyncViewModel(app, app.container.photoSyncRepository)
+                PhotoSyncViewModel(app, app.container.photoSyncRepository, app.container.sessionRepository)
             }
         }
     }

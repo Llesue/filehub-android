@@ -30,7 +30,8 @@ class PhotoSyncWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as FileHubApplication
         val repo = app.container.photoSyncRepository
-        val config = repo.config() ?: return Result.success()
+        val profileId = inputData.getString("profileId") ?: return Result.success()
+        val config = repo.config(profileId) ?: return Result.success()
         if (!config.enabled) return Result.success()
 
         if (!hasPhotoPermission(config)) {
@@ -44,7 +45,11 @@ class PhotoSyncWorker(
         }
 
         try {
-            setForeground(PhotoSyncNotifications.foregroundInfo(applicationContext, 0, 0, ""))
+            setForeground(
+                PhotoSyncNotifications.foregroundInfo(
+                    applicationContext, 0, 0, "", notificationId(profileId),
+                ),
+            )
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
@@ -58,7 +63,7 @@ class PhotoSyncWorker(
         val photos = withContext(Dispatchers.IO) {
             MediaScanner.photos(applicationContext, albums, config.includeVideos)
         }
-        val entries = repo.entries().associateBy { it.signature }
+        val entries = repo.entries(profileId).associateBy { it.signature }
         val remoteNames = mutableMapOf<String, MutableMap<String, Long>>()
         var done = 0
         var failed = 0
@@ -85,12 +90,13 @@ class PhotoSyncWorker(
                 )
                 if (target.alreadyExists) {
                     repo.saveEntry(
-                        entry(photo, remoteDir, target.name, STATUS_DONE, null, photo.size),
+                        entry(profileId, photo, remoteDir, target.name, STATUS_DONE, null, photo.size),
                     )
                     done += 1
                 } else {
                     uploadPhotoWithRoot(
                         api = api,
+                        profileId = profileId,
                         rootId = config.rootId,
                         photo = photo,
                         remoteDir = remoteDir,
@@ -106,6 +112,7 @@ class PhotoSyncWorker(
                 failed += 1
                 repo.saveEntry(
                     entry(
+                        profileId = profileId,
                         photo = photo,
                         remoteDir = remoteDir(config, photo),
                         remoteName = existing?.remotePath?.substringAfterLast('/') ?: photo.name,
@@ -122,6 +129,7 @@ class PhotoSyncWorker(
                 failed += 1
                 repo.saveEntry(
                     entry(
+                        profileId = profileId,
                         photo = photo,
                         remoteDir = remoteDir(config, photo),
                         remoteName = existing?.remotePath?.substringAfterLast('/') ?: photo.name,
@@ -136,6 +144,7 @@ class PhotoSyncWorker(
                 done + failed,
                 photos.size,
                 photos.getOrNull(index)?.name.orEmpty(),
+                notificationId(profileId),
             )
         }
 
@@ -145,6 +154,7 @@ class PhotoSyncWorker(
 
     private suspend fun uploadPhotoWithRoot(
         api: FileHubApi,
+        profileId: String,
         rootId: Long,
         photo: MediaPhoto,
         remoteDir: String,
@@ -175,7 +185,7 @@ class PhotoSyncWorker(
             chunkSize = created.chunkSize
         }
         repo.saveEntry(
-            entry(photo, remoteDir, remoteName, STATUS_RUNNING, null, 0, uploadId),
+            entry(profileId, photo, remoteDir, remoteName, STATUS_RUNNING, null, 0, uploadId),
         )
         val chunks = if (photo.size == 0L) 0 else ((photo.size + chunkSize - 1) / chunkSize).toInt()
         var received = runCatching { api.uploadStatus(uploadId!!).receivedChunks }
@@ -190,6 +200,7 @@ class PhotoSyncWorker(
             api.uploadChunk(uploadId!!, index, data)
             received = received + index
             repo.updateEntry(
+                profileId = profileId,
                 signature = photo.signature,
                 status = STATUS_RUNNING,
                 uploadId = uploadId,
@@ -201,6 +212,7 @@ class PhotoSyncWorker(
         val complete = api.completeUpload(uploadId!!)
         repo.saveEntry(
             entry(
+                profileId = profileId,
                 photo = photo,
                 remoteDir = remoteDir,
                 remoteName = remoteName,
@@ -291,6 +303,7 @@ class PhotoSyncWorker(
         value.replace(Regex("[/\\\\\\p{Cntrl}]"), "_").trim().ifEmpty { "Camera" }
 
     private fun entry(
+        profileId: String,
         photo: MediaPhoto,
         remoteDir: String,
         remoteName: String,
@@ -300,6 +313,7 @@ class PhotoSyncWorker(
         uploadId: String? = null,
         remotePath: String? = null,
     ): PhotoSyncEntryEntity = PhotoSyncEntryEntity(
+        profileId = profileId,
         signature = photo.signature,
         localId = photo.localId,
         bucketId = photo.bucketId,
@@ -329,10 +343,10 @@ class PhotoSyncWorker(
                 lastRunAt = now(),
                 lastResult = result,
                 lastError = if (failed > 0) "$failed failed" else null,
-                pendingCount = repo.pendingCount(),
+                pendingCount = repo.pendingCount(config.profileId),
             ),
         )
-        PhotoSyncNotifications.finished(applicationContext, result)
+        PhotoSyncNotifications.finished(applicationContext, result, notificationId(config.profileId))
     }
 
     private suspend fun fail(
@@ -341,7 +355,7 @@ class PhotoSyncWorker(
         message: String,
     ): Result {
         repo.updateConfig(config.copy(lastError = message, lastRunAt = now()))
-        PhotoSyncNotifications.finished(applicationContext, message)
+        PhotoSyncNotifications.finished(applicationContext, message, notificationId(config.profileId))
         return Result.retry()
     }
 
@@ -366,6 +380,9 @@ class PhotoSyncWorker(
             Manifest.permission.READ_EXTERNAL_STORAGE,
         ) == PackageManager.PERMISSION_GRANTED
     }
+
+    private fun notificationId(profileId: String): Int =
+        5301 + (profileId.hashCode() and 0x0FFFFF)
 
     private fun now(): Long = System.currentTimeMillis() / 1000
 

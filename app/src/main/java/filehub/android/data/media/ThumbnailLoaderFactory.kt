@@ -19,6 +19,13 @@ class ThumbnailLoaderFactory(private val context: Context) {
     fun get(profileId: String, token: String): ImageLoader =
         loaders.getOrPut(profileId) { create(token) }
 
+    @Synchronized
+    fun close(profileId: String) {
+        loaders.remove(profileId)?.let { loader ->
+            runCatching { loader.shutdown() }
+        }
+    }
+
     private fun create(token: String): ImageLoader {
         val client = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)

@@ -12,6 +12,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import filehub.android.FileHubApplication
 import filehub.android.core.model.FileEntry
 import filehub.android.core.model.FileKind
+import filehub.android.core.model.FileProperties
 import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.ServerProfile
@@ -66,6 +67,9 @@ data class FileBrowserState(
     val shareCreated: ShareCreated? = null,
     val shareLoading: Boolean = false,
     val shareError: String? = null,
+    val properties: FileProperties? = null,
+    val propertiesLoading: Boolean = false,
+    val propertiesError: String? = null,
 ) {
     val isEmpty: Boolean get() = !loading && error == null && entries.isEmpty()
     val selectionMode: Boolean get() = selected.isNotEmpty()
@@ -153,6 +157,31 @@ class FilesViewModel(
 
     fun selectAll() {
         _state.update { it.copy(selected = it.entries.map(FileEntry::name).toSet()) }
+    }
+
+    fun loadProperties(entry: FileEntry) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        _state.update { it.copy(properties = null, propertiesLoading = true, propertiesError = null) }
+        viewModelScope.launch {
+            runCatching { repository.properties(profile, root.id, path) }
+                .onSuccess { properties ->
+                    _state.update {
+                        it.copy(properties = properties, propertiesLoading = false)
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(propertiesLoading = false, propertiesError = error.toUserMessage())
+                    }
+                }
+        }
+    }
+
+    fun clearProperties() {
+        _state.update { it.copy(properties = null, propertiesError = null, propertiesLoading = false) }
     }
 
     fun requestDeleteSelected() {
@@ -571,6 +600,15 @@ class FilesViewModel(
 
     fun clear() {
         loadJob?.cancel()
+        _state.value = FileBrowserState()
+    }
+
+    fun release() {
+        loadJob?.cancel()
+        val profileId = _state.value.profile?.id
+        if (profileId != null) thumbnailLoaderFactory.close(profileId)
+        activeToken = null
+        _imageLoader.value = null
         _state.value = FileBrowserState()
     }
 
