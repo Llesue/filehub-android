@@ -175,5 +175,23 @@
     <string name="photo_sync_schedule_15m">每 15 分钟</string>
     <string name="photo_sync_saved">相册同步设置已保存</string>
     <string name="photo_sync_save_failed">保存相册同步设置失败</string>
+    <string name="folder_sync_channel">目录同步</string>
+    <string name="folder_sync_screen">目录同步</string>
+    <string name="folder_sync_local">本地文件夹</string>
+    <string name="folder_sync_choose">选择文件夹</string>
+    <string name="folder_sync_mode">方向</string>
+    <string name="folder_sync_mode_upload">手机 → 服务器</string>
+    <string name="folder_sync_mode_download">服务器 → 手机</string>
+    <string name="folder_sync_mode_two_way">双向</string>
+    <string name="folder_sync_delete">同步删除</string>
+    <string name="folder_sync_enabled">已开启</string>
+    <string name="folder_sync_off">关闭</string>
+    <string name="folder_sync_now">立即同步</string>
+    <string name="folder_sync_last_run">上次同步</string>
+    <string name="folder_sync_conflicts">冲突</string>
+    <string name="folder_sync_pending">待同步</string>
+    <string name="folder_sync_no_folder">请先选择本地文件夹</string>
+    <string name="folder_sync_save_failed">保存目录同步设置失败</string>
+    <string name="folder_sync_result">完成 %1$d / %2$d</string>
 </resources>
 

@@ -89,6 +89,7 @@ fun FileHubApp(viewModel: AppViewModel) {
     val searchViewModel: SearchViewModel = viewModel(factory = SearchViewModel.factory(application))
     val transferViewModel: TransferViewModel = viewModel(factory = TransferViewModel.factory(application))
     val photoSyncViewModel: PhotoSyncViewModel = viewModel(factory = PhotoSyncViewModel.factory(application))
+    val folderSyncViewModel: FolderSyncViewModel = viewModel(factory = FolderSyncViewModel.factory(application))
     var tab by rememberSaveable { mutableStateOf(MainTab.Servers) }
     val session by viewModel.session.collectAsStateWithLifecycle()
     val transfers by transferViewModel.items.collectAsStateWithLifecycle()
@@ -158,6 +159,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                             onRefresh = viewModel::refreshRoots,
                             onTransfers = { navController.navigate("transfers") },
                             onPhotoSync = { navController.navigate("photoSync") },
+                            onFolderSync = { navController.navigate("folderSync") },
                         )
                     }
                 }
@@ -191,6 +193,13 @@ fun FileHubApp(viewModel: AppViewModel) {
                     searchViewModel.reset()
                     navController.popBackStack()
                 },
+            )
+        }
+        composable("folderSync") {
+            FolderSyncScreen(
+                viewModel = folderSyncViewModel,
+                session = session,
+                onBack = { navController.popBackStack() },
             )
         }
         composable("photoSync") {

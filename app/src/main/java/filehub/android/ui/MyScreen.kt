@@ -47,6 +47,7 @@ fun MyScreen(
     onRefresh: () -> Unit,
     onTransfers: () -> Unit,
     onPhotoSync: () -> Unit,
+    onFolderSync: () -> Unit,
 ) {
     val profile = state.active
     var confirmRemove by remember { mutableStateOf(false) }
@@ -172,6 +173,12 @@ fun MyScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(stringResource(R.string.photo_sync_screen))
+        }
+        OutlinedButton(
+            onClick = onFolderSync,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.folder_sync_screen))
         }
         OutlinedButton(
             onClick = onRefresh,
