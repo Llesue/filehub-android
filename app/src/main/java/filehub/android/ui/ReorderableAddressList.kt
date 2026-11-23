@@ -181,10 +181,18 @@ fun ReorderableAddressList(
                                 val from = draggingIndex
                                 if (from == null) return@detectDragGestures
                                 val destination = targetIndex ?: from
-                                if (destination != from) onMove(from, destination)
-                                draggingIndex = null
-                                targetIndex = null
-                                dragOffset = 0f
+                                if (destination != from) {
+                                    androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                                        onMove(from, destination)
+                                        draggingIndex = null
+                                        targetIndex = null
+                                        dragOffset = 0f
+                                    }
+                                } else {
+                                    draggingIndex = null
+                                    targetIndex = null
+                                    dragOffset = 0f
+                                }
                             },
                             onDragCancel = {
                                 draggingIndex = null
