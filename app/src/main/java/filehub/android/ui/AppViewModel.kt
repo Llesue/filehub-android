@@ -9,6 +9,9 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import filehub.android.FileHubApplication
 import filehub.android.R
+import filehub.android.data.BrowserStateRepository
+import filehub.android.data.ClientRelease
+import filehub.android.data.ClientUpdateChecker
 import filehub.android.data.ServerConnection
 import filehub.android.data.FilesRepository
 import filehub.android.data.toUserMessage
@@ -42,6 +45,12 @@ data class LoginUiState(
     val success: Boolean = false,
 )
 
+data class ClientUpdateUiState(
+    val release: ClientRelease? = null,
+    val checking: Boolean = false,
+    val error: String? = null,
+)
+
 class AppViewModel(
     private val application: Application,
     private val repository: SessionRepository,
@@ -50,6 +59,8 @@ class AppViewModel(
     private val thumbnailLoaderFactory: ThumbnailLoaderFactory,
     private val photoSyncRepository: PhotoSyncRepository,
     private val folderSyncRepository: FolderSyncRepository,
+    private val clientUpdateChecker: ClientUpdateChecker,
+    private val browserStateRepository: BrowserStateRepository,
 ) : ViewModel() {
 
     val session: StateFlow<SessionState> = repository.state
@@ -65,6 +76,13 @@ class AppViewModel(
 
     private val _serverVersion = MutableStateFlow<VersionDto?>(null)
     val serverVersion: StateFlow<VersionDto?> = _serverVersion.asStateFlow()
+    private val _serverVersionLoading = MutableStateFlow(false)
+    val serverVersionLoading: StateFlow<Boolean> = _serverVersionLoading.asStateFlow()
+
+    private val _clientUpdate = MutableStateFlow(ClientUpdateUiState())
+    val clientUpdate: StateFlow<ClientUpdateUiState> = _clientUpdate.asStateFlow()
+    private val _versionError = MutableStateFlow<String?>(null)
+    val versionError: StateFlow<String?> = _versionError.asStateFlow()
 
     private val _login = MutableStateFlow(LoginUiState())
     val login: StateFlow<LoginUiState> = _login.asStateFlow()
@@ -182,10 +200,60 @@ class AppViewModel(
 
     fun loadServerVersion() {
         val profile = session.value.active ?: return
+        _serverVersionLoading.value = true
         viewModelScope.launch {
             runCatching { filesRepository.version(profile) }
-                .onSuccess { _serverVersion.value = it }
+                .onSuccess {
+                    _serverVersion.value = it
+                    _versionError.value = null
+                }
+                .onFailure {
+                    _versionError.value = application.getString(R.string.version_check_failed)
+                }
+            _serverVersionLoading.value = false
         }
+    }
+
+    fun loadClientUpdate(force: Boolean = false, reportError: Boolean = false) {
+        val cached = clientUpdateChecker.cached()
+        if (cached != null) {
+            _clientUpdate.update { it.copy(release = cached) }
+        }
+        if (!force && cached != null && clientUpdateChecker.isFresh(cached)) {
+            return
+        }
+        if (_clientUpdate.value.checking) return
+        _clientUpdate.update { it.copy(checking = true, error = null) }
+        viewModelScope.launch {
+            runCatching { clientUpdateChecker.check() }
+                .onSuccess { release ->
+                    _clientUpdate.value = ClientUpdateUiState(release = release)
+                    _versionError.value = null
+                }
+                .onFailure {
+                    _clientUpdate.update { state ->
+                        state.copy(
+                            checking = false,
+                            error = if (reportError) {
+                                application.getString(R.string.version_check_failed)
+                            } else {
+                                state.error
+                            },
+                        )
+                    }
+                    if (reportError) {
+                        _versionError.value = application.getString(R.string.version_check_failed)
+                    }
+                    return@launch
+                }
+            _clientUpdate.update { it.copy(checking = false) }
+        }
+    }
+
+    fun refreshVersions() {
+        _versionError.value = null
+        loadServerVersion()
+        loadClientUpdate(force = true, reportError = true)
     }
 
     fun refreshRoots() {
@@ -200,11 +268,13 @@ class AppViewModel(
                 folderSyncRepository.disableAndCancel(id)
             }
             repository.logout(removeProfile = false)
+            profileId?.let { browserStateRepository.clearForProfile(it) }
         }
     }
 
     fun removeProfile(profileId: String) {
         viewModelScope.launch {
+            browserStateRepository.clearForProfile(profileId)
             photoSyncRepository.disableAndCancel(profileId)
             folderSyncRepository.disableAndCancel(profileId)
             repository.removeProfile(profileId)
@@ -265,6 +335,8 @@ class AppViewModel(
                     app.container.thumbnailLoaderFactory,
                     app.container.photoSyncRepository,
                     app.container.folderSyncRepository,
+                    app.container.clientUpdateChecker,
+                    app.container.browserStateRepository,
                 )
             }
         }

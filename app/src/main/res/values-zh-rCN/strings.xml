@@ -404,6 +404,13 @@
     <string name="exif_orientation_270">旋转 270°</string>
     <string name="text_preview_truncated">文件较大，仅显示前一部分内容。</string>
     <string name="sort_remote_size_hint">远程目录大小可能不完整。</string>
+    <string name="version_check_failed">检查更新失败</string>
+    <string name="version_new">新版本 %1$s</string>
+    <string name="client_update_title">安卓客户端有新版本</string>
+    <string name="client_update_body">当前 %1$s · 最新 %2$s</string>
+    <string name="server_update_title">服务端有新版本</string>
+    <string name="open_download_page">打开下载页</string>
+    <string name="open_release_page">打开发布页</string>
     <string name="version_title">版本</string>
     <string name="client_version">客户端版本</string>
     <string name="preview_rotate">旋转</string>

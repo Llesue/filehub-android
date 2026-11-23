@@ -67,8 +67,13 @@ fun MyScreen(
     onShares: () -> Unit,
     usage: UsageUiState,
     serverVersion: filehub.android.data.api.VersionDto?,
+    clientUpdate: ClientUpdateUiState,
+    serverVersionLoading: Boolean,
+    versionError: String?,
     onLoadUsage: () -> Unit,
     onLoadServerVersion: () -> Unit,
+    onLoadClientUpdate: () -> Unit,
+    onRefreshVersions: () -> Unit,
     theme: String,
     onThemeChange: (String) -> Unit,
     language: String,
@@ -84,6 +89,7 @@ fun MyScreen(
         if (profile != null) {
             onLoadUsage()
             onLoadServerVersion()
+            onLoadClientUpdate()
         }
     }
 
@@ -217,7 +223,13 @@ fun MyScreen(
         )
         UsageCard(usage = usage, onRefresh = onLoadUsage)
 
-        VersionCard(serverVersion)
+        VersionCard(
+            serverVersion = serverVersion,
+            clientUpdate = clientUpdate,
+            serverVersionLoading = serverVersionLoading,
+            versionError = versionError,
+            onRefresh = onRefreshVersions,
+        )
 
         Spacer(Modifier.height(8.dp))
         Button(
@@ -389,32 +401,134 @@ private fun UsageCard(usage: UsageUiState, onRefresh: () -> Unit) {
 }
 
 @Composable
-private fun VersionCard(serverVersion: filehub.android.data.api.VersionDto?) {
-    InfoCard(title = stringResource(R.string.version_title)) {
+private fun VersionCard(
+    serverVersion: filehub.android.data.api.VersionDto?,
+    clientUpdate: ClientUpdateUiState,
+    serverVersionLoading: Boolean,
+    versionError: String?,
+    onRefresh: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val release = clientUpdate.release
+    val clientNewer = release != null &&
+        filehub.android.data.ClientUpdateChecker.isNewer(release.version, BuildConfig.VERSION_NAME)
+    val serverNewer = serverVersion?.let {
+        it.checkEnabled && it.updateAvailable && !it.latest.isNullOrBlank()
+    } == true
+    var dialog by remember { mutableStateOf(false) }
+    var dialogIsClient by remember { mutableStateOf(true) }
+
+    fun open(url: String) {
+        runCatching {
+            context.startActivity(
+                android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse(url),
+                ),
+            )
+        }
+    }
+
+    InfoCard(
+        title = stringResource(R.string.version_title),
+        action = {
+            if (clientUpdate.checking || serverVersionLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = stringResource(R.string.common_refresh),
+                    )
+                }
+            }
+        },
+    ) {
         VersionRow(
             label = stringResource(R.string.client_version),
             value = BuildConfig.VERSION_NAME,
+            chip = if (clientNewer) {
+                stringResource(R.string.version_new, release?.version.orEmpty())
+            } else {
+                null
+            },
+            onChipClick = {
+                dialogIsClient = true
+                dialog = true
+            },
         )
         VersionRow(
             label = stringResource(R.string.server_version),
             value = serverVersion?.version ?: "—",
+            chip = if (serverNewer) {
+                stringResource(R.string.version_new, serverVersion.latest.orEmpty())
+            } else {
+                null
+            },
+            onChipClick = {
+                dialogIsClient = false
+                dialog = true
+            },
         )
-        if (serverVersion?.updateAvailable == true) {
+        versionError?.let {
             Text(
-                text = stringResource(
-                    R.string.server_version_update,
-                    serverVersion.latest ?: "",
-                ),
+                text = it,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.error,
             )
         }
+    }
+
+    if (dialog) {
+        val current = BuildConfig.VERSION_NAME
+        val latest = if (dialogIsClient) release?.version.orEmpty() else serverVersion?.latest.orEmpty()
+        AlertDialog(
+            onDismissRequest = { dialog = false },
+            title = {
+                Text(
+                    stringResource(
+                        if (dialogIsClient) R.string.client_update_title else R.string.server_update_title,
+                    ),
+                )
+            },
+            text = {
+                Text(stringResource(R.string.client_update_body, current, latest))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        dialog = false
+                        if (dialogIsClient) {
+                            release?.url?.let(::open)
+                        } else {
+                            open("https://github.com/Llesue/filehub/releases/latest")
+                        }
+                    },
+                ) {
+                    Text(
+                        stringResource(
+                            if (dialogIsClient) R.string.open_download_page else R.string.open_release_page,
+                        ),
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { dialog = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 }
 
 @Composable
-private fun VersionRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
+private fun VersionRow(
+    label: String,
+    value: String,
+    chip: String? = null,
+    onChipClick: (() -> Unit)? = null,
+) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
@@ -422,6 +536,21 @@ private fun VersionRow(label: String, value: String) {
             modifier = Modifier.weight(1f),
         )
         Text(text = value, style = MaterialTheme.typography.bodyMedium)
+        if (chip != null) {
+            Spacer(Modifier.size(6.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.clickable { onChipClick?.invoke() },
+            ) {
+                Text(
+                    text = chip,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            }
+        }
     }
 }
 
@@ -524,6 +653,7 @@ private fun themeLabel(value: String): String = when (value) {
 private fun InfoCard(
     title: String,
     spacing: Dp = 8.dp,
+    action: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Surface(
@@ -533,11 +663,15 @@ private fun InfoCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                action?.invoke()
+            }
             content()
         }
     }

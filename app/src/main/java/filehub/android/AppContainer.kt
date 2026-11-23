@@ -1,6 +1,7 @@
 package filehub.android
 
 import android.content.Context
+import filehub.android.data.ClientUpdateChecker
 import filehub.android.data.DirectoryCacheRepository
 import filehub.android.data.BrowserStateRepository
 import filehub.android.data.FilesRepository
@@ -45,6 +46,7 @@ class AppContainer(context: Context) {
         .fallbackToDestructiveMigration()
         .build()
     val directoryCacheRepository: DirectoryCacheRepository = DirectoryCacheRepository(syncDatabase.directoryCacheDao())
+    val clientUpdateChecker: ClientUpdateChecker = ClientUpdateChecker(appContext)
     val browserStateRepository: BrowserStateRepository = BrowserStateRepository(syncDatabase.browserStateDao())
     val photoSyncRepository: PhotoSyncRepository = PhotoSyncRepository(appContext, syncDatabase.photoSyncDao())
     val folderSyncRepository: FolderSyncRepository = FolderSyncRepository(appContext, syncDatabase.folderSyncDao())

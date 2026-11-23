@@ -525,7 +525,7 @@ fun TextEditorScreen(
                 editing = editing,
                 saving = state.saving,
                 onClickEncoding = {
-                    if (state.lossy) {
+                    if (state.lossy && !state.loading) {
                         val next = nextEncoding(state.encoding)
                         viewModel.load(next)
                     }

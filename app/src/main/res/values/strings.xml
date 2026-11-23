@@ -404,6 +404,13 @@
     <string name="exif_orientation_270">Rotated 270°</string>
     <string name="text_preview_truncated">File is large; showing the first part only.</string>
     <string name="sort_remote_size_hint">Remote folder sizes may be incomplete.</string>
+    <string name="version_check_failed">Update check failed</string>
+    <string name="version_new">New %1$s</string>
+    <string name="client_update_title">New Android version</string>
+    <string name="client_update_body">Current %1$s · Latest %2$s</string>
+    <string name="server_update_title">New server version</string>
+    <string name="open_download_page">Open download page</string>
+    <string name="open_release_page">Open release page</string>
     <string name="version_title">Versions</string>
     <string name="client_version">Client version</string>
     <string name="preview_rotate">Rotate</string>
