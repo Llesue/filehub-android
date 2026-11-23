@@ -466,5 +466,40 @@
         <item quantity="one">In %d year</item>
         <item quantity="other">In %d years</item>
     </plurals>
+
+    <string name="preview_unavailable_title">Can\'t preview this file</string>
+    <string name="preview_unavailable_body">This file type can\'t be opened inside the app. You can still download or share it.</string>
+    <string name="preview_open_as_text">Open as text</string>
+    <string name="preview_download">Download</string>
+    <string name="preview_share">Share</string>
+    <string name="preview_details">Properties</string>
+    <string name="preview_copy_all">Copy all</string>
+    <string name="preview_copied">Copied</string>
+    <string name="preview_reload">Reload</string>
+    <string name="preview_wrap">Wrap lines</string>
+    <string name="preview_no_wrap">No wrap</string>
+    <string name="preview_try_encoding">Try another encoding</string>
+    <string name="preview_mixed_eol">Mixed</string>
+    <string name="preview_lossy_chip">Encoding warning</string>
+    <string name="editor_saved">Saved</string>
+    <string name="editor_unsaved">Unsaved</string>
+    <string name="editor_saving">Saving…</string>
+    <string name="editor_find">Find</string>
+    <string name="editor_find_none">No matches</string>
+    <string name="editor_theme">Editor theme</string>
+    <string name="editor_theme_auto">Match app</string>
+    <string name="editor_theme_light">Light</string>
+    <string name="editor_theme_sepia">Sepia</string>
+    <string name="editor_line_ending">Line endings</string>
+    <string name="editor_eol_lf">LF (Unix)</string>
+    <string name="editor_eol_crlf">CRLF (Windows)</string>
+    <string name="markdown_bold">B</string>
+    <string name="markdown_italic">I</string>
+    <string name="markdown_list">•</string>
+    <string name="markdown_ordered">1.</string>
+    <string name="markdown_quote">&gt;</string>
+    <string name="markdown_code">&lt;/&gt;</string>
+    <string name="markdown_link">Link</string>
+    <string name="file_error_body">Check the network or server status and try again.</string>
 </resources>
 

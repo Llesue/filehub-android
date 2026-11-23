@@ -28,6 +28,7 @@ data class TextEditorState(
     val encoding: String? = null,
     val bom: Boolean = false,
     val lineEnding: String = "lf",
+    val originalLineEnding: String = "lf",
     val writable: Boolean = false,
     val readOnlyReason: String? = null,
     val lossy: Boolean = false,
@@ -35,6 +36,7 @@ data class TextEditorState(
     val saving: Boolean = false,
     val saveError: String? = null,
     val conflict: Boolean = false,
+    val justSaved: Boolean = false,
 )
 
 class TextEditorViewModel(
@@ -97,6 +99,7 @@ class TextEditorViewModel(
             encoding = text.encoding,
             bom = text.bom,
             lineEnding = text.lineEnding,
+            originalLineEnding = text.lineEnding,
             writable = text.writable && !text.lossy,
             readOnlyReason = if (text.lossy) {
                 application.getString(R.string.text_encoding_unsupported)
@@ -109,8 +112,28 @@ class TextEditorViewModel(
 
     fun setContent(value: String) {
         _state.update {
-            it.copy(content = value, dirty = value != it.original, saveError = null)
+            it.copy(
+                content = value,
+                dirty = value != it.original || it.lineEnding != it.originalLineEnding,
+                saveError = null,
+                justSaved = false,
+            )
         }
+    }
+
+    fun setLineEnding(value: String) {
+        if (value != "lf" && value != "crlf") return
+        _state.update {
+            it.copy(
+                lineEnding = value,
+                dirty = it.content != it.original || value != it.originalLineEnding,
+                justSaved = false,
+            )
+        }
+    }
+
+    fun clearJustSaved() {
+        _state.update { it.copy(justSaved = false) }
     }
 
     fun save(force: Boolean = false) {
@@ -139,9 +162,11 @@ class TextEditorViewModel(
                         size = result.size.takeIf { value -> value > 0 } ?: it.size,
                         modified = System.currentTimeMillis() / 1000,
                         original = it.content,
+                        originalLineEnding = it.lineEnding,
                         dirty = false,
                         conflict = false,
                         saveError = null,
+                        justSaved = true,
                     )
                 }
             }.onFailure { error ->

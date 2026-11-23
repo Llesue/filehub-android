@@ -108,6 +108,7 @@ dependencies {
     implementation(libs.markwon.tasklist)
     implementation(libs.markwon.strikethrough)
     implementation(libs.markwon.linkify)
+    implementation(libs.highlights)
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.compose.ui)

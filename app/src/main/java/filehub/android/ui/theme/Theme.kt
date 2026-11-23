@@ -5,7 +5,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+
+data class WarningColors(val container: Color, val content: Color)
+
+private val LightWarning = WarningColors(
+    container = Color(0xFFFFE082),
+    content = Color(0xFF3B2F00),
+)
+
+private val DarkWarning = WarningColors(
+    container = Color(0xFF4A3A00),
+    content = Color(0xFFFFE082),
+)
+
+val LocalWarningColors = staticCompositionLocalOf { LightWarning }
 
 private val LightColors = lightColorScheme(
     primary = FileHubBlue,
@@ -44,8 +59,12 @@ fun FileHubTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        content = content,
-    )
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalWarningColors provides if (darkTheme) DarkWarning else LightWarning,
+    ) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) DarkColors else LightColors,
+            content = content,
+        )
+    }
 }

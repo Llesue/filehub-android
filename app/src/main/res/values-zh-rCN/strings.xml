@@ -429,5 +429,40 @@
     <plurals name="time_in_weeks"><item quantity="other">%d 周后</item></plurals>
     <plurals name="time_in_months"><item quantity="other">%d 个月后</item></plurals>
     <plurals name="time_in_years"><item quantity="other">%d 年后</item></plurals>
+
+    <string name="preview_unavailable_title">无法预览</string>
+    <string name="preview_unavailable_body">这个文件暂时无法在应用内打开，仍可下载或分享。</string>
+    <string name="preview_open_as_text">以文本方式打开</string>
+    <string name="preview_download">下载</string>
+    <string name="preview_share">分享</string>
+    <string name="preview_details">属性</string>
+    <string name="preview_copy_all">复制全文</string>
+    <string name="preview_copied">已复制</string>
+    <string name="preview_reload">重新加载</string>
+    <string name="preview_wrap">自动换行</string>
+    <string name="preview_no_wrap">不换行</string>
+    <string name="preview_try_encoding">换个编码试试</string>
+    <string name="preview_mixed_eol">混合</string>
+    <string name="preview_lossy_chip">编码有误</string>
+    <string name="editor_saved">已保存</string>
+    <string name="editor_unsaved">未保存</string>
+    <string name="editor_saving">保存中…</string>
+    <string name="editor_find">查找</string>
+    <string name="editor_find_none">无结果</string>
+    <string name="editor_theme">编辑器主题</string>
+    <string name="editor_theme_auto">跟随应用</string>
+    <string name="editor_theme_light">浅色</string>
+    <string name="editor_theme_sepia">护眼</string>
+    <string name="editor_line_ending">换行符</string>
+    <string name="editor_eol_lf">LF (Unix)</string>
+    <string name="editor_eol_crlf">CRLF (Windows)</string>
+    <string name="markdown_bold">B</string>
+    <string name="markdown_italic">I</string>
+    <string name="markdown_list">•</string>
+    <string name="markdown_ordered">1.</string>
+    <string name="markdown_quote">&gt;</string>
+    <string name="markdown_code">&lt;/&gt;</string>
+    <string name="markdown_link">链接</string>
+    <string name="file_error_body">检查网络或服务器状态后重试。</string>
 </resources>
 

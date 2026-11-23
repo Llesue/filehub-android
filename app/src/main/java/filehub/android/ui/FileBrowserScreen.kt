@@ -37,6 +37,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material.icons.filled.Close
@@ -423,17 +424,16 @@ fun FileBrowserScreen(
 
         Box(modifier = Modifier.weight(1f)) {
         when {
-            state.loginRequired -> MessageState(
+            state.loginRequired -> StatusMessage(
+                icon = Icons.Filled.Warning,
                 title = stringResource(R.string.file_login_required),
-                action = null,
             )
-            state.error != null && state.entries.isEmpty() -> MessageState(
+            state.error != null && state.entries.isEmpty() -> StatusMessage(
+                icon = Icons.Filled.Warning,
                 title = state.error.orEmpty(),
-                action = {
-                    TextButton(onClick = viewModel::refresh) {
-                        Text(stringResource(R.string.common_retry))
-                    }
-                },
+                body = stringResource(R.string.file_error_body),
+                actionLabel = stringResource(R.string.common_retry),
+                onAction = viewModel::refresh,
             )
             state.loading && state.entries.isEmpty() -> SkeletonList()
             state.entries.isEmpty() -> EmptyFolder(
@@ -703,6 +703,29 @@ fun FileBrowserScreen(
             onConfirm = viewModel::confirmDelete,
         )
     }
+    state.unsupportedPreview?.let { unsupported ->
+        UnsupportedPreviewDialog(
+            preview = unsupported,
+            onOpenAsText = {
+                viewModel.dismissUnsupported()
+                viewModel.openAsText(unsupported.entry)
+            },
+            onDownload = {
+                requestNotificationPermission()
+                viewModel.dismissUnsupported()
+                viewModel.enqueueDownload(unsupported.entry)
+            },
+            onShare = {
+                viewModel.dismissUnsupported()
+                viewModel.openShare(unsupported.entry)
+            },
+            onDetails = {
+                viewModel.dismissUnsupported()
+                viewModel.showDetails(unsupported.entry)
+            },
+            onDismiss = viewModel::dismissUnsupported,
+        )
+    }
     state.previewEntry?.let { entry ->
         PreviewDialog(
             entry = entry,
@@ -717,6 +740,8 @@ fun FileBrowserScreen(
             loading = state.previewLoading,
             mediaReady = state.previewMediaReady,
             error = state.previewError,
+            previewAsText = state.previewAsText,
+            encoding = state.previewEncoding,
             playerFactory = viewModel::createPlayer,
             onPageChanged = viewModel::previewPage,
             onLongPress = {
@@ -735,6 +760,14 @@ fun FileBrowserScreen(
             } else {
                 null
             },
+            onReloadEncoding = viewModel::reloadPreviewText,
+            onRetryText = { viewModel.reloadPreviewText(state.previewEncoding) },
+            onDownload = {
+                requestNotificationPermission()
+                viewModel.enqueueDownload(entry)
+            },
+            onShare = { viewModel.openShare(entry) },
+            onDetails = { viewModel.showDetails(entry) },
             onClose = viewModel::closePreview,
         )
     }
@@ -1291,27 +1324,6 @@ private fun DetailRow(label: String, value: String) {
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-@Composable
-private fun MessageState(title: String, action: (@Composable () -> Unit)?) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (action != null) {
-            Spacer(Modifier.height(12.dp))
-            action()
-        }
     }
 }
 

@@ -59,6 +59,12 @@ data class AudioPickerState(
     val info: AudioInfoDto,
 )
 
+data class UnsupportedPreview(
+    val entry: FileEntry,
+    val message: String? = null,
+    val allowText: Boolean = false,
+)
+
 data class ActiveJob(
     val id: String,
     val label: String,
@@ -95,6 +101,8 @@ data class FileBrowserState(
     val previewSession: Long = 0,
     val previewAsText: Boolean = false,
     val textPreview: TextFileDto? = null,
+    val previewEncoding: String? = null,
+    val unsupportedPreview: UnsupportedPreview? = null,
     val pdfPreviewFile: File? = null,
     val previewLoading: Boolean = false,
     val previewMediaReady: Int = 0,
@@ -467,7 +475,20 @@ class FilesViewModel(
         val current = _state.value
         val profile = current.profile ?: return
         val root = current.root ?: return
-        val needsText = entry.kind == FileKind.Text || entry.kind == FileKind.Code
+        if (!canPreview(entry)) {
+            _state.update {
+                it.copy(
+                    unsupportedPreview = UnsupportedPreview(
+                        entry = entry,
+                        allowText = entry.kind == FileKind.File,
+                    ),
+                )
+            }
+            return
+        }
+        val needsText = entry.kind == FileKind.Text ||
+            entry.kind == FileKind.Code ||
+            entry.isMarkdown
         val needsPdf = entry.kind == FileKind.Pdf
         val needsMedia = entry.kind == FileKind.Video || entry.kind == FileKind.Audio
         val images = when {
@@ -495,12 +516,16 @@ class FilesViewModel(
             needsText -> viewModelScope.launch {
                 runCatching { repository.readText(profile, root.id, path) }
                     .onSuccess { text ->
-                        _state.update { it.copy(textPreview = text, previewLoading = false) }
+                        _state.update {
+                            it.copy(
+                                textPreview = text,
+                                previewEncoding = null,
+                                previewLoading = false,
+                            )
+                        }
                     }
                     .onFailure { error ->
-                        _state.update {
-                            it.copy(previewLoading = false, previewError = error.toUserMessage(application))
-                        }
+                        showUnsupported(entry, error.toUserMessage(application))
                     }
             }
             needsPdf -> viewModelScope.launch {
@@ -556,18 +581,9 @@ class FilesViewModel(
             runCatching { repository.probeText(profile, root.id, path) }
                 .onSuccess { probe ->
                     when {
-                        !probe.isText -> _state.update {
-                            it.copy(
-                                previewLoading = false,
-                                previewError = probeErrorMessage(probe.reason),
-                            )
-                        }
-                        probe.size > MAX_TEXT_EDIT_BYTES -> _state.update {
-                            it.copy(
-                                previewLoading = false,
-                                previewError = application.getString(R.string.text_too_large),
-                            )
-                        }
+                        !probe.isText -> showUnsupported(entry, probeErrorMessage(probe.reason))
+                        probe.size > MAX_TEXT_EDIT_BYTES ->
+                            showUnsupported(entry, application.getString(R.string.text_too_large))
                         else -> runCatching {
                             repository.readText(profile, root.id, path)
                         }.onSuccess { text ->
@@ -575,12 +591,7 @@ class FilesViewModel(
                                 it.copy(textPreview = text, previewLoading = false)
                             }
                         }.onFailure { error ->
-                            _state.update {
-                                it.copy(
-                                    previewLoading = false,
-                                    previewError = error.toUserMessage(application),
-                                )
-                            }
+                            showUnsupported(entry, error.toUserMessage(application))
                         }
                     }
                 }
@@ -590,10 +601,64 @@ class FilesViewModel(
                     } else {
                         error.toUserMessage(application)
                     }
-                    _state.update { it.copy(previewLoading = false, previewError = message) }
+                    showUnsupported(entry, message)
                 }
         }
     }
+
+    fun reloadPreviewText(encoding: String?) {
+        val current = _state.value
+        val entry = current.previewEntry ?: return
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        _state.update {
+            it.copy(previewEncoding = encoding, previewLoading = true, previewError = null)
+        }
+        viewModelScope.launch {
+            runCatching { repository.readText(profile, root.id, path, encoding) }
+                .onSuccess { text ->
+                    _state.update { it.copy(textPreview = text, previewLoading = false) }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            previewLoading = false,
+                            previewError = error.toUserMessage(application),
+                        )
+                    }
+                }
+        }
+    }
+
+    fun dismissUnsupported() {
+        _state.update { it.copy(unsupportedPreview = null) }
+    }
+
+    private fun showUnsupported(entry: FileEntry, message: String?) {
+        _state.update {
+            it.copy(
+                previewEntry = null,
+                previewImages = emptyList(),
+                textPreview = null,
+                previewLoading = false,
+                previewError = null,
+                unsupportedPreview = UnsupportedPreview(entry, message),
+            )
+        }
+    }
+
+    private fun canPreview(entry: FileEntry): Boolean =
+        entry.isMarkdown || when (entry.kind) {
+            FileKind.Image,
+            FileKind.Video,
+            FileKind.Audio,
+            FileKind.Pdf,
+            FileKind.Text,
+            FileKind.Code,
+            -> true
+            else -> false
+        }
 
     private fun probeErrorMessage(reason: String): String = when (reason) {
         "too_large" -> application.getString(R.string.text_too_large)
@@ -620,6 +685,7 @@ class FilesViewModel(
                 previewImagesPinned = false,
                 previewAsText = false,
                 textPreview = null,
+                previewEncoding = null,
                 pdfPreviewFile = null,
                 previewError = null,
                 previewLoading = false,

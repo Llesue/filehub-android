@@ -430,10 +430,17 @@ fun PreviewDialog(
     loading: Boolean,
     mediaReady: Int,
     error: String?,
+    previewAsText: Boolean,
+    encoding: String?,
     playerFactory: () -> ExoPlayer?,
     onPageChanged: (FileEntry) -> Unit,
     onLongPress: () -> Unit,
     onEdit: (() -> Unit)?,
+    onReloadEncoding: (String?) -> Unit,
+    onRetryText: () -> Unit,
+    onDownload: () -> Unit,
+    onShare: () -> Unit,
+    onDetails: () -> Unit,
     onClose: () -> Unit,
 ) {
     val isMedia = entry.kind == FileKind.Image ||
@@ -656,53 +663,70 @@ fun PreviewDialog(
                     }
                 }
             } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .navigationBarsPadding(),
-                ) {
-                    PreviewTopBar(
+                val textMode = previewAsText ||
+                    entry.kind == FileKind.Text ||
+                    entry.kind == FileKind.Code ||
+                    entry.isMarkdown
+                if (textMode) {
+                    TextPreviewScaffold(
                         entry = entry,
-                        contentColor = contentColor,
-                        showDetails = false,
-                        showOrientation = false,
-                        showEdit = onEdit != null && (
-                            entry.kind == FileKind.Text ||
-                                entry.kind == FileKind.Code ||
-                                entry.isMarkdown
-                            ),
-                        onEdit = onEdit ?: {},
-                        onDetails = onLongPress,
-                        onToggleOrientation = {},
-                        onClose = onClose,
-                        scrim = false,
-                    )
-                    PreviewBody(
-                        entry = entry,
-                        pages = pages,
-                        pagerState = pagerState,
-                        imageLoader = imageLoader,
-                        imageUrlFor = imageUrlFor,
-                        thumbnailUrlFor = thumbnailUrlFor,
-                        downloadUrlFor = downloadUrlFor,
                         text = text,
-                        pdfFile = pdfFile,
                         loading = loading,
-                        mediaReady = mediaReady,
                         error = error,
-                        contentColor = contentColor,
-                        playerFactory = playerFactory,
-                        original = false,
-                        onOriginalError = {},
-                        pagerEnabled = false,
-                        onZoomChanged = {},
-                        onLongPress = onLongPress,
-                        onImageTap = {},
-                        onControlsVisibilityChanged = {},
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
+                        encoding = encoding,
+                        onReloadEncoding = onReloadEncoding,
+                        onRetry = onRetryText,
+                        onEdit = onEdit,
+                        onDownload = onDownload,
+                        onShare = onShare,
+                        onDetails = onDetails,
+                        onClose = onClose,
                     )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .navigationBarsPadding(),
+                    ) {
+                        PreviewTopBar(
+                            entry = entry,
+                            contentColor = contentColor,
+                            showDetails = false,
+                            showOrientation = false,
+                            showEdit = false,
+                            onEdit = {},
+                            onDetails = onLongPress,
+                            onToggleOrientation = {},
+                            onClose = onClose,
+                            scrim = false,
+                        )
+                        PreviewBody(
+                            entry = entry,
+                            pages = pages,
+                            pagerState = pagerState,
+                            imageLoader = imageLoader,
+                            imageUrlFor = imageUrlFor,
+                            thumbnailUrlFor = thumbnailUrlFor,
+                            downloadUrlFor = downloadUrlFor,
+                            text = text,
+                            pdfFile = pdfFile,
+                            loading = loading,
+                            mediaReady = mediaReady,
+                            error = error,
+                            contentColor = contentColor,
+                            playerFactory = playerFactory,
+                            original = false,
+                            onOriginalError = {},
+                            pagerEnabled = false,
+                            onZoomChanged = {},
+                            onLongPress = onLongPress,
+                            onImageTap = {},
+                            onControlsVisibilityChanged = {},
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                        )
+                    }
                 }
             }
         }
@@ -998,28 +1022,78 @@ fun MarkdownPreview(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val markwon = remember(context) {
+    val density = LocalDensity.current
+    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
+    val outline = MaterialTheme.colorScheme.outline
+    val codeTypeface = remember(context) {
+        androidx.core.content.res.ResourcesCompat.getFont(context, R.font.jetbrains_mono)
+            ?: android.graphics.Typeface.MONOSPACE
+    }
+    val markwon = remember(context, textColor, linkColor, surfaceVariant, outline, codeTypeface) {
+        val codeBackground = surfaceVariant.copy(alpha = 0.55f).toArgb()
+        val border = outline.copy(alpha = 0.6f).toArgb()
+        val bodyText = textColor.toArgb()
         Markwon.builder(context)
-            .usePlugin(TablePlugin.create(context))
-            .usePlugin(TaskListPlugin.create(context))
-            .usePlugin(StrikethroughPlugin.create())
-            .usePlugin(LinkifyPlugin.create())
+            .usePlugin(object : io.noties.markwon.AbstractMarkwonPlugin() {
+                override fun configureTheme(builder: io.noties.markwon.core.MarkwonTheme.Builder) {
+                    builder
+                        .linkColor(linkColor.toArgb())
+                        .isLinkUnderlined(false)
+                        .blockMargin(with(density) { 12.dp.roundToPx() })
+                        .blockQuoteWidth(with(density) { 3.dp.roundToPx() })
+                        .blockQuoteColor(linkColor.copy(alpha = 0.45f).toArgb())
+                        .codeTextColor(bodyText)
+                        .codeBackgroundColor(codeBackground)
+                        .codeBlockTextColor(bodyText)
+                        .codeBlockBackgroundColor(codeBackground)
+                        .codeBlockMargin(with(density) { 10.dp.roundToPx() })
+                        .codeTextSize(with(density) { 13.sp.toPx().toInt() })
+                        .codeBlockTextSize(with(density) { 13.sp.toPx().toInt() })
+                        .codeTypeface(codeTypeface)
+                        .codeBlockTypeface(codeTypeface)
+                        .headingTextSizeMultipliers(
+                            floatArrayOf(1.9f, 1.55f, 1.3f, 1.15f, 1.05f, 1f),
+                        )
+                        .headingBreakHeight(0)
+                        .headingBreakColor(android.graphics.Color.TRANSPARENT)
+                        .thematicBreakColor(border)
+                }
+            })
+            .usePlugin(
+                io.noties.markwon.ext.tables.TablePlugin.create { builder ->
+                    builder
+                        .tableCellPadding(with(density) { 8.dp.roundToPx() })
+                        .tableBorderColor(border)
+                        .tableBorderWidth(with(density) { 1.dp.roundToPx() })
+                        .tableHeaderRowBackgroundColor(codeBackground)
+                        .tableOddRowBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        .tableEvenRowBackgroundColor(android.graphics.Color.TRANSPARENT)
+                },
+            )
+            .usePlugin(io.noties.markwon.ext.tasklist.TaskListPlugin.create(context))
+            .usePlugin(io.noties.markwon.ext.strikethrough.StrikethroughPlugin.create())
+            .usePlugin(io.noties.markwon.linkify.LinkifyPlugin.create())
             .build()
     }
-    val padding = with(LocalDensity.current) { 16.dp.roundToPx() }
+    val padding = with(density) { 20.dp.roundToPx() }
     AndroidView(
         factory = { ctx ->
             TextView(ctx).apply {
                 setTextColor(textColor.toArgb())
                 setLinkTextColor(linkColor.toArgb())
-                textSize = 15f
+                textSize = 16f
+                setLineSpacing(0f, 1.2f)
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 setPadding(padding, padding, padding, padding)
-                movementMethod = ScrollingMovementMethod()
+                movementMethod = android.text.method.LinkMovementMethod.getInstance()
                 setTextIsSelectable(true)
             }
         },
-        update = { markwon.setMarkdown(it, markdown) },
+        update = { view ->
+            view.setTextColor(textColor.toArgb())
+            view.setLinkTextColor(linkColor.toArgb())
+            markwon.setMarkdown(view, markdown)
+        },
         modifier = modifier.fillMaxSize(),
     )
 }
@@ -1132,7 +1206,7 @@ private fun PdfPage(renderer: PdfRenderer, index: Int) {
     }
 }
 
-private const val CODE_PREVIEW_MAX_CHARS = 256 * 1024
+internal const val CODE_PREVIEW_MAX_CHARS = 256 * 1024
 
 @Composable
 private fun CodePreview(
