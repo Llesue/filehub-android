@@ -55,6 +55,7 @@ fun BrowseScreen(
     onRetry: () -> Unit,
     onSearch: (Long?) -> Unit,
     onPauseAudio: () -> Unit,
+    onResumeAudio: () -> Unit,
 ) {
     val active = state.active
     val files by filesViewModel.state.collectAsStateWithLifecycle()
@@ -101,6 +102,7 @@ fun BrowseScreen(
             roots = state.roots,
             onSearch = onSearch,
             onPauseAudio = onPauseAudio,
+            onResumeAudio = onResumeAudio,
             onBack = {
                 if (files.path.isEmpty()) {
                     filesViewModel.clear()

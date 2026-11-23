@@ -50,10 +50,21 @@ class AudioPlayerController(
     private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
     private var pendingAction: ((MediaController) -> Unit)? = null
     private var pollJob: Job? = null
+    private var resumeAfterVideo = false
+    private var videoAudioItem: String? = null
+    private var videoActive = false
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             sync(player)
+            if (videoActive && resumeAfterVideo) {
+                if (player.mediaItemCount == 0 ||
+                    (videoAudioItem != null && player.currentMediaItem?.mediaId != videoAudioItem) ||
+                    player.isPlaying
+                ) {
+                    clearVideoResume()
+                }
+            }
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -63,6 +74,7 @@ class AudioPlayerController(
 
     fun playQueue(profileId: String, tracks: List<AudioTrack>, startIndex: Int) {
         if (tracks.isEmpty()) return
+        clearVideoResume()
         val index = startIndex.coerceIn(0, tracks.lastIndex)
         scope.launch {
             val profile = sessionRepository.state.value.profiles.firstOrNull { it.id == profileId }
@@ -99,19 +111,60 @@ class AudioPlayerController(
     }
 
     fun togglePlayPause() {
+        clearVideoResume()
         val current = controller ?: return
         if (current.isPlaying) current.pause() else current.play()
     }
 
     fun pause() {
+        clearVideoResume()
         controller?.pause()
     }
 
+    /**
+     * Called when a video preview starts. Only queues a resume when music is
+     * actually playing; a paused player must stay paused after the video.
+     */
+    fun pauseForVideo() {
+        val current = controller
+        resumeAfterVideo = current?.isPlaying == true
+        videoAudioItem = current?.currentMediaItem?.mediaId
+        videoActive = current != null
+        current?.pause()
+    }
+
+    /**
+     * Restores the music paused by [pauseForVideo]. Skips the resume when the
+     * user stopped, changed track or cleared the queue while watching.
+     */
+    fun resumeAfterVideo() {
+        if (!resumeAfterVideo) {
+            clearVideoResume()
+            return
+        }
+        resumeAfterVideo = false
+        videoActive = false
+        val expected = videoAudioItem
+        videoAudioItem = null
+        val current = controller ?: return
+        if (current.mediaItemCount == 0) return
+        if (expected != null && current.currentMediaItem?.mediaId != expected) return
+        if (!current.isPlaying) current.play()
+    }
+
+    fun clearVideoResume() {
+        resumeAfterVideo = false
+        videoAudioItem = null
+        videoActive = false
+    }
+
     fun next() {
+        clearVideoResume()
         controller?.seekToNextMediaItem()
     }
 
     fun previous() {
+        clearVideoResume()
         controller?.seekToPreviousMediaItem()
     }
 
@@ -124,6 +177,7 @@ class AudioPlayerController(
     }
 
     fun stop() {
+        clearVideoResume()
         val current = controller
         if (current != null) {
             current.stop()

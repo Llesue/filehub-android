@@ -122,6 +122,7 @@ fun FileBrowserScreen(
     roots: List<FileRoot>,
     onSearch: (Long?) -> Unit,
     onPauseAudio: () -> Unit,
+    onResumeAudio: () -> Unit,
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -1046,7 +1047,12 @@ fun FileBrowserScreen(
             },
             onShare = { viewModel.openShare(entry) },
             onDetails = { viewModel.showDetails(entry) },
-            onClose = viewModel::closePreview,
+            onVideoEnded = onResumeAudio,
+            onClose = {
+                val wasVideo = state.previewEntry?.kind == FileKind.Video
+                viewModel.closePreview()
+                if (wasVideo) onResumeAudio()
+            },
         )
     }
     if (imageMenu) {

@@ -140,6 +140,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import filehub.android.R
@@ -444,6 +445,7 @@ fun PreviewDialog(
     onDownload: () -> Unit,
     onShare: () -> Unit,
     onDetails: () -> Unit,
+    onVideoEnded: () -> Unit,
     onClose: () -> Unit,
 ) {
     val isMedia = entry.kind == FileKind.Image ||
@@ -460,6 +462,7 @@ fun PreviewDialog(
     val activity = remember(context) { context.findActivity() }
     val originalOrientation = remember(activity) { activity?.requestedOrientation }
     var controlsVisible by remember { mutableStateOf(true) }
+    var imageFullscreen by remember { mutableStateOf(false) }
     var zoomed by remember { mutableStateOf(false) }
     var showOriginal by remember(session) { mutableStateOf(false) }
     var originalError by remember(session) { mutableStateOf(false) }
@@ -532,12 +535,17 @@ fun PreviewDialog(
                     WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         }
-        LaunchedEffect(entry.kind, controlsVisible, insetsController) {
-            if (entry.kind == FileKind.Image && insetsController != null) {
-                if (controlsVisible) {
-                    insetsController.show(WindowInsetsCompat.Type.statusBars())
-                } else {
+        val hideStatusBar = when (entry.kind) {
+            FileKind.Image -> imageFullscreen
+            FileKind.Video -> !controlsVisible
+            else -> false
+        }
+        LaunchedEffect(entry.kind, hideStatusBar, insetsController) {
+            if (insetsController != null && (entry.kind == FileKind.Image || entry.kind == FileKind.Video)) {
+                if (hideStatusBar) {
                     insetsController.hide(WindowInsetsCompat.Type.statusBars())
+                } else {
+                    insetsController.show(WindowInsetsCompat.Type.statusBars())
                 }
             }
         }
@@ -572,12 +580,15 @@ fun PreviewDialog(
                     pagerEnabled = !zoomed,
                     onZoomChanged = { zoomed = it },
                     onLongPress = onLongPress,
-                    onImageTap = { controlsVisible = !controlsVisible },
+                    onImageTap = { imageFullscreen = !imageFullscreen },
+                    onImageDoubleTapZoomIn = { imageFullscreen = true },
                     onControlsVisibilityChanged = { controlsVisible = it },
+                    onVideoEnded = onVideoEnded,
                     modifier = Modifier.fillMaxSize(),
                 )
                 val showBar = when (entry.kind) {
-                    FileKind.Video, FileKind.Image -> controlsVisible
+                    FileKind.Image -> !imageFullscreen
+                    FileKind.Video -> controlsVisible
                     else -> true
                 }
                 AnimatedVisibility(
@@ -611,7 +622,7 @@ fun PreviewDialog(
                 }
                 if (entry.kind == FileKind.Image) {
                     AnimatedVisibility(
-                        visible = controlsVisible,
+                        visible = !imageFullscreen,
                         enter = fadeIn(tween(160)),
                         exit = fadeOut(tween(160)),
                         modifier = Modifier
@@ -724,7 +735,9 @@ fun PreviewDialog(
                             onZoomChanged = {},
                             onLongPress = onLongPress,
                             onImageTap = {},
+                            onImageDoubleTapZoomIn = {},
                             onControlsVisibilityChanged = {},
+                            onVideoEnded = onVideoEnded,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth(),
@@ -836,7 +849,9 @@ private fun PreviewBody(
     onZoomChanged: (Boolean) -> Unit,
     onLongPress: () -> Unit,
     onImageTap: () -> Unit,
+    onImageDoubleTapZoomIn: () -> Unit,
     onControlsVisibilityChanged: (Boolean) -> Unit,
+    onVideoEnded: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
@@ -886,6 +901,7 @@ private fun PreviewBody(
                             onScaleChanged = onZoomChanged,
                             onLongPress = onLongPress,
                             onTap = onImageTap,
+                            onDoubleTapZoomIn = onImageDoubleTapZoomIn,
                             onError = if (original) onOriginalError else null,
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -965,7 +981,16 @@ private fun PreviewBody(
                 val url = downloadUrlFor(entry).orEmpty()
                 val player = remember(url, mediaReady) { playerFactory() }
                 DisposableEffect(player) {
-                    onDispose { player?.release() }
+                    val listener = object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            if (playbackState == Player.STATE_ENDED) onVideoEnded()
+                        }
+                    }
+                    player?.addListener(listener)
+                    onDispose {
+                        player?.removeListener(listener)
+                        player?.release()
+                    }
                 }
                 LaunchedEffect(player, url) {
                     if (player != null) {
@@ -1293,6 +1318,7 @@ private fun ZoomableImage(
     onScaleChanged: (Boolean) -> Unit,
     onLongPress: () -> Unit,
     onTap: () -> Unit,
+    onDoubleTapZoomIn: () -> Unit,
     onError: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
@@ -1404,6 +1430,7 @@ private fun ZoomableImage(
                                     containerSize = containerSize,
                                 )
                                 onScaleChanged(true)
+                                onDoubleTapZoomIn()
                                 animateZoom(target, targetOffset)
                             }
                         },

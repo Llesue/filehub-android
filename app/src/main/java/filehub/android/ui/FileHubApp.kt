@@ -323,7 +323,8 @@ fun FileHubApp(viewModel: AppViewModel) {
                             onAddServer = { navController.navigate("addServer") },
                             onRetry = viewModel::refreshRoots,
                             onSearch = { rootId -> navController.navigate("search/${rootId ?: -1}") },
-                            onPauseAudio = audioController::pause,
+                            onPauseAudio = audioController::pauseForVideo,
+                            onResumeAudio = audioController::resumeAfterVideo,
                         )
                         MainTab.My -> MyScreen(
                             state = session,
