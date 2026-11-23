@@ -99,6 +99,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.focus.FocusRequester
@@ -117,7 +118,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import android.text.format.Formatter
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import android.view.View
 import android.text.method.ScrollingMovementMethod
 import android.widget.TextView
@@ -508,6 +513,24 @@ fun PreviewDialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        val dialogView = LocalView.current
+        val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
+        DisposableEffect(dialogWindow, entry.kind) {
+            val window = dialogWindow ?: activity?.window
+            val controller = window?.let {
+                WindowCompat.getInsetsController(it, it.decorView)
+            }
+            if (controller != null && entry.kind == FileKind.Image) {
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.statusBars())
+                onDispose {
+                    controller.show(WindowInsetsCompat.Type.statusBars())
+                }
+            } else {
+                onDispose { }
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()

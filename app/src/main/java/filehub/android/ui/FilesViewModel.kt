@@ -37,6 +37,7 @@ import filehub.android.data.transfer.TransferStatus
 import filehub.android.data.api.FileHubApiException
 import filehub.android.data.toUserMessage
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withPermit
@@ -396,6 +397,7 @@ class FilesViewModel(
                     }
                 }
                 .onFailure { error ->
+                    if (error is CancellationException) throw error
                     _state.update {
                         it.copy(operationLoading = false, operationError = error.toUserMessage(application))
                     }
@@ -1237,6 +1239,7 @@ class FilesViewModel(
                     )
                 }
             }.onFailure { error ->
+                if (error is CancellationException) throw error
                 val needsLogin = (error as? FileHubApiException)?.statusCode == 401
                 _state.update {
                     it.copy(
