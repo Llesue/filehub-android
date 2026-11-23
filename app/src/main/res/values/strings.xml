@@ -501,5 +501,9 @@
     <string name="markdown_code">&lt;/&gt;</string>
     <string name="markdown_link">Link</string>
     <string name="file_error_body">Check the network or server status and try again.</string>
+    <string name="editor_symbols">Symbols</string>
+    <string name="editor_hide_symbols">Hide</string>
+    <string name="editor_undo">Undo</string>
+    <string name="editor_redo">Redo</string>
 </resources>
 

@@ -464,5 +464,9 @@
     <string name="markdown_code">&lt;/&gt;</string>
     <string name="markdown_link">链接</string>
     <string name="file_error_body">检查网络或服务器状态后重试。</string>
+    <string name="editor_symbols">符号</string>
+    <string name="editor_hide_symbols">收起</string>
+    <string name="editor_undo">撤销</string>
+    <string name="editor_redo">重做</string>
 </resources>
 

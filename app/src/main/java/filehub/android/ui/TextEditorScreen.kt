@@ -1,9 +1,10 @@
 package filehub.android.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -108,6 +109,7 @@ fun TextEditorScreen(
     var discardDialog by remember { mutableStateOf(false) }
     var pendingEncoding by remember { mutableStateOf<String?>(null) }
     var preview by remember { mutableStateOf(false) }
+    var symbolsOpen by remember { mutableStateOf(false) }
     var wrap by remember(viewModel.pathLabel()) {
         mutableStateOf(!isCodeFile(viewModel.pathLabel()))
     }
@@ -173,6 +175,10 @@ fun TextEditorScreen(
 
     LaunchedEffect(findFocusRequest) {
         if (findOpen) findFocus.requestFocus()
+    }
+
+    LaunchedEffect(preview, findOpen) {
+        if (preview || findOpen) symbolsOpen = false
     }
 
     BackHandler(enabled = state.dirty) { discardDialog = true }
@@ -347,7 +353,10 @@ fun TextEditorScreen(
                     }
                 }
                 if (viewModel.isMarkdown && !split && !state.loading && state.error == null) {
-                    TextButton(onClick = { preview = !preview }) {
+                    TextButton(
+                        onClick = { preview = !preview },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
                         Text(
                             stringResource(if (preview) R.string.editor_edit else R.string.editor_preview),
                         )
@@ -376,7 +385,7 @@ fun TextEditorScreen(
                 Button(
                     onClick = { viewModel.save() },
                     enabled = state.dirty && state.writable && !state.saving,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                 ) {
                     Text(stringResource(R.string.editor_save))
                 }
@@ -595,6 +604,14 @@ fun TextEditorScreen(
                     )
                     else -> editorBody(Modifier.fillMaxSize())
                 }
+                if (symbolsOpen && !preview && state.writable && !viewModel.isMarkdown) {
+                    SymbolsPanel(
+                        palette = palette,
+                        onInsert = ::insert,
+                        onDismiss = { symbolsOpen = false },
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                }
             }
 
             if (!preview && state.writable && !state.loading && state.error == null) {
@@ -603,6 +620,8 @@ fun TextEditorScreen(
                     palette = palette,
                     canUndo = canUndo,
                     canRedo = canRedo,
+                    symbolsOpen = symbolsOpen,
+                    onSymbols = { symbolsOpen = !symbolsOpen },
                     onInsert = ::insert,
                     onPrefix = ::prefixLine,
                     onLink = ::insertLink,
@@ -920,6 +939,8 @@ private fun EditorToolbar(
     palette: EditorPalette,
     canUndo: Boolean,
     canRedo: Boolean,
+    symbolsOpen: Boolean,
+    onSymbols: () -> Unit,
     onInsert: (String, String) -> Unit,
     onPrefix: (String) -> Unit,
     onLink: () -> Unit,
@@ -927,61 +948,178 @@ private fun EditorToolbar(
     onRedo: () -> Unit,
 ) {
     Surface(color = palette.surface, modifier = Modifier.fillMaxWidth()) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             if (markdown) {
-                ToolButton("H1", palette) { onPrefix("# ") }
-                ToolButton(stringResource(R.string.markdown_bold), palette) { onInsert("**", "**") }
-                ToolButton(stringResource(R.string.markdown_italic), palette) { onInsert("*", "*") }
-                ToolButton(stringResource(R.string.markdown_list), palette) { onPrefix("- ") }
-                ToolButton(stringResource(R.string.markdown_ordered), palette) { onPrefix("1. ") }
-                ToolButton(stringResource(R.string.markdown_quote), palette) { onPrefix("> ") }
-                ToolButton(stringResource(R.string.markdown_code), palette) { onInsert("`", "`") }
-                ToolButton(stringResource(R.string.markdown_link), palette) { onLink() }
-            } else {
-                ToolButton("Tab", palette) { onInsert("  ", "") }
-                listOf("\"", "'", "(", ")", "{", "}", "[", "]", "<", ">", "=", ":", ";", "/").forEach { symbol ->
-                    ToolButton(symbol, palette) {
-                        when (symbol) {
-                            "\"", "'", "(", ")", "{", "}", "[", "]", "<", ">" -> onInsert(symbol, symbol)
-                            else -> onInsert(symbol, "")
-                        }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    ToolKey(
+                        stringResource(R.string.editor_undo),
+                        palette,
+                        Modifier.weight(1f),
+                        enabled = canUndo,
+                        onClick = onUndo,
+                    )
+                    ToolKey(
+                        stringResource(R.string.editor_redo),
+                        palette,
+                        Modifier.weight(1f),
+                        enabled = canRedo,
+                        onClick = onRedo,
+                    )
+                    ToolKey("H1", palette, Modifier.weight(1f)) { onPrefix("# ") }
+                    ToolKey(stringResource(R.string.markdown_bold), palette, Modifier.weight(1f)) {
+                        onInsert("**", "**")
+                    }
+                    ToolKey(stringResource(R.string.markdown_italic), palette, Modifier.weight(1f)) {
+                        onInsert("*", "*")
                     }
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    ToolKey(stringResource(R.string.markdown_list), palette, Modifier.weight(1f)) {
+                        onPrefix("- ")
+                    }
+                    ToolKey(stringResource(R.string.markdown_ordered), palette, Modifier.weight(1f)) {
+                        onPrefix("1. ")
+                    }
+                    ToolKey(stringResource(R.string.markdown_quote), palette, Modifier.weight(1f)) {
+                        onPrefix("> ")
+                    }
+                    ToolKey(stringResource(R.string.markdown_code), palette, Modifier.weight(1f)) {
+                        onInsert("`", "`")
+                    }
+                    ToolKey(stringResource(R.string.markdown_link), palette, Modifier.weight(1f)) {
+                        onLink()
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    ToolKey(
+                        stringResource(R.string.editor_undo),
+                        palette,
+                        Modifier.weight(1f),
+                        enabled = canUndo,
+                        onClick = onUndo,
+                    )
+                    ToolKey(
+                        stringResource(R.string.editor_redo),
+                        palette,
+                        Modifier.weight(1f),
+                        enabled = canRedo,
+                        onClick = onRedo,
+                    )
+                    ToolKey("Tab", palette, Modifier.weight(1f)) { onInsert("  ", "") }
+                    ToolKey(
+                        label = stringResource(R.string.editor_symbols),
+                        palette = palette,
+                        modifier = Modifier.weight(1f),
+                        selected = symbolsOpen,
+                        onClick = onSymbols,
+                    )
+                }
             }
-            ToolButton("↶", palette, enabled = canUndo, onClick = onUndo)
-            ToolButton("↷", palette, enabled = canRedo, onClick = onRedo)
         }
     }
 }
 
 @Composable
-private fun ToolButton(
-    text: String,
+private fun SymbolsPanel(
     palette: EditorPalette,
+    onInsert: (String, String) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = palette.surface,
+        border = BorderStroke(1.dp, palette.gutter.copy(alpha = 0.35f)),
+        shadowElevation = 8.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.editor_symbols),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.muted,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.editor_hide_symbols))
+                }
+            }
+            listOf(
+                listOf("\"", "'", "(", ")"),
+                listOf("{", "}", "[", "]"),
+                listOf("<", ">", "=", ":"),
+                listOf(";", "/", "\\", "|"),
+            ).forEach { keys ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    keys.forEach { symbol ->
+                        ToolKey(symbol, palette, Modifier.weight(1f)) {
+                            when (symbol) {
+                                "\"", "'", "(", ")", "{", "}", "[", "]", "<", ">" ->
+                                    onInsert(symbol, symbol)
+                                else -> onInsert(symbol, "")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolKey(
+    label: String,
+    palette: EditorPalette,
+    modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    selected: Boolean = false,
     onClick: () -> Unit,
 ) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = palette.surface,
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(10.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            palette.background
+        },
+        contentColor = palette.text,
+        border = BorderStroke(1.dp, palette.gutter.copy(alpha = 0.18f)),
+        modifier = modifier.height(40.dp),
     ) {
-        TextButton(
-            onClick = onClick,
-            enabled = enabled,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            modifier = Modifier.height(34.dp),
-        ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                text = text,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (enabled) palette.text else palette.muted.copy(alpha = 0.5f),
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (enabled) palette.text else palette.muted.copy(alpha = 0.4f),
             )
         }
     }
