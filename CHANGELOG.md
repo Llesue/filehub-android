@@ -8,11 +8,11 @@
 - Image preview: single-tap chrome toggle, anchored pinch zoom with bounds, double-tap at 150% of 1:1, and a bottom-left original/preview switch with automatic fallback.
 - Startup auto-connects the active server in address order while keeping the server page visible, without overriding notification deep links or the user's tab choice.
 - Camera shortcut in the browser toolbar and empty folder state; photos upload to the folder where the shutter was pressed.
-- Full-screen delete confirmation with every selected entry, a numeric-code placeholder, autofocus, countdown, refresh-after-expiry and disabled dismissal while the request runs.
+- Modal delete confirmation that lists every selected file name, with a numeric-code field when the server requires one; dismissal is disabled while the request runs.
 - Server-side text probe with legacy encoding detection (UTF-16 without BOM, GBK/GB18030, Big5, Shift_JIS, EUC-KR, Windows-125x, ISO-8859-x); unknown files can open as text with lossy warnings.
 - Read-only code preview with line numbers, no soft wrap, horizontal scrolling, copy without gutter, and a 256 KB truncation notice.
 - Full-screen text editor with line-number gutter, 16sp/24sp body text, Markdown edit/preview toggle, encoding/BOM/line-ending preservation, If-Match conflicts, reload/overwrite choices, UTF-8 save-as, and read-only reasons.
-- On-demand remote directory sizes with a concurrency limit, timeout, cache and `≥` marker for partial results.
+- On-demand directory sizes for local and remote roots, with a concurrency limit, polling for server-side scans, cache and `≥` marker for partial results.
 - Unified relative time across file cards, details, search, sync pages and token validity, with unit tests.
 - Global audio player backed by MediaSessionService: queue from the current folder, previous/next, seek, background and notification controls, collapsed/expanded layouts, and automatic stop on logout.
 - Audio track discovery and transcoding fallback, with a track picker and clear ffmpeg/transcode errors.
