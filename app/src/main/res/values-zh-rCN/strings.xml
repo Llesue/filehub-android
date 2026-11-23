@@ -360,6 +360,8 @@
     <string name="delete_code_refresh">重新获取确认码</string>
     <string name="text_preview_truncated">文件较大，仅显示前一部分内容。</string>
     <string name="sort_remote_size_hint">远程目录大小可能不完整。</string>
+    <string name="version_title">版本</string>
+    <string name="client_version">客户端版本</string>
     <string name="preview_rotate">旋转</string>
     <string name="error_server_setup_required">服务器尚未初始化，请先在浏览器中完成初始化</string>
     <string name="error_unauthorized">设备授权已失效，请重新登录</string>

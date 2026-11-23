@@ -447,12 +447,14 @@ private fun ShareEditDialog(
         title = { Text(stringResource(R.string.share_edit)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.share_read_only),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(checked = readOnly, onCheckedChange = { readOnly = it })
+                if (share.isDir) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.share_read_only),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(checked = readOnly, onCheckedChange = { readOnly = it })
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(

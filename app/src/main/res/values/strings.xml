@@ -360,6 +360,8 @@
     <string name="delete_code_refresh">Get a new code</string>
     <string name="text_preview_truncated">File is large; showing the first part only.</string>
     <string name="sort_remote_size_hint">Remote folder sizes may be incomplete.</string>
+    <string name="version_title">Versions</string>
+    <string name="client_version">Client version</string>
     <string name="preview_rotate">Rotate</string>
     <string name="error_server_setup_required">Server is not initialized. Complete setup in a browser first.</string>
     <string name="error_unauthorized">Device token expired. Sign in again.</string>

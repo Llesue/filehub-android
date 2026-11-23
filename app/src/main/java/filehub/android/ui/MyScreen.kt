@@ -19,10 +19,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -197,20 +201,6 @@ fun MyScreen(
                 label = stringResource(R.string.my_token_expiry),
                 value = tokenValidityText(expiresAt),
             )
-            InfoRow(
-                label = stringResource(R.string.server_version),
-                value = serverVersion?.version ?: "—",
-            )
-            if (serverVersion?.updateAvailable == true) {
-                Text(
-                    text = stringResource(
-                        R.string.server_version_update,
-                        serverVersion.latest ?: "",
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
             Text(
                 text = stringResource(R.string.my_token_expiry_hint),
                 style = MaterialTheme.typography.bodySmall,
@@ -227,13 +217,7 @@ fun MyScreen(
         )
         UsageCard(usage = usage, onRefresh = onLoadUsage)
 
-        InfoCard(title = stringResource(R.string.my_version_format, BuildConfig.VERSION_NAME)) {
-            Text(
-                text = stringResource(R.string.my_version_body),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        VersionCard(serverVersion)
 
         Spacer(Modifier.height(8.dp))
         Button(
@@ -310,90 +294,134 @@ fun MyScreen(
 @Composable
 private fun UsageCard(usage: UsageUiState, onRefresh: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    InfoCard(title = stringResource(R.string.usage_title)) {
-        val data = usage.usage
-        val used = data?.usedBytes
-        when {
-            usage.error != null -> {
-                Text(
-                    text = usage.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                TextButton(onClick = onRefresh) {
-                    Text(stringResource(R.string.common_retry))
-                }
-            }
-            data == null || used == null -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    Spacer(Modifier.size(8.dp))
-                    Text(
-                        text = stringResource(R.string.usage_computing),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            else -> {
-                val quota = data.quotaBytes ?: 0
-                val usedText = Formatter.formatShortFileSize(context, used)
-                val quotaText = if (quota > 0) {
-                    Formatter.formatShortFileSize(context, quota)
-                } else {
-                    stringResource(R.string.usage_unlimited)
-                }
-                Text(
-                    text = "$usedText / $quotaText",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (quota > 0) {
-                    val fraction = (used.toFloat() / quota).coerceIn(0f, 1f)
-                    LinearProgressIndicator(
-                        progress = { fraction },
-                        color = if (fraction >= 0.9f) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 6.dp),
-                    )
-                }
-                val entryCount = data.entryCount
-                if (entryCount != null) {
-                    val maxEntries = data.maxEntries
-                    Text(
-                        text = if (maxEntries != null && maxEntries > 0) {
-                            stringResource(R.string.usage_entries_limit, entryCount, maxEntries)
-                        } else {
-                            stringResource(R.string.usage_entries, entryCount)
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (data.stale || data.computing) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            val data = usage.usage
+            val used = data?.usedBytes
+            when {
+                usage.error != null -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = stringResource(R.string.usage_refreshing),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = usage.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.weight(1f),
                         )
-                    } else {
-                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = onRefresh) {
+                            Text(stringResource(R.string.common_retry))
+                        }
                     }
-                    TextButton(onClick = onRefresh, enabled = !usage.loading) {
-                        Text(stringResource(R.string.common_refresh))
+                }
+                data == null || used == null -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text(
+                            text = stringResource(R.string.usage_title) + " · " +
+                                stringResource(R.string.usage_computing),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                else -> {
+                    val quota = data.quotaBytes ?: 0
+                    val usedText = Formatter.formatShortFileSize(context, used)
+                    val quotaText = if (quota > 0) {
+                        Formatter.formatShortFileSize(context, quota)
+                    } else {
+                        stringResource(R.string.usage_unlimited)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.usage_title),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                text = "$usedText / $quotaText",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                        }
+                        if (data.stale || data.computing) {
+                            Text(
+                                text = stringResource(R.string.usage_refreshing),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = onRefresh, enabled = !usage.loading) {
+                            Icon(
+                                Icons.Filled.Refresh,
+                                contentDescription = stringResource(R.string.common_refresh),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                    if (quota > 0) {
+                        val fraction = (used.toFloat() / quota).coerceIn(0f, 1f)
+                        LinearProgressIndicator(
+                            progress = { fraction },
+                            color = if (fraction >= 0.9f) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp)
+                                .height(4.dp),
+                        )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VersionCard(serverVersion: filehub.android.data.api.VersionDto?) {
+    InfoCard(title = stringResource(R.string.version_title)) {
+        VersionRow(
+            label = stringResource(R.string.client_version),
+            value = BuildConfig.VERSION_NAME,
+        )
+        VersionRow(
+            label = stringResource(R.string.server_version),
+            value = serverVersion?.version ?: "—",
+        )
+        if (serverVersion?.updateAvailable == true) {
+            Text(
+                text = stringResource(
+                    R.string.server_version_update,
+                    serverVersion.latest ?: "",
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun VersionRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(text = value, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
