@@ -859,6 +859,10 @@ class FileHubApi(
         requestUnit("shares/$id", "DELETE", body = null, csrfToken = null)
     }
 
+    suspend fun purgeShare(id: Long) {
+        requestUnit("shares/$id/purge", "DELETE", body = null, csrfToken = null)
+    }
+
     suspend fun archiveZip(
         rootId: Long,
         dir: String,

@@ -8,6 +8,7 @@ import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -52,11 +53,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
@@ -70,13 +73,16 @@ import java.util.Date
 @Composable
 fun SharesScreen(
     viewModel: ShareViewModel,
+    faviconUrl: String?,
     onBack: () -> Unit,
     onOpenPublic: (PublicLink) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var openDialog by remember { mutableStateOf(false) }
-    var linkDialog by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    val expiredNotice = stringResource(R.string.share_card_expired)
+    val revokedNotice = stringResource(R.string.share_card_revoked)
 
     LaunchedEffect(Unit) { viewModel.load() }
 
@@ -127,14 +133,19 @@ fun SharesScreen(
                 items(state.shares, key = { it.id }) { share ->
                     ShareCard(
                         share = share,
-                        onCopy = {
-                            viewModel.copyLink(share)
-                            linkDialog = null
-                        },
+                        onCopy = { viewModel.copyLink(share) },
                         onEdit = { viewModel.beginEdit(share) },
                         onRotate = { viewModel.rotate(share) },
                         onRevoke = { viewModel.revoke(share) },
                         onOpen = { viewModel.open(share) },
+                        onShowCard = {
+                            when {
+                                share.expired -> notice = expiredNotice
+                                share.revoked -> notice = revokedNotice
+                                else -> viewModel.showCard(share)
+                            }
+                        },
+                        onDelete = { viewModel.requestDelete(share) },
                     )
                 }
                 state.nextCursor?.let { cursor ->
@@ -170,8 +181,8 @@ fun SharesScreen(
 
     LaunchedEffect(state.actionLink) {
         val link = state.actionLink ?: return@LaunchedEffect
-        linkDialog = link
-        copyToClipboard(context, link)
+        copyShareLink(context, link)
+        Toast.makeText(context, R.string.share_copy_done, Toast.LENGTH_SHORT).show()
         viewModel.dismissAction()
     }
 
@@ -198,8 +209,78 @@ fun SharesScreen(
         )
     }
 
-    linkDialog?.let { link ->
-        ShareLinkDialog(link = link, onDismiss = { linkDialog = null })
+    notice?.let { message ->
+        AlertDialog(
+            onDismissRequest = { notice = null },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { notice = null }) {
+                    Text(stringResource(R.string.file_close))
+                }
+            },
+        )
+    }
+
+    state.cardShare?.let { share ->
+        val link = state.cardLink ?: return@let
+        val collection = share.kind == "collection"
+        val name = if (collection) {
+            stringResource(R.string.share_collection_count, share.itemCount)
+        } else {
+            share.realPath.trimEnd('/').substringAfterLast('/').ifEmpty { share.realPath }
+        }
+        val kind = if (collection || share.isDir) {
+            filehub.android.core.model.FileKind.Folder
+        } else {
+            filehub.android.core.model.detectKind(name, "", false)
+        }
+        ShareCardDialog(
+            spec = ShareCardSpec(
+                url = link,
+                title = name,
+                kind = kind,
+                iconColor = fileIconColor(kind).toArgb(),
+                hasPassword = share.hasPassword,
+                expiryText = shareExpiryLabel(share.expiresAt),
+                faviconUrl = faviconUrl,
+                headerTitle = "FileHub",
+                headerSubtitle = stringResource(R.string.share_card_header),
+                passwordText = stringResource(R.string.share_card_password),
+                footerText = stringResource(R.string.share_card_footer),
+            ),
+            onDismiss = viewModel::dismissCard,
+        )
+    }
+
+    state.deleting?.let { share ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissDelete,
+            title = { Text(stringResource(R.string.share_delete_confirm_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.share_delete_confirm_body))
+                    state.deleteError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = viewModel::confirmDelete,
+                    enabled = !state.deleteLoading,
+                ) {
+                    Text(
+                        text = stringResource(R.string.share_delete),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissDelete) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 
     state.editing?.let { share ->
@@ -231,18 +312,27 @@ private fun ShareCard(
     onRotate: () -> Unit,
     onRevoke: () -> Unit,
     onOpen: () -> Unit,
+    onShowCard: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    val name = share.realPath.trimEnd('/').substringAfterLast('/').ifEmpty { share.realPath }
+    val collection = share.kind == "collection"
+    val name = if (collection) {
+        stringResource(R.string.share_collection_count, share.itemCount)
+    } else {
+        share.realPath.trimEnd('/').substringAfterLast('/').ifEmpty { share.realPath }
+    }
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onShowCard),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val kind = if (share.isDir) {
+                val kind = if (collection || share.isDir) {
                     filehub.android.core.model.FileKind.Folder
                 } else {
                     filehub.android.core.model.detectKind(name, "", false)
@@ -275,13 +365,15 @@ private fun ShareCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        text = share.realPath,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    if (!collection && share.realPath.isNotEmpty()) {
+                        Text(
+                            text = share.realPath,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Box {
                     IconButton(onClick = { menuOpen = true }) {
@@ -303,6 +395,13 @@ private fun ShareCard(
                             },
                         )
                         CompactDropdownMenuItem(
+                            text = { Text(stringResource(R.string.share_card_qr_action)) },
+                            onClick = {
+                                menuOpen = false
+                                onShowCard()
+                            },
+                        )
+                        CompactDropdownMenuItem(
                             text = {
                                 Text(
                                     stringResource(R.string.share_revoke),
@@ -314,6 +413,18 @@ private fun ShareCard(
                                 onRevoke()
                             },
                         )
+                        CompactDropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(R.string.share_delete),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onDelete()
+                            },
+                        )
                     }
                 }
             }
@@ -321,6 +432,9 @@ private fun ShareCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onCopy) {
                     Text(stringResource(R.string.share_copy))
+                }
+                TextButton(onClick = onShowCard) {
+                    Text(stringResource(R.string.share_card_qr_action))
                 }
                 TextButton(onClick = onOpen) {
                     Text(stringResource(R.string.shares_open))

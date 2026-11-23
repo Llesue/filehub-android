@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import filehub.android.FileHubApplication
+import filehub.android.R
 import filehub.android.core.model.ShareCreated
 import filehub.android.core.model.ShareInfo
 import filehub.android.data.SessionRepository
@@ -28,6 +29,12 @@ data class ShareUiState(
     val editLoading: Boolean = false,
     val editError: String? = null,
     val openLink: String? = null,
+    val cardShare: ShareInfo? = null,
+    val cardLink: String? = null,
+    val cardLoading: Boolean = false,
+    val deleting: ShareInfo? = null,
+    val deleteLoading: Boolean = false,
+    val deleteError: String? = null,
 )
 
 class ShareViewModel(
@@ -191,6 +198,74 @@ class ShareViewModel(
                 .onSuccess { load() }
                 .onFailure { error ->
                     _state.value = _state.value.copy(actionError = error.toUserMessage(application))
+                }
+        }
+    }
+
+    fun showCard(share: ShareInfo) {
+        if (share.expired || share.revoked) return
+        val profile = sessionRepository.state.value.active ?: return
+        _state.value = _state.value.copy(cardLoading = true, actionError = null)
+        viewModelScope.launch {
+            runCatching { shareRepository.url(profile, share.id) }
+                .onSuccess { created ->
+                    _state.value = _state.value.copy(
+                        cardShare = share,
+                        cardLink = absoluteUrl(profile.baseUrl, created.url),
+                        cardLoading = false,
+                    )
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        cardLoading = false,
+                        actionError = error.toUserMessage(application),
+                    )
+                }
+        }
+    }
+
+    fun dismissCard() {
+        _state.value = _state.value.copy(cardShare = null, cardLink = null, cardLoading = false)
+    }
+
+    fun requestDelete(share: ShareInfo) {
+        _state.value = _state.value.copy(deleting = share, deleteError = null)
+    }
+
+    fun dismissDelete() {
+        if (_state.value.deleteLoading) return
+        _state.value = _state.value.copy(deleting = null, deleteError = null)
+    }
+
+    fun confirmDelete() {
+        val share = _state.value.deleting ?: return
+        val profile = sessionRepository.state.value.active ?: return
+        _state.value = _state.value.copy(deleteLoading = true, deleteError = null)
+        viewModelScope.launch {
+            runCatching { shareRepository.purge(profile, share.id) }
+                .onSuccess {
+                    _state.value = _state.value.copy(
+                        shares = _state.value.shares.filterNot { it.id == share.id },
+                        deleting = null,
+                        deleteLoading = false,
+                        deleteError = null,
+                    )
+                }
+                .onFailure { error ->
+                    val alreadyGone = error is filehub.android.data.api.FileHubApiException &&
+                        error.statusCode == 404
+                    if (alreadyGone) {
+                        _state.value = _state.value.copy(
+                            shares = _state.value.shares.filterNot { it.id == share.id },
+                            deleting = null,
+                            deleteLoading = false,
+                        )
+                    } else {
+                        _state.value = _state.value.copy(
+                            deleteLoading = false,
+                            deleteError = application.getString(R.string.share_delete_failed),
+                        )
+                    }
                 }
         }
     }

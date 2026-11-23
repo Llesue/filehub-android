@@ -414,6 +414,7 @@ fun FileHubApp(viewModel: AppViewModel) {
         composable("shares") {
             SharesScreen(
                 viewModel = shareViewModel,
+                faviconUrl = session.active?.iconUrl,
                 onBack = { navController.popBackStack() },
                 onOpenPublic = { link ->
                     navController.navigate(

@@ -616,7 +616,7 @@ fun UnsupportedPreviewDialog(
     preview: UnsupportedPreview,
     onOpenAsText: () -> Unit,
     onDownload: () -> Unit,
-    onShare: () -> Unit,
+    onShare: (() -> Unit)?,
     onDetails: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -695,13 +695,15 @@ fun UnsupportedPreviewDialog(
                 }
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(
-                        onClick = onShare,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                    ) {
-                        Text(stringResource(R.string.preview_share))
+                    if (onShare != null) {
+                        OutlinedButton(
+                            onClick = onShare,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                        ) {
+                            Text(stringResource(R.string.preview_share))
+                        }
                     }
                     OutlinedButton(
                         onClick = onDetails,

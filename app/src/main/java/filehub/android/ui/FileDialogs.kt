@@ -330,6 +330,7 @@ private fun DeleteItemRow(item: DeleteItemDto) {
 @Composable
 fun ShareCreateDialog(
     entryName: String,
+    collection: Boolean = false,
     loading: Boolean,
     error: String?,
     onDismiss: () -> Unit,
@@ -346,13 +347,15 @@ fun ShareCreateDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FileNameText(entryName, style = MaterialTheme.typography.bodyMedium)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.share_read_only),
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    AppSwitch(checked = readOnly, onCheckedChange = { readOnly = it })
+                if (!collection) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.share_read_only),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        AppSwitch(checked = readOnly, onCheckedChange = { readOnly = it })
+                    }
                 }
                 OutlinedTextField(
                     value = password,

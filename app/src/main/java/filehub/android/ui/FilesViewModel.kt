@@ -118,8 +118,9 @@ data class FileBrowserState(
     val previewLoading: Boolean = false,
     val previewMediaReady: Int = 0,
     val previewError: String? = null,
-    val shareEntry: FileEntry? = null,
+    val shareEntries: List<FileEntry> = emptyList(),
     val shareCreated: ShareCreated? = null,
+    val shareHasPassword: Boolean = false,
     val shareLoading: Boolean = false,
     val shareError: String? = null,
     val properties: FileProperties? = null,
@@ -871,14 +872,35 @@ class FilesViewModel(
     }
 
     fun openShare(entry: FileEntry) {
+        openShare(listOf(entry))
+    }
+
+    fun openShareSelection() {
+        val selected = _state.value.entries.filter { it.name in _state.value.selected }
+        openShare(selected)
+    }
+
+    private fun openShare(entries: List<FileEntry>) {
+        if (entries.isEmpty()) return
         _state.update {
-            it.copy(shareEntry = entry, shareCreated = null, shareError = null)
+            it.copy(
+                shareEntries = entries,
+                shareCreated = null,
+                shareHasPassword = false,
+                shareError = null,
+            )
         }
     }
 
     fun dismissShare() {
         _state.update {
-            it.copy(shareEntry = null, shareCreated = null, shareError = null, shareLoading = false)
+            it.copy(
+                shareEntries = emptyList(),
+                shareCreated = null,
+                shareHasPassword = false,
+                shareError = null,
+                shareLoading = false,
+            )
         }
     }
 
@@ -886,19 +908,30 @@ class FilesViewModel(
         val current = _state.value
         val profile = current.profile ?: return
         val root = current.root ?: return
-        val entry = current.shareEntry ?: return
-        if (current.shareLoading) return
-        val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
-        _state.update { it.copy(shareLoading = true, shareError = null) }
+        val entries = current.shareEntries
+        if (entries.isEmpty() || current.shareLoading) return
+        val collection = entries.size > 1
+        val paths = entries.map { entry ->
+            if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        }
+        _state.update {
+            it.copy(
+                shareLoading = true,
+                shareError = null,
+                shareHasPassword = !password.isNullOrBlank(),
+            )
+        }
         viewModelScope.launch {
             runCatching {
                 shareRepository.create(
                     profile = profile,
                     rootId = root.id,
-                    paths = listOf(path),
+                    paths = paths,
                     password = password?.takeIf { it.isNotBlank() },
                     expiresAt = expiresAt,
-                    readOnly = readOnly,
+                    // A collection share is read-only on the server regardless
+                    // of this flag; send the effective value to keep them in sync.
+                    readOnly = if (collection) true else readOnly,
                 )
             }.onSuccess { created ->
                 _state.update {

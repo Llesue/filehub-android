@@ -77,6 +77,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
@@ -229,6 +230,10 @@ fun FileBrowserScreen(
         state.root?.isRemote != true
     val canOpenAsText = singleSelected != null && !singleSelected.isDir &&
         singleSelected.kind == FileKind.File
+    val canShare = state.root?.isRemote != true &&
+        selectedEntries.isNotEmpty() &&
+        selectedEntries.size <= 100 &&
+        (selectedEntries.size == 1 || selectedEntries.none { it.isDir })
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -699,11 +704,13 @@ fun FileBrowserScreen(
         }
         if (state.selectionMode) {
             SelectionBar(
+                showShare = canShare,
                 onMove = {
                     transferMove = true
                     transferOpen = true
                 },
                 onDelete = viewModel::requestDeleteSelected,
+                onShare = viewModel::openShareSelection,
                 onMore = { moreSheet = true },
             )
         }
@@ -848,19 +855,50 @@ fun FileBrowserScreen(
             },
         )
     }
-    state.shareEntry?.let { entry ->
-        if (state.shareCreated == null) {
-            ShareCreateDialog(
-                entryName = entry.name,
-                loading = state.shareLoading,
-                error = state.shareError,
-                onDismiss = viewModel::dismissShare,
-                onCreate = viewModel::createShare,
-            )
-        }
+    if (state.shareEntries.isNotEmpty() && state.shareCreated == null) {
+        val collection = state.shareEntries.size > 1
+        ShareCreateDialog(
+            entryName = if (collection) {
+                stringResource(R.string.share_collection_count, state.shareEntries.size)
+            } else {
+                state.shareEntries.first().name
+            },
+            collection = collection,
+            loading = state.shareLoading,
+            error = state.shareError,
+            onDismiss = viewModel::dismissShare,
+            onCreate = viewModel::createShare,
+        )
     }
     state.shareCreated?.let { created ->
-        ShareLinkDialog(link = created.url, onDismiss = viewModel::dismissShare)
+        val collection = state.shareEntries.size > 1
+        val entry = state.shareEntries.firstOrNull()
+        val kind = if (collection || entry?.isDir == true) {
+            FileKind.Folder
+        } else {
+            entry?.kind ?: FileKind.File
+        }
+        val title = if (collection) {
+            stringResource(R.string.share_collection_count, state.shareEntries.size)
+        } else {
+            entry?.name.orEmpty()
+        }
+        ShareCardDialog(
+            spec = ShareCardSpec(
+                url = created.url,
+                title = title,
+                kind = kind,
+                iconColor = fileIconColor(kind).toArgb(),
+                hasPassword = state.shareHasPassword,
+                expiryText = shareExpiryLabel(created.expiresAt),
+                faviconUrl = state.profile?.iconUrl,
+                headerTitle = "FileHub",
+                headerSubtitle = stringResource(R.string.share_card_header),
+                passwordText = stringResource(R.string.share_card_password),
+                footerText = stringResource(R.string.share_card_footer),
+            ),
+            onDismiss = viewModel::dismissShare,
+        )
     }
     state.audioPicker?.let { picker ->
         AlertDialog(
@@ -920,9 +958,13 @@ fun FileBrowserScreen(
                 viewModel.dismissUnsupported()
                 viewModel.enqueueDownload(unsupported.entry)
             },
-            onShare = {
-                viewModel.dismissUnsupported()
-                viewModel.openShare(unsupported.entry)
+            onShare = if (state.root?.isRemote == true) {
+                null
+            } else {
+                {
+                    viewModel.dismissUnsupported()
+                    viewModel.openShare(unsupported.entry)
+                }
             },
             onDetails = {
                 viewModel.dismissUnsupported()
@@ -1015,8 +1057,10 @@ fun FileBrowserScreen(
 
 @Composable
 private fun SelectionBar(
+    showShare: Boolean,
     onMove: () -> Unit,
     onDelete: () -> Unit,
+    onShare: () -> Unit,
     onMore: () -> Unit,
 ) {
     Surface(
@@ -1033,6 +1077,11 @@ private fun SelectionBar(
         ) {
             TextButton(onClick = onMove) {
                 Text(stringResource(R.string.move_to))
+            }
+            if (showShare) {
+                TextButton(onClick = onShare) {
+                    Text(stringResource(R.string.share_create))
+                }
             }
             TextButton(onClick = onDelete) {
                 Text(

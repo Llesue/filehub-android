@@ -49,6 +49,8 @@ class ShareRepository(
 
     suspend fun revoke(profile: ServerProfile, id: Long) = api(profile).revokeShare(id)
 
+    suspend fun purge(profile: ServerProfile, id: Long) = api(profile).purgeShare(id)
+
     private suspend fun api(profile: ServerProfile): FileHubApi {
         val token = session.tokenFor(profile)
             ?: throw FileHubApiException(401, "UNAUTHORIZED", context.getString(R.string.error_unauthorized))
