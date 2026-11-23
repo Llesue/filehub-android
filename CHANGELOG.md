@@ -10,8 +10,12 @@
 - Camera shortcut in the browser toolbar and empty folder state; photos upload to the folder where the shutter was pressed.
 - Modal delete confirmation that lists every selected file name, with a numeric-code field when the server requires one; dismissal is disabled while the request runs.
 - Server-side text probe with legacy encoding detection (UTF-16 without BOM, GBK/GB18030, Big5, Shift_JIS, EUC-KR, Windows-125x, ISO-8859-x); unknown files can open as text with lossy warnings.
-- Read-only code preview with line numbers, no soft wrap, horizontal scrolling, copy without gutter, and a 256 KB truncation notice.
-- Full-screen text editor with line-number gutter, 16sp/24sp body text, Markdown edit/preview toggle, encoding/BOM/line-ending preservation, If-Match conflicts, reload/overwrite choices, UTF-8 save-as, and read-only reasons.
+- Reader-style text preview: document header with size, time, encoding, line-ending, character and BOM chips, a padded page surface, copy-all, download and direct encoding switching; lossy text gets an inline "try another encoding" action.
+- Syntax highlighting for Kotlin, Java, Python, JavaScript/TypeScript, C/C++, Rust, Go, shell and other common grammars, using the bundled JetBrains Mono font; search matches are highlighted without losing syntax colours.
+- Text editor with saved/unsaved state, a filled save action, tappable encoding and line-ending chips, LF/CRLF switching, find-in-file with match count and next/previous navigation, a symbol/Tab toolbar, a Markdown formatting bar, and side-by-side Markdown preview on wide screens.
+- Editor themes: follow the app, fixed light, or sepia, persisted per device.
+- Unsupported file types open an action dialog (download, share, properties, open as text when possible) instead of a dead-end full-screen message; read failures use the same dialog.
+- Shared empty/error states with an icon, an explanation and a single recovery action.
 - On-demand directory sizes for local and remote roots, with a concurrency limit, polling for server-side scans, cache and `≥` marker for partial results.
 - Unified relative time across file cards, details, search, sync pages and token validity, with unit tests.
 - Global audio player backed by MediaSessionService: queue from the current folder, previous/next, seek, background and notification controls, collapsed/expanded layouts, and automatic stop on logout.

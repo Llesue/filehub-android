@@ -72,3 +72,8 @@ Signing certificate SHA-256:
 - [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md) — 0.1.0 release notes
 - [`docs/release-notes/v0.1.1.md`](docs/release-notes/v0.1.1.md) — 0.1.1 release notes
 - [`CHANGELOG.md`](CHANGELOG.md)
+
+## Licenses
+
+- Bundled **JetBrains Mono** font: SIL Open Font License 1.1, see `licenses/JetBrainsMono-OFL.txt`.
+- Syntax highlighting: [`dev.snipme:highlights`](https://github.com/SnipMeDev/Highlights), Apache License 2.0.
