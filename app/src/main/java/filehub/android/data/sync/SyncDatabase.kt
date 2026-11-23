@@ -110,6 +110,42 @@ data class DirectoryCacheEntity(
     val fetchedAt: Long,
 )
 
+@Entity(tableName = "browser_state", primaryKeys = ["profileId", "rootId", "path"])
+data class BrowserStateEntity(
+    val profileId: String,
+    val rootId: Long,
+    val path: String,
+    val sort: String,
+    val order: String,
+    val view: String,
+    val listIndex: Int,
+    val listOffset: Int,
+    val gridIndex: Int,
+    val gridOffset: Int,
+    val updatedAt: Long,
+)
+
+@Dao
+interface BrowserStateDao {
+    @Query(
+        "SELECT * FROM browser_state WHERE profileId = :profileId AND rootId = :rootId " +
+            "AND path = :path",
+    )
+    suspend fun get(profileId: String, rootId: Long, path: String): BrowserStateEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(entry: BrowserStateEntity)
+
+    @Query(
+        "DELETE FROM browser_state WHERE rowid NOT IN " +
+            "(SELECT rowid FROM browser_state ORDER BY updatedAt DESC LIMIT :keep)",
+    )
+    suspend fun prune(keep: Int)
+
+    @Query("DELETE FROM browser_state WHERE profileId = :profileId")
+    suspend fun clearForProfile(profileId: String)
+}
+
 @Dao
 interface DirectoryCacheDao {
     @Query(
@@ -255,16 +291,41 @@ interface PhotoSyncDao {
         FolderSyncConfigEntity::class,
         FolderSyncEntryEntity::class,
         DirectoryCacheEntity::class,
+        BrowserStateEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class SyncDatabase : RoomDatabase() {
     abstract fun photoSyncDao(): PhotoSyncDao
     abstract fun folderSyncDao(): FolderSyncDao
     abstract fun directoryCacheDao(): DirectoryCacheDao
+    abstract fun browserStateDao(): BrowserStateDao
 
     companion object {
+        /** Adds the per-directory browser state (sort, view, scroll). */
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `browser_state` (
+                        `profileId` TEXT NOT NULL,
+                        `rootId` INTEGER NOT NULL,
+                        `path` TEXT NOT NULL,
+                        `sort` TEXT NOT NULL,
+                        `order` TEXT NOT NULL,
+                        `view` TEXT NOT NULL,
+                        `listIndex` INTEGER NOT NULL,
+                        `listOffset` INTEGER NOT NULL,
+                        `gridIndex` INTEGER NOT NULL,
+                        `gridOffset` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`profileId`, `rootId`, `path`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
         /** Splits the old global Wi-Fi switch into separate photo/video policies. */
         val MIGRATION_4_5: Migration = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {

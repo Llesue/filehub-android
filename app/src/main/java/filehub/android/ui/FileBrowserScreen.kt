@@ -19,9 +19,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,6 +32,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,17 +54,22 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,7 +82,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -77,6 +93,7 @@ import androidx.core.content.FileProvider
 import filehub.android.BuildConfig
 import java.io.File
 import filehub.android.R
+import filehub.android.core.model.BrowserViewMode
 import filehub.android.core.model.FileEntry
 import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileKind
@@ -92,6 +109,7 @@ import filehub.android.ui.theme.FileHubFilePurple
 import filehub.android.ui.theme.FileHubFileRed
 import filehub.android.ui.theme.FileHubFileTeal
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileBrowserScreen(
     viewModel: FilesViewModel,
@@ -104,11 +122,12 @@ fun FileBrowserScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val imageLoader by viewModel.imageLoader.collectAsStateWithLifecycle()
     var sortMenu by remember { mutableStateOf(false) }
-    var moreMenu by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf(false) }
     var newFile by remember { mutableStateOf(false) }
     var renameEntry by remember { mutableStateOf<FileEntry?>(null) }
-    var transferEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var moreSheet by remember { mutableStateOf(false) }
+    var createSheet by remember { mutableStateOf(false) }
+    var transferOpen by remember { mutableStateOf(false) }
     var transferMove by remember { mutableStateOf(true) }
     var zipDialog by remember { mutableStateOf(false) }
     var imageMenu by remember { mutableStateOf(false) }
@@ -193,8 +212,23 @@ fun FileBrowserScreen(
             state.deletePreview == null &&
             !newFolder && !newFile && renameEntry == null,
     ) {
-        if (state.selectionMode) viewModel.clearSelection() else onBack()
+        if (state.selectionMode) {
+            moreSheet = false
+            viewModel.clearSelection()
+        } else {
+            onBack()
+        }
     }
+
+    val selectedEntries = state.entries.filter { it.name in state.selected }
+    val singleSelected = selectedEntries.singleOrNull()
+    val canDownload = selectedEntries.any { !it.isDir }
+    val canZip = state.root?.isRemote != true && selectedEntries.size > 1
+    val canExtract = singleSelected != null && !singleSelected.isDir &&
+        singleSelected.name.endsWith(".zip", ignoreCase = true) &&
+        state.root?.isRemote != true
+    val canOpenAsText = singleSelected != null && !singleSelected.isDir &&
+        singleSelected.kind == FileKind.File
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -216,138 +250,104 @@ fun FileBrowserScreen(
                     Text(stringResource(R.string.selection_select_all))
                 }
             } else {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back),
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = state.root?.alias ?: "",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (state.readOnly) {
-                    Text(
-                        text = stringResource(R.string.file_read_only_reason),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (state.root?.isRemote != true) {
-                IconButton(onClick = { onSearch(state.root?.id) }) {
-                    Icon(Icons.Filled.Search, contentDescription = null)
-                }
-            }
-            if (!state.readOnly && !state.selectionMode) {
-                IconButton(onClick = ::takePhoto) {
+                IconButton(onClick = onBack) {
                     Icon(
-                        painter = painterResource(R.drawable.ic_camera),
-                        contentDescription = stringResource(R.string.transfer_camera_action),
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.common_back),
                     )
                 }
-            }
-            Box {
-                Surface(
-                    modifier = Modifier.clickable(enabled = false) {},
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = sortLabel(state.sort) + if (state.order == SortOrder.Asc) " ↑" else " ↓",
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        text = state.root?.alias ?: "",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                }
-                // The sort chip is interactive through its own overlay so the
-                // border and the dropdown can share a touch target.
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clickable { sortMenu = true },
-                )
-                DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                    SortMenuItem(FileSort.Name, state.sort, state.order) {
-                        sortMenu = false
-                        viewModel.setSort(FileSort.Name)
-                    }
-                    SortMenuItem(FileSort.Size, state.sort, state.order) {
-                        sortMenu = false
-                        viewModel.setSort(FileSort.Size)
-                    }
-                    SortMenuItem(FileSort.Modified, state.sort, state.order) {
-                        sortMenu = false
-                        viewModel.setSort(FileSort.Modified)
-                    }
-                    if (state.root?.isRemote == true) {
+                    if (state.readOnly) {
                         Text(
-                            text = stringResource(R.string.sort_remote_size_hint),
+                            text = stringResource(R.string.file_read_only_reason),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         )
                     }
                 }
-            }
-            Box {
-                IconButton(onClick = { moreMenu = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.file_more))
+                if (state.root?.isRemote != true) {
+                    IconButton(onClick = { onSearch(state.root?.id) }) {
+                        Icon(Icons.Filled.Search, contentDescription = null)
+                    }
                 }
-                DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
-                    if (!state.readOnly) {
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.transfer_upload_action)) },
-                            onClick = {
-                                moreMenu = false
-                                filePicker.launch(arrayOf("*/*"))
+                IconButton(
+                    onClick = {
+                        viewModel.setView(
+                            if (state.view == BrowserViewMode.List) {
+                                BrowserViewMode.Grid
+                            } else {
+                                BrowserViewMode.List
                             },
                         )
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.transfer_photo_action)) },
-                            onClick = {
-                                moreMenu = false
-                                mediaPicker.launch(arrayOf("image/*", "video/*"))
+                    },
+                ) {
+                    Icon(
+                        painter = painterResource(
+                            if (state.view == BrowserViewMode.List) {
+                                R.drawable.ic_view_grid
+                            } else {
+                                R.drawable.ic_view_list
                             },
-                        )
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.transfer_camera_action)) },
-                            onClick = {
-                                moreMenu = false
-                                takePhoto()
+                        ),
+                        contentDescription = stringResource(
+                            if (state.view == BrowserViewMode.List) {
+                                R.string.file_view_grid
+                            } else {
+                                R.string.file_view_list
                             },
+                        ),
+                    )
+                }
+                Box {
+                    Surface(
+                        modifier = Modifier.clickable(enabled = false) {},
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    ) {
+                        Text(
+                            text = sortLabel(state.sort) + if (state.order == SortOrder.Asc) " ↑" else " ↓",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                         )
                     }
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_new_folder)) },
-                        leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                        onClick = {
-                            moreMenu = false
-                            newFolder = true
-                        },
+                    // The sort chip is interactive through its own overlay so the
+                    // border and the dropdown can share a touch target.
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clickable { sortMenu = true },
                     )
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_new_file)) },
-                        leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                        onClick = {
-                            moreMenu = false
-                            newFile = true
-                        },
-                    )
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.file_refresh)) },
-                        leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
-                        onClick = {
-                            moreMenu = false
-                            viewModel.refresh()
-                        },
-                    )
+                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                        SortMenuItem(FileSort.Name, state.sort, state.order) {
+                            sortMenu = false
+                            viewModel.setSort(FileSort.Name)
+                        }
+                        SortMenuItem(FileSort.Size, state.sort, state.order) {
+                            sortMenu = false
+                            viewModel.setSort(FileSort.Size)
+                        }
+                        SortMenuItem(FileSort.Modified, state.sort, state.order) {
+                            sortMenu = false
+                            viewModel.setSort(FileSort.Modified)
+                        }
+                        if (state.root?.isRemote == true) {
+                            Text(
+                                text = stringResource(R.string.sort_remote_size_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
                 }
-            }
             }
         }
 
@@ -422,49 +422,81 @@ fun FileBrowserScreen(
             Spacer(Modifier.height(1.dp))
         }
 
+        val listState = rememberLazyListState()
+        val gridState = rememberLazyGridState()
+        val currentPath by rememberUpdatedState(state.path)
+
+        LaunchedEffect(listState) {
+            snapshotFlow {
+                Triple(
+                    listState.firstVisibleItemIndex,
+                    listState.firstVisibleItemScrollOffset,
+                    listState.isScrollInProgress,
+                )
+            }.collect { (index, offset, scrolling) ->
+                viewModel.reportScroll(
+                    path = currentPath,
+                    view = BrowserViewMode.List,
+                    index = index,
+                    offset = offset.coerceAtLeast(0),
+                    persist = !scrolling,
+                )
+            }
+        }
+        LaunchedEffect(gridState) {
+            snapshotFlow {
+                Triple(
+                    gridState.firstVisibleItemIndex,
+                    gridState.firstVisibleItemScrollOffset,
+                    gridState.isScrollInProgress,
+                )
+            }.collect { (index, offset, scrolling) ->
+                viewModel.reportScroll(
+                    path = currentPath,
+                    view = BrowserViewMode.Grid,
+                    index = index,
+                    offset = offset.coerceAtLeast(0),
+                    persist = !scrolling,
+                )
+            }
+        }
+        LaunchedEffect(state.path, state.view, state.restore, state.entries.size) {
+            val target = state.restore ?: return@LaunchedEffect
+            if (state.entries.isEmpty()) return@LaunchedEffect
+            val max = state.entries.lastIndex
+            val index = target.index.coerceIn(0, max)
+            when {
+                target.view == BrowserViewMode.List && state.view == BrowserViewMode.List -> {
+                    listState.scrollToItem(index, target.offset.coerceAtLeast(0))
+                    viewModel.consumeRestore()
+                }
+                target.view == BrowserViewMode.Grid && state.view == BrowserViewMode.Grid -> {
+                    gridState.scrollToItem(index, target.offset.coerceAtLeast(0))
+                    viewModel.consumeRestore()
+                }
+            }
+        }
+
         Box(modifier = Modifier.weight(1f)) {
-        when {
-            state.loginRequired -> StatusMessage(
-                icon = Icons.Filled.Warning,
-                title = stringResource(R.string.file_login_required),
-            )
-            state.error != null && state.entries.isEmpty() -> StatusMessage(
-                icon = Icons.Filled.Warning,
-                title = state.error.orEmpty(),
-                body = stringResource(R.string.file_error_body),
-                actionLabel = stringResource(R.string.common_retry),
-                onAction = viewModel::refresh,
-            )
-            state.loading && state.entries.isEmpty() -> SkeletonList()
-            state.entries.isEmpty() -> EmptyFolder(
-                onCamera = if (!state.readOnly) ::takePhoto else null,
-            )
-            else -> Column(modifier = Modifier.fillMaxSize()) {
-                if (state.offline) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.errorContainer,
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(start = 12.dp, end = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = stringResource(R.string.file_offline_cached),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.weight(1f),
-                            )
-                            TextButton(onClick = viewModel::refresh) {
-                                Text(stringResource(R.string.common_retry))
-                            }
-                        }
-                    }
-                } else {
-                    state.error?.let { message ->
+            when {
+                state.loginRequired -> StatusMessage(
+                    icon = Icons.Filled.Warning,
+                    title = stringResource(R.string.file_login_required),
+                )
+                state.error != null && state.entries.isEmpty() -> StatusMessage(
+                    icon = Icons.Filled.Warning,
+                    title = state.error.orEmpty(),
+                    body = stringResource(R.string.file_error_body),
+                    actionLabel = stringResource(R.string.common_retry),
+                    onAction = viewModel::refresh,
+                )
+                state.loading && state.entries.isEmpty() ->
+                    if (state.view == BrowserViewMode.Grid) SkeletonGrid() else SkeletonList()
+                state.entries.isEmpty() -> EmptyFolder(
+                    onAction = if (!state.readOnly) ({ createSheet = true }) else null,
+                )
+                else -> Column(modifier = Modifier.fillMaxSize()) {
+                    if (state.offline) {
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -477,11 +509,9 @@ fun FileBrowserScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = message,
+                                    text = stringResource(R.string.file_offline_cached),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f),
                                 )
                                 TextButton(onClick = viewModel::refresh) {
@@ -489,93 +519,192 @@ fun FileBrowserScreen(
                                 }
                             }
                         }
-                    }
-                }
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 0.dp,
-                        end = 0.dp,
-                        top = 4.dp,
-                        bottom = 24.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                items(state.entries, key = { it.name + it.modified + it.size }) { entry ->
-                    FileCard(
-                        entry = entry,
-                        imageLoader = imageLoader,
-                        thumbnailUrl = viewModel.thumbnailUrl(entry),
-                        selected = entry.name in state.selected,
-                        selectionMode = state.selectionMode,
-                        onEntry = {
-                            when (entry.kind) {
-                                FileKind.Audio -> {
-                                    requestNotificationPermission()
-                                    viewModel.requestAudioPlay(entry)
+                    } else {
+                        state.error?.let { message ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.errorContainer,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(start = 12.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = message,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(onClick = viewModel::refresh) {
+                                        Text(stringResource(R.string.common_retry))
+                                    }
                                 }
-                                FileKind.Video -> {
-                                    onPauseAudio()
-                                    viewModel.enter(entry)
-                                }
-                                else -> viewModel.enter(entry)
                             }
-                        },
-                        onToggle = { viewModel.toggleSelection(entry) },
-                        onDetails = { viewModel.showDetails(entry) },
-                        onRename = { renameEntry = entry },
-                        onDelete = { viewModel.requestDelete(listOf(entry)) },
-                        onDownload = {
-                            requestNotificationPermission()
-                            viewModel.enqueueDownload(entry)
-                        },
-                        onShare = { viewModel.openShare(entry) },
-                        onMove = {
-                            transferEntry = entry
-                            transferMove = true
-                        },
-                        onCopy = {
-                            transferEntry = entry
-                            transferMove = false
-                        },
-                        onExtract = { viewModel.unzip(entry) },
-                        onOpenAsText = { viewModel.openAsText(entry) },
-                        onRetryThumbnail = { viewModel.retryThumbnail(entry) },
-                        remote = state.root?.isRemote == true,
-                        dirSizeState = viewModel.dirSizeState(entry),
-                        onRequestDirSize = { viewModel.requestDirSize(entry) },
-                    )
-                }
-                state.nextCursor?.let { cursor ->
-                    item(key = "footer-$cursor") {
-                        LaunchedEffect(cursor) { viewModel.loadMore() }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        }
+                    }
+                    PullToRefreshBox(
+                        isRefreshing = state.loading && state.entries.isNotEmpty(),
+                        onRefresh = viewModel::refresh,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    ) {
+                        if (state.view == BrowserViewMode.List) {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                    start = 0.dp,
+                                    end = 0.dp,
+                                    top = 4.dp,
+                                    bottom = 96.dp,
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                items(state.entries, key = { it.name + it.modified + it.size }) { entry ->
+                                    FileCard(
+                                        entry = entry,
+                                        imageLoader = imageLoader,
+                                        thumbnailUrl = viewModel.thumbnailUrl(entry),
+                                        selected = entry.name in state.selected,
+                                        selectionMode = state.selectionMode,
+                                        onEntry = {
+                                            when (entry.kind) {
+                                                FileKind.Audio -> {
+                                                    requestNotificationPermission()
+                                                    viewModel.requestAudioPlay(entry)
+                                                }
+                                                FileKind.Video -> {
+                                                    onPauseAudio()
+                                                    viewModel.enter(entry)
+                                                }
+                                                else -> viewModel.enter(entry)
+                                            }
+                                        },
+                                        onToggle = { viewModel.toggleSelection(entry) },
+                                        dirSizeState = viewModel.dirSizeState(entry),
+                                        onRequestDirSize = { viewModel.requestDirSize(entry) },
+                                    )
+                                }
+                                state.nextCursor?.let { cursor ->
+                                    item(key = "footer-$cursor") {
+                                        LaunchedEffect(cursor) { viewModel.loadMore() }
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(16.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(24.dp),
+                                                strokeWidth = 2.dp,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                val columns = when {
+                                    maxWidth >= 840.dp -> 4
+                                    maxWidth >= 600.dp -> 3
+                                    else -> 2
+                                }
+                                LazyVerticalGrid(
+                                    state = gridState,
+                                    columns = GridCells.Fixed(columns),
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                        start = 8.dp,
+                                        end = 8.dp,
+                                        top = 4.dp,
+                                        bottom = 96.dp,
+                                    ),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    gridItems(
+                                        state.entries,
+                                        key = { it.name + it.modified + it.size },
+                                    ) { entry ->
+                                        GridCard(
+                                            entry = entry,
+                                            imageLoader = imageLoader,
+                                            thumbnailUrl = viewModel.thumbnailUrl(entry),
+                                            selected = entry.name in state.selected,
+                                            selectionMode = state.selectionMode,
+                                            onEntry = {
+                                                when (entry.kind) {
+                                                    FileKind.Audio -> {
+                                                        requestNotificationPermission()
+                                                        viewModel.requestAudioPlay(entry)
+                                                    }
+                                                    FileKind.Video -> {
+                                                        onPauseAudio()
+                                                        viewModel.enter(entry)
+                                                    }
+                                                    else -> viewModel.enter(entry)
+                                                }
+                                            },
+                                            onToggle = { viewModel.toggleSelection(entry) },
+                                        )
+                                    }
+                                    state.nextCursor?.let { cursor ->
+                                        item(
+                                            key = "grid-footer-$cursor",
+                                            span = { GridItemSpan(maxLineSpan) },
+                                        ) {
+                                            LaunchedEffect(cursor) { viewModel.loadMore() }
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(16.dp),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(24.dp),
+                                                    strokeWidth = 2.dp,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
-        }
+            if (!state.readOnly &&
+                !state.selectionMode &&
+                state.previewEntry == null &&
+                state.unsupportedPreview == null
+            ) {
+                FloatingActionButton(
+                    onClick = { createSheet = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = stringResource(R.string.fab_create),
+                    )
+                }
+            }
         }
         if (state.selectionMode) {
             SelectionBar(
-                count = state.selected.size,
-                showZip = state.root?.isRemote != true,
-                onDelete = viewModel::requestDeleteSelected,
-                onDownload = {
-                    requestNotificationPermission()
-                    viewModel.downloadSelected()
+                onMove = {
+                    transferMove = true
+                    transferOpen = true
                 },
-                onZip = { zipDialog = true },
-                onClear = viewModel::clearSelection,
+                onDelete = viewModel::requestDeleteSelected,
+                onMore = { moreSheet = true },
             )
         }
     }
@@ -614,22 +743,98 @@ fun FileBrowserScreen(
             },
         )
     }
-    transferEntry?.let { entry ->
+    if (transferOpen) {
         TargetPathDialog(
             title = stringResource(if (transferMove) R.string.move_to else R.string.copy_to),
             roots = roots,
             initialRootId = state.root?.id,
             initialPath = state.path,
-            onDismiss = { transferEntry = null },
+            onDismiss = { transferOpen = false },
             onConfirm = { rootId, path ->
                 if (transferMove) {
-                    viewModel.moveEntry(entry, rootId, path)
+                    viewModel.moveSelected(rootId, path)
                 } else {
-                    viewModel.copyEntry(entry, rootId, path)
+                    viewModel.copySelected(rootId, path)
                 }
-                transferEntry = null
+                transferOpen = false
             },
         )
+    }
+    if (createSheet) {
+        ModalBottomSheet(onDismissRequest = { createSheet = false }) {
+            Column(modifier = Modifier.padding(bottom = 12.dp)) {
+                SheetAction(R.string.action_new_folder) {
+                    createSheet = false
+                    newFolder = true
+                }
+                SheetAction(R.string.action_new_file) {
+                    createSheet = false
+                    newFile = true
+                }
+                SheetAction(R.string.transfer_upload_action) {
+                    createSheet = false
+                    filePicker.launch(arrayOf("*/*"))
+                }
+                SheetAction(R.string.transfer_photo_action) {
+                    createSheet = false
+                    mediaPicker.launch(arrayOf("image/*", "video/*"))
+                }
+                SheetAction(R.string.transfer_camera_action) {
+                    createSheet = false
+                    takePhoto()
+                }
+            }
+        }
+    }
+    if (moreSheet) {
+        ModalBottomSheet(onDismissRequest = { moreSheet = false }) {
+            Column(modifier = Modifier.padding(bottom = 12.dp)) {
+                if (canDownload) {
+                    SheetAction(R.string.transfer_download_action) {
+                        moreSheet = false
+                        requestNotificationPermission()
+                        viewModel.downloadSelected()
+                    }
+                }
+                if (!state.readOnly) {
+                    SheetAction(R.string.copy_to) {
+                        moreSheet = false
+                        transferMove = false
+                        transferOpen = true
+                    }
+                }
+                if (singleSelected != null) {
+                    if (!state.readOnly) {
+                        SheetAction(R.string.action_rename) {
+                            moreSheet = false
+                            renameEntry = singleSelected
+                        }
+                    }
+                    SheetAction(R.string.file_details) {
+                        moreSheet = false
+                        viewModel.showDetails(singleSelected)
+                    }
+                    if (canOpenAsText) {
+                        SheetAction(R.string.action_open_as_text) {
+                            moreSheet = false
+                            viewModel.openAsText(singleSelected)
+                        }
+                    }
+                    if (canExtract) {
+                        SheetAction(R.string.extract) {
+                            moreSheet = false
+                            viewModel.unzip(singleSelected)
+                        }
+                    }
+                }
+                if (canZip) {
+                    SheetAction(R.string.zip_create) {
+                        moreSheet = false
+                        zipDialog = true
+                    }
+                }
+            }
+        }
     }
     if (zipDialog) {
         TextInputDialog(
@@ -810,12 +1015,9 @@ fun FileBrowserScreen(
 
 @Composable
 private fun SelectionBar(
-    count: Int,
-    showZip: Boolean,
+    onMove: () -> Unit,
     onDelete: () -> Unit,
-    onDownload: () -> Unit,
-    onZip: () -> Unit,
-    onClear: () -> Unit,
+    onMore: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -825,31 +1027,21 @@ private fun SelectionBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            Text(
-                text = stringResource(R.string.selection_selected, count),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-            Row {
-                TextButton(onClick = onClear) {
-                    Text(stringResource(R.string.selection_cancel))
-                }
-                TextButton(onClick = onDownload) {
-                    Text(stringResource(R.string.transfer_download_action))
-                }
-                TextButton(onClick = onZip) {
-                    Text(stringResource(R.string.zip_create))
-                }
-                TextButton(onClick = onDelete) {
-                    Text(
-                        text = stringResource(R.string.selection_delete),
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+            TextButton(onClick = onMove) {
+                Text(stringResource(R.string.move_to))
+            }
+            TextButton(onClick = onDelete) {
+                Text(
+                    text = stringResource(R.string.selection_delete),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            TextButton(onClick = onMore) {
+                Text(stringResource(R.string.file_action_more))
             }
         }
     }
@@ -961,23 +1153,10 @@ private fun FileCard(
     selectionMode: Boolean,
     onEntry: () -> Unit,
     onToggle: () -> Unit,
-    onDetails: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-    onDownload: () -> Unit,
-    onShare: () -> Unit,
-    onMove: () -> Unit,
-    onCopy: () -> Unit,
-    onExtract: () -> Unit,
-    onOpenAsText: () -> Unit,
-    onRetryThumbnail: () -> Unit,
-    remote: Boolean,
     dirSizeState: DirSizeState?,
     onRequestDirSize: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
-    var thumbFailed by remember(thumbnailUrl) { mutableStateOf(false) }
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val sizeUnknown = entry.isDir && entry.size <= 0
     val size = if (sizeUnknown) {
         dirSizeLabel(dirSizeState)
@@ -1008,155 +1187,153 @@ private fun FileCard(
                 },
                 onLongClick = onToggle,
             )
-            .padding(start = 16.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+            .padding(start = 16.dp, top = 6.dp, bottom = 6.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        FileThumb(
+            entry = entry,
+            imageLoader = imageLoader,
+            thumbnailUrl = thumbnailUrl,
+            selected = selected,
+            modifier = Modifier.size(48.dp),
+        )
+        Spacer(Modifier.size(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            FileNameText(
+                name = entry.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = meta,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GridCard(
+    entry: FileEntry,
+    imageLoader: ImageLoader?,
+    thumbnailUrl: String?,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onEntry: () -> Unit,
+    onToggle: () -> Unit,
+) {
+    val label = stringResource(R.string.file_item_description, entry.name, fileKindLabel(entry.kind))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .combinedClickable(
+                onClick = {
+                    if (selectionMode || selected) onToggle() else onEntry()
+                },
+                onLongClick = onToggle,
+            )
+            .semantics(mergeDescendants = true) {
+                contentDescription = label
+            }
+            .padding(2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        FileThumb(
+            entry = entry,
+            imageLoader = imageLoader,
+            thumbnailUrl = thumbnailUrl,
+            selected = selected,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f),
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = entry.name,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun FileThumb(
+    entry: FileEntry,
+    imageLoader: ImageLoader?,
+    thumbnailUrl: String?,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    var thumbFailed by remember(thumbnailUrl) { mutableStateOf(false) }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(fileIconRes(entry.kind)),
+            contentDescription = null,
+            tint = fileIconColor(entry.kind),
+            modifier = Modifier.size(28.dp),
+        )
+        if (thumbnailUrl != null && imageLoader != null && !thumbFailed) {
+            AsyncImage(
+                model = thumbnailUrl,
+                imageLoader = imageLoader,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                onError = { thumbFailed = true },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (entry.kind == FileKind.Video) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .align(Alignment.BottomStart)
+                    .padding(6.dp)
+                    .size(22.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    painter = painterResource(fileIconRes(entry.kind)),
+                    painter = painterResource(R.drawable.ic_play),
                     contentDescription = null,
-                    tint = fileIconColor(entry.kind),
-                    modifier = Modifier.size(26.dp),
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp),
                 )
-                if (thumbnailUrl != null && imageLoader != null) {
-                    AsyncImage(
-                        model = thumbnailUrl,
-                        imageLoader = imageLoader,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        onError = { thumbFailed = true },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                if (selected) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .size(18.dp)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.Check,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(12.dp),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.size(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                FileNameText(
-                    name = entry.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = meta,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Box {
-                IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.file_more))
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.file_details)) },
-                        onClick = {
-                            menuOpen = false
-                            onDetails()
-                        },
-                    )
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.share_create)) },
-                        onClick = {
-                            menuOpen = false
-                            onShare()
-                        },
-                    )
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.move_to)) },
-                        onClick = {
-                            menuOpen = false
-                            onMove()
-                        },
-                    )
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.copy_to)) },
-                        onClick = {
-                            menuOpen = false
-                            onCopy()
-                        },
-                    )
-                    if (!remote && entry.name.endsWith(".zip", ignoreCase = true)) {
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.extract)) },
-                            onClick = {
-                                menuOpen = false
-                                onExtract()
-                            },
-                        )
-                    }
-                    if (!entry.isDir) {
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.transfer_download_action)) },
-                            onClick = {
-                                menuOpen = false
-                                onDownload()
-                            },
-                        )
-                    }
-                    if (thumbFailed) {
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.thumb_retry)) },
-                            onClick = {
-                                menuOpen = false
-                                onRetryThumbnail()
-                            },
-                        )
-                    }
-                    if (entry.kind == FileKind.File) {
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_open_as_text)) },
-                            onClick = {
-                                menuOpen = false
-                                onOpenAsText()
-                            },
-                        )
-                    }
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_rename)) },
-                        onClick = {
-                            menuOpen = false
-                            onRename()
-                        },
-                    )
-                    CompactDropdownMenuItem(
-                        text = {
-                            Text(
-                                stringResource(R.string.action_delete),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        },
-                        onClick = {
-                            menuOpen = false
-                            onDelete()
-                        },
-                    )
-                }
             }
         }
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .size(20.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -1186,7 +1363,7 @@ private fun FileDetailsDialog(
         title = { FileNameText(entry.name) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                DetailRow(stringResource(R.string.file_type), entry.kind.name)
+                DetailRow(stringResource(R.string.file_type), fileKindLabel(entry.kind))
                 DetailRow(stringResource(R.string.file_size), size)
                 if (sizeUnknown && dirSizeState is DirSizeState.Failed) {
                     TextButton(onClick = onRetryDirSize) {
@@ -1328,7 +1505,7 @@ private fun DetailRow(label: String, value: String) {
 }
 
 @Composable
-private fun EmptyFolder(onCamera: (() -> Unit)? = null) {
+private fun EmptyFolder(onAction: (() -> Unit)? = null) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1353,17 +1530,54 @@ private fun EmptyFolder(onCamera: (() -> Unit)? = null) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (onCamera != null) {
+        if (onAction != null) {
             Spacer(Modifier.height(12.dp))
-            TextButton(onClick = onCamera) {
+            TextButton(onClick = onAction) {
                 Icon(
-                    painter = painterResource(R.drawable.ic_camera),
+                    Icons.Filled.Add,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.size(6.dp))
-                Text(stringResource(R.string.transfer_camera_action))
+                Text(stringResource(R.string.file_empty_action))
             }
+        }
+    }
+}
+
+@Composable
+private fun SheetAction(labelRes: Int, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(labelRes),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+    }
+}
+
+@Composable
+private fun SkeletonGrid() {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        gridItems(List(10) { it }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
+            )
         }
     }
 }

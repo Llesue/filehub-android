@@ -18,6 +18,9 @@ import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileSort
 import filehub.android.core.model.ServerProfile
 import filehub.android.core.model.SortOrder
+import filehub.android.core.model.BrowserViewMode
+import filehub.android.data.BrowserState
+import filehub.android.data.BrowserStateRepository
 import filehub.android.data.DirectoryCacheRepository
 import filehub.android.data.FilesRepository
 import filehub.android.data.ShareRepository
@@ -59,6 +62,12 @@ data class AudioPickerState(
     val info: AudioInfoDto,
 )
 
+data class ScrollRestore(
+    val view: BrowserViewMode,
+    val index: Int,
+    val offset: Int,
+)
+
 data class UnsupportedPreview(
     val entry: FileEntry,
     val message: String? = null,
@@ -88,6 +97,8 @@ data class FileBrowserState(
     val stale: Boolean = false,
     val sort: FileSort = FileSort.Name,
     val order: SortOrder = SortOrder.Asc,
+    val view: BrowserViewMode = BrowserViewMode.List,
+    val restore: ScrollRestore? = null,
     val error: String? = null,
     val loginRequired: Boolean = false,
     val selectedEntry: FileEntry? = null,
@@ -135,6 +146,7 @@ class FilesViewModel(
     private val transferRepository: TransferRepository,
     private val shareRepository: ShareRepository,
     private val directoryCache: DirectoryCacheRepository,
+    private val browserStateRepository: BrowserStateRepository,
     private val audioPlayerController: AudioPlayerController,
 ) : ViewModel() {
 
@@ -147,11 +159,18 @@ class FilesViewModel(
     private var activeToken: String? = null
 
     private var loadJob: Job? = null
+    private var navJob: Job? = null
+    private var persistScrollJob: Job? = null
     private var uploadRefreshJob: Job? = null
     private val dirSizeJobs = mutableMapOf<String, Job>()
     private val dirSizeLimit = kotlinx.coroutines.sync.Semaphore(3)
     private val seenCompletedUploads = mutableSetOf<String>()
     private var uploadsPrimed = false
+
+    private var listIndex = 0
+    private var listOffset = 0
+    private var gridIndex = 0
+    private var gridOffset = 0
 
     init {
         viewModelScope.launch {
@@ -188,8 +207,11 @@ class FilesViewModel(
 
     fun open(profile: ServerProfile, root: FileRoot, path: String = "") {
         val normalized = normalizePath(path)
+        persistCurrentState()
         loadJob?.cancel()
+        navJob?.cancel()
         cancelDirSizes()
+        resetScrollPosition()
         _state.value = FileBrowserState(
             profile = profile,
             root = root,
@@ -202,7 +224,14 @@ class FilesViewModel(
                 _imageLoader.value = thumbnailLoaderFactory.get(profile.id, token)
             }
         }
-        load(path = normalized, append = false)
+        navJob = viewModelScope.launch {
+            val saved = browserStateRepository.get(profile.id, root.id, normalized)
+                ?: BrowserState.Default
+            val current = _state.value
+            if (current.root?.id != root.id || current.path != normalized) return@launch
+            applyBrowserState(saved)
+            load(path = normalized, append = false)
+        }
     }
 
     fun dirSizeState(entry: FileEntry): DirSizeState? = _state.value.dirSizes[dirSizeKey(entry)]
@@ -268,8 +297,13 @@ class FilesViewModel(
     fun navigateTo(path: String) {
         val normalized = normalizePath(path)
         if (normalized == _state.value.path) return
+        val profile = _state.value.profile ?: return
+        val root = _state.value.root ?: return
+        persistCurrentState()
         loadJob?.cancel()
+        navJob?.cancel()
         cancelDirSizes()
+        resetScrollPosition()
         _state.update {
             it.copy(
                 path = normalized,
@@ -278,9 +312,17 @@ class FilesViewModel(
                 loading = true,
                 error = null,
                 operationError = null,
+                restore = null,
             )
         }
-        load(path = normalized, append = false)
+        navJob = viewModelScope.launch {
+            val saved = browserStateRepository.get(profile.id, root.id, normalized)
+                ?: BrowserState.Default
+            val current = _state.value
+            if (current.root?.id != root.id || current.path != normalized) return@launch
+            applyBrowserState(saved)
+            load(path = normalized, append = false)
+        }
     }
 
     fun enter(entry: FileEntry) {
@@ -722,12 +764,110 @@ class FilesViewModel(
 
     fun setSort(sort: FileSort) {
         val current = _state.value
-        if (sort == current.sort) {
-            _state.update { it.copy(order = if (it.order == SortOrder.Asc) SortOrder.Desc else SortOrder.Asc) }
+        val next = if (sort == current.sort) {
+            current.copy(order = if (current.order == SortOrder.Asc) SortOrder.Desc else SortOrder.Asc)
         } else {
-            _state.update { it.copy(sort = sort, order = SortOrder.Asc) }
+            current.copy(sort = sort, order = SortOrder.Asc)
         }
+        listIndex = 0
+        listOffset = 0
+        gridIndex = 0
+        gridOffset = 0
+        _state.update {
+            it.copy(
+                sort = next.sort,
+                order = next.order,
+                restore = ScrollRestore(it.view, 0, 0),
+            )
+        }
+        persistCurrentState()
         refresh()
+    }
+
+    fun setView(view: BrowserViewMode) {
+        val current = _state.value
+        if (current.view == view) return
+        val target = if (view == BrowserViewMode.List) {
+            ScrollRestore(view, listIndex, listOffset)
+        } else {
+            ScrollRestore(view, gridIndex, gridOffset)
+        }
+        _state.update { it.copy(view = view, restore = target) }
+        persistCurrentState()
+    }
+
+    fun consumeRestore() {
+        _state.update { it.copy(restore = null) }
+    }
+
+    fun reportScroll(
+        path: String,
+        view: BrowserViewMode,
+        index: Int,
+        offset: Int,
+        persist: Boolean,
+    ) {
+        val current = _state.value
+        if (current.path != path || current.restore != null) return
+        if (view == BrowserViewMode.List) {
+            listIndex = index
+            listOffset = offset
+        } else {
+            gridIndex = index
+            gridOffset = offset
+        }
+        if (!persist) return
+        persistScrollJob?.cancel()
+        persistScrollJob = viewModelScope.launch {
+            delay(500)
+            persistCurrentState()
+        }
+    }
+
+    private fun resetScrollPosition() {
+        listIndex = 0
+        listOffset = 0
+        gridIndex = 0
+        gridOffset = 0
+    }
+
+    private fun applyBrowserState(saved: BrowserState) {
+        listIndex = saved.listIndex
+        listOffset = saved.listOffset
+        gridIndex = saved.gridIndex
+        gridOffset = saved.gridOffset
+        val restore = if (saved.view == BrowserViewMode.List) {
+            ScrollRestore(saved.view, saved.listIndex, saved.listOffset)
+        } else {
+            ScrollRestore(saved.view, saved.gridIndex, saved.gridOffset)
+        }
+        _state.update {
+            it.copy(
+                sort = saved.sort,
+                order = saved.order,
+                view = saved.view,
+                restore = restore,
+            )
+        }
+    }
+
+    private fun persistCurrentState() {
+        persistScrollJob?.cancel()
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val snapshot = BrowserState(
+            sort = current.sort,
+            order = current.order,
+            view = current.view,
+            listIndex = listIndex,
+            listOffset = listOffset,
+            gridIndex = gridIndex,
+            gridOffset = gridOffset,
+        )
+        viewModelScope.launch {
+            browserStateRepository.put(profile.id, root.id, current.path, snapshot)
+        }
     }
 
     fun openShare(entry: FileEntry) {
@@ -1204,14 +1344,20 @@ class FilesViewModel(
     }
 
     fun clear() {
+        persistCurrentState()
         loadJob?.cancel()
+        navJob?.cancel()
         cancelDirSizes()
+        resetScrollPosition()
         _state.value = FileBrowserState()
     }
 
     fun release() {
+        persistCurrentState()
         loadJob?.cancel()
+        navJob?.cancel()
         cancelDirSizes()
+        resetScrollPosition()
         val profileId = _state.value.profile?.id
         if (profileId != null) thumbnailLoaderFactory.close(profileId)
         activeToken = null
@@ -1352,6 +1498,7 @@ class FilesViewModel(
                     app.container.transferRepository,
                     app.container.shareRepository,
                     app.container.directoryCacheRepository,
+                    app.container.browserStateRepository,
                     app.container.audioPlayerController,
                 )
             }

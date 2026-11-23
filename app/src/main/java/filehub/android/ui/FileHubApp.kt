@@ -8,24 +8,28 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -38,11 +42,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatDelegate
@@ -207,31 +213,64 @@ fun FileHubApp(viewModel: AppViewModel) {
                                 onClick = { navController.navigate("transfers") },
                             )
                         }
-                        NavigationBar(
-                            modifier = Modifier
-                                .navigationBarsPadding()
-                                .height(60.dp),
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            windowInsets = WindowInsets(0, 0, 0, 0),
-                        ) {
-                            MainTab.entries.forEach { item ->
-                                NavigationBarItem(
-                                    selected = tab == item,
-                                    onClick = { tab = item },
-                                    icon = {
-                                        Icon(
-                                            item.icon,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(22.dp),
-                                        )
-                                    },
-                                    label = {
+                        Surface(color = MaterialTheme.colorScheme.surface) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .navigationBarsPadding()
+                                    .height(58.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                MainTab.entries.forEach { item ->
+                                    val selected = tab == item
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .selectable(
+                                                selected = selected,
+                                                role = Role.Tab,
+                                                onClick = { tab = item },
+                                            ),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center,
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(width = 48.dp, height = 28.dp)
+                                                .background(
+                                                    color = if (selected) {
+                                                        MaterialTheme.colorScheme.primaryContainer
+                                                    } else {
+                                                        androidx.compose.ui.graphics.Color.Transparent
+                                                    },
+                                                    shape = CircleShape,
+                                                ),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(
+                                                item.icon,
+                                                contentDescription = null,
+                                                tint = if (selected) {
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                                modifier = Modifier.size(22.dp),
+                                            )
+                                        }
+                                        Spacer(Modifier.height(2.dp))
                                         Text(
                                             text = stringResource(item.labelRes),
                                             style = MaterialTheme.typography.labelSmall,
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.onSurface
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
                                         )
-                                    },
-                                )
+                                    }
+                                }
                             }
                         }
                     }

@@ -7,11 +7,13 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import filehub.android.FileHubApplication
+import filehub.android.R
 import filehub.android.core.model.FileKind
 import filehub.android.core.model.SearchResult
 import filehub.android.data.FilesRepository
 import filehub.android.data.api.IndexStatusDto
 import filehub.android.data.SessionRepository
+import filehub.android.data.transfer.TransferRepository
 import filehub.android.data.toUserMessage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,12 +35,20 @@ data class SearchState(
     val indexStatus: IndexStatusDto? = null,
     val indexLoading: Boolean = false,
     val indexError: String? = null,
-)
+    val selected: Set<String> = emptySet(),
+    val deleteOpen: Boolean = false,
+    val deleteCount: Int = 0,
+    val actionLoading: Boolean = false,
+    val actionError: String? = null,
+) {
+    fun key(result: SearchResult): String = "${result.rootId}:${result.path}"
+}
 
 class SearchViewModel(
     private val application: Application,
     private val filesRepository: FilesRepository,
     private val sessionRepository: SessionRepository,
+    private val transferRepository: TransferRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchState())
@@ -98,6 +108,7 @@ class SearchViewModel(
                         nextCursor = cursor,
                         loading = false,
                         error = null,
+                        selected = emptySet(),
                     )
                 }
                 if (results.isEmpty()) checkIndex()
@@ -153,6 +164,133 @@ class SearchViewModel(
             }
         }
     }
+
+    fun toggleSelection(result: SearchResult) {
+        _state.update {
+            val key = it.key(result)
+            val next = it.selected.toMutableSet()
+            if (!next.add(key)) next.remove(key)
+            it.copy(selected = next)
+        }
+    }
+
+    fun clearSelection() {
+        _state.update { it.copy(selected = emptySet()) }
+    }
+
+    fun selectAll() {
+        _state.update { it.copy(selected = it.results.map(it::key).toSet()) }
+    }
+
+    fun selectedResults(): List<SearchResult> {
+        val current = _state.value
+        return current.results.filter { current.key(it) in current.selected }
+    }
+
+    fun downloadSelected() {
+        val profile = sessionRepository.state.value.active ?: return
+        val results = selectedResults().filterNot { it.isDir }
+        if (results.isEmpty()) return
+        viewModelScope.launch {
+            results.forEach { result ->
+                runCatching {
+                    transferRepository.enqueueDownload(
+                        profile = profile,
+                        rootId = result.rootId,
+                        remotePath = result.path,
+                        name = result.name,
+                        size = result.size,
+                        mimeType = result.mimeType,
+                    )
+                }.onFailure { error ->
+                    _state.update { it.copy(actionError = error.toUserMessage(application)) }
+                }
+            }
+            clearSelection()
+        }
+    }
+
+    fun requestDeleteSelected() {
+        val profile = sessionRepository.state.value.active ?: return
+        val results = selectedResults()
+        if (results.isEmpty()) return
+        val groups = results.groupBy { it.rootId }
+        viewModelScope.launch {
+            _state.update { it.copy(actionLoading = true, actionError = null) }
+            val previews = mutableListOf<Pair<String, String>>()
+            var count = 0
+            var requiresCode = false
+            for ((rootId, items) in groups) {
+                val preview = runCatching {
+                    filesRepository.deletePreview(profile, rootId, items.map { it.path })
+                }.getOrElse { error ->
+                    _state.update {
+                        it.copy(
+                            actionLoading = false,
+                            actionError = error.toUserMessage(application),
+                        )
+                    }
+                    return@launch
+                }
+                count += preview.items.size
+                requiresCode = requiresCode || preview.requiresCode
+                previews += preview.token to preview.confirmCode
+            }
+            if (requiresCode) {
+                _state.update {
+                    it.copy(
+                        actionLoading = false,
+                        actionError = application.getString(R.string.search_delete_requires_code),
+                    )
+                }
+                return@launch
+            }
+            pendingDeletes = previews
+            _state.update {
+                it.copy(actionLoading = false, deleteOpen = true, deleteCount = count)
+            }
+        }
+    }
+
+    fun confirmDelete() {
+        val profile = sessionRepository.state.value.active ?: return
+        val deletes = pendingDeletes
+        viewModelScope.launch {
+            _state.update { it.copy(actionLoading = true, actionError = null) }
+            for ((token, code) in deletes) {
+                runCatching { filesRepository.deleteConfirm(profile, token, code) }
+                    .onFailure { error ->
+                        _state.update {
+                            it.copy(
+                                actionLoading = false,
+                                actionError = error.toUserMessage(application),
+                            )
+                        }
+                        return@launch
+                    }
+            }
+            pendingDeletes = emptyList()
+            _state.update {
+                it.copy(
+                    actionLoading = false,
+                    deleteOpen = false,
+                    selected = emptySet(),
+                )
+            }
+            search(_state.value.query)
+        }
+    }
+
+    fun dismissDelete() {
+        pendingDeletes = emptyList()
+        _state.update { it.copy(deleteOpen = false, actionLoading = false) }
+    }
+
+    fun clearActionError() {
+        _state.update { it.copy(actionError = null) }
+    }
+
+    private var pendingDeletes: List<Pair<String, String>> = emptyList()
 
     fun checkIndex() {
         val profile = sessionRepository.state.value.active ?: return
@@ -215,6 +353,7 @@ class SearchViewModel(
 
     fun reset() {
         job?.cancel()
+        pendingDeletes = emptyList()
         _state.value = SearchState()
     }
 
@@ -235,7 +374,12 @@ class SearchViewModel(
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = application as FileHubApplication
-                SearchViewModel(app, app.container.filesRepository, app.container.sessionRepository)
+                SearchViewModel(
+                    app,
+                    app.container.filesRepository,
+                    app.container.sessionRepository,
+                    app.container.transferRepository,
+                )
             }
         }
     }

@@ -52,6 +52,11 @@ enum class SortOrder(val apiValue: String) {
     Desc("desc"),
 }
 
+enum class BrowserViewMode(val storageValue: String) {
+    List("list"),
+    Grid("grid"),
+}
+
 enum class FileKind {
     Folder,
     Image,
@@ -65,6 +70,12 @@ enum class FileKind {
     Database,
     Archive,
     Code,
+    Apk,
+    Ebook,
+    Font,
+    DiskImage,
+    Design,
+    Torrent,
     File,
 }
 
@@ -187,6 +198,7 @@ internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKin
     if (lowerName in KNOWN_CODE_NAMES) return FileKind.Code
     if (lowerName in KNOWN_TEXT_NAMES) return FileKind.Text
     return when {
+        mime == "application/vnd.android.package-archive" || ext == "apk" -> FileKind.Apk
         mime.startsWith("image/") -> FileKind.Image
         ext in setOf("jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "heic", "heif", "jxl") -> FileKind.Image
         mime.startsWith("video/") -> FileKind.Video
@@ -194,6 +206,11 @@ internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKin
         mime.startsWith("audio/") -> FileKind.Audio
         ext in setOf("mp3", "wav", "flac", "aac", "ogg", "m4a", "opus", "oga", "wma", "aiff", "amr") -> FileKind.Audio
         mime == "application/pdf" || ext == "pdf" -> FileKind.Pdf
+        ext in setOf("epub", "mobi", "azw", "azw3", "fb2", "djvu") -> FileKind.Ebook
+        ext in setOf("ttf", "otf", "woff", "woff2", "eot") -> FileKind.Font
+        ext in setOf("iso", "img", "dmg", "vhd", "vhdx", "vmdk") -> FileKind.DiskImage
+        ext in setOf("psd", "ai", "xcf", "sketch", "fig", "afdesign", "afphoto") -> FileKind.Design
+        ext == "torrent" -> FileKind.Torrent
         ext in setOf("doc", "docx", "rtf", "odt", "docm", "dotm", "dotx", "wps", "caj") -> FileKind.Document
         ext in setOf("xls", "xlsx", "xlsb", "xlsm", "csv", "tsv", "ods", "et") -> FileKind.Sheet
         ext in setOf("ppt", "pptx", "pptm", "potm", "potx", "ppsx", "odp", "dps", "key") -> FileKind.Slide
@@ -204,7 +221,7 @@ internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKin
         mime.startsWith("application/vnd.openxmlformats-officedocument.spreadsheetml") -> FileKind.Sheet
         mime.startsWith("application/vnd.ms-powerpoint") -> FileKind.Slide
         mime.startsWith("application/vnd.openxmlformats-officedocument.presentationml") -> FileKind.Slide
-        ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "cab", "tgz") -> FileKind.Archive
+        ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "cab", "tgz", "aab") -> FileKind.Archive
         ext in setOf(
             "kt", "kts", "java", "rs", "go", "py", "js", "ts", "tsx", "jsx",
             "c", "h", "cpp", "hpp", "cs", "rb", "php", "sh", "zsh", "sql",
@@ -212,7 +229,7 @@ internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKin
             "properties", "env", "bat", "cmd", "ps1", "psm1", "vbs", "reg", "ahk",
         ) -> FileKind.Code
         mime.startsWith("text/") -> FileKind.Text
-        ext in setOf("md", "markdown", "txt", "log", "csv") -> FileKind.Text
+        ext in setOf("md", "markdown", "txt", "log", "csv", "srt", "ass", "ssa", "vtt", "sub") -> FileKind.Text
         else -> FileKind.File
     }
 }

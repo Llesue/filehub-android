@@ -2,6 +2,7 @@ package filehub.android
 
 import android.content.Context
 import filehub.android.data.DirectoryCacheRepository
+import filehub.android.data.BrowserStateRepository
 import filehub.android.data.FilesRepository
 import filehub.android.data.ShareRepository
 import filehub.android.data.SessionRepository
@@ -36,10 +37,15 @@ class AppContainer(context: Context) {
     val transferRepository: TransferRepository = TransferRepository(appContext, transferStore)
     val audioPlayerController: AudioPlayerController = AudioPlayerController(appContext, sessionRepository)
     val syncDatabase: SyncDatabase = Room.databaseBuilder(appContext, SyncDatabase::class.java, "filehub-sync.db")
-        .addMigrations(SyncDatabase.MIGRATION_3_4, SyncDatabase.MIGRATION_4_5)
+        .addMigrations(
+            SyncDatabase.MIGRATION_3_4,
+            SyncDatabase.MIGRATION_4_5,
+            SyncDatabase.MIGRATION_5_6,
+        )
         .fallbackToDestructiveMigration()
         .build()
     val directoryCacheRepository: DirectoryCacheRepository = DirectoryCacheRepository(syncDatabase.directoryCacheDao())
+    val browserStateRepository: BrowserStateRepository = BrowserStateRepository(syncDatabase.browserStateDao())
     val photoSyncRepository: PhotoSyncRepository = PhotoSyncRepository(appContext, syncDatabase.photoSyncDao())
     val folderSyncRepository: FolderSyncRepository = FolderSyncRepository(appContext, syncDatabase.folderSyncDao())
 

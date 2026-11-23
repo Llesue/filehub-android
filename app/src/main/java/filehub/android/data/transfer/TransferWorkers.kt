@@ -410,7 +410,7 @@ class DownloadWorker(
             val target = runCatching {
                 val dir = File(Environment.getExternalStoragePublicDirectory(publicDir), "FileHub")
                     .apply { mkdirs() }
-                File(dir, item.name).also { file ->
+                uniqueFile(dir, item.name).also { file ->
                     part.inputStream().use { input ->
                         file.outputStream().use { output -> input.copyTo(output) }
                     }
@@ -418,7 +418,7 @@ class DownloadWorker(
             }.getOrElse {
                 val dir = File(applicationContext.getExternalFilesDir(publicDir), "FileHub")
                     .apply { mkdirs() }
-                File(dir, item.name).also { file ->
+                uniqueFile(dir, item.name).also { file ->
                     part.inputStream().use { input ->
                         file.outputStream().use { output -> input.copyTo(output) }
                     }
@@ -426,6 +426,24 @@ class DownloadWorker(
             }
             part.delete()
             Uri.fromFile(target).toString()
+        }
+    }
+
+    /**
+     * Android 9 and below writes straight to the public folder. Never replace
+     * an existing download: append " (1)", " (2)" and so on instead.
+     */
+    private fun uniqueFile(dir: File, name: String): File {
+        val direct = File(dir, name)
+        if (!direct.exists()) return direct
+        val dot = name.lastIndexOf('.')
+        val base = if (dot > 0) name.substring(0, dot) else name
+        val extension = if (dot > 0) name.substring(dot) else ""
+        var index = 1
+        while (true) {
+            val candidate = File(dir, "$base ($index)$extension")
+            if (!candidate.exists()) return candidate
+            index++
         }
     }
 

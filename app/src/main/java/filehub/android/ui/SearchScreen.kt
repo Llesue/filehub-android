@@ -1,10 +1,13 @@
 package filehub.android.ui
 
 import android.text.format.Formatter
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,8 +29,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
@@ -39,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,6 +98,10 @@ fun SearchScreen(
     LaunchedEffect(query) {
         delay(300)
         viewModel.search(query)
+    }
+
+    BackHandler(enabled = state.selected.isNotEmpty()) {
+        viewModel.clearSelection()
     }
 
     Column(
@@ -186,6 +196,34 @@ fun SearchScreen(
             Spacer(Modifier.height(1.dp))
         }
 
+        state.actionError?.let { message ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                    )
+                    IconButton(onClick = viewModel::clearActionError) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            }
+        }
+
         when {
             state.error != null -> CenterHint(state.error.orEmpty())
             !state.searched && query.isBlank() -> CenterHint(stringResource(R.string.search_min_chars))
@@ -206,7 +244,7 @@ fun SearchScreen(
                     start = 16.dp,
                     end = 16.dp,
                     top = 8.dp,
-                    bottom = 24.dp,
+                    bottom = if (state.selected.isEmpty()) 24.dp else 96.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -216,6 +254,9 @@ fun SearchScreen(
                         rootAlias = rootAliases[result.rootId],
                         imageLoader = imageLoader,
                         thumbUrl = viewModel.thumbnailUrl(result),
+                        selected = state.key(result) in state.selected,
+                        selectionMode = state.selected.isNotEmpty(),
+                        onToggle = { viewModel.toggleSelection(result) },
                         onClick = { onOpenResult(result) },
                     )
                 }
@@ -231,6 +272,87 @@ fun SearchScreen(
                             CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                         }
                     }
+                }
+            }
+        }
+
+        if (state.selected.isNotEmpty()) {
+            SearchSelectionBar(
+                count = state.selected.size,
+                onSelectAll = viewModel::selectAll,
+                onDownload = viewModel::downloadSelected,
+                onDelete = viewModel::requestDeleteSelected,
+                onClear = viewModel::clearSelection,
+                busy = state.actionLoading,
+            )
+        }
+    }
+
+    if (state.deleteOpen) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissDelete,
+            title = { Text(stringResource(R.string.search_delete_title, state.deleteCount)) },
+            text = { Text(stringResource(R.string.search_delete_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = viewModel::confirmDelete,
+                    enabled = !state.actionLoading,
+                ) {
+                    Text(
+                        text = stringResource(R.string.selection_delete),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissDelete) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SearchSelectionBar(
+    count: Int,
+    onSelectAll: () -> Unit,
+    onDownload: () -> Unit,
+    onDelete: () -> Unit,
+    onClear: () -> Unit,
+    busy: Boolean,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(R.string.selection_selected, count),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row {
+                TextButton(onClick = onSelectAll, enabled = !busy) {
+                    Text(stringResource(R.string.selection_select_all))
+                }
+                TextButton(onClick = onClear, enabled = !busy) {
+                    Text(stringResource(R.string.selection_cancel))
+                }
+                TextButton(onClick = onDownload, enabled = !busy) {
+                    Text(stringResource(R.string.transfer_download_action))
+                }
+                TextButton(onClick = onDelete, enabled = !busy) {
+                    Text(
+                        text = stringResource(R.string.selection_delete),
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }
@@ -321,6 +443,9 @@ private fun SearchResultCard(
     rootAlias: String?,
     imageLoader: ImageLoader?,
     thumbUrl: String?,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onToggle: () -> Unit,
     onClick: () -> Unit,
 ) {
     val entry = result.toEntry()
@@ -332,10 +457,21 @@ private fun SearchResultCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clip(RoundedCornerShape(12.dp))
+            .combinedClickable(
+                onClick = { if (selectionMode || selected) onToggle() else onClick() },
+                onLongClick = onToggle,
+            ),
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        ),
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -385,6 +521,21 @@ private fun SearchResultCard(
                             relativeTimeText(result.modified),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(14.dp),
                     )
                 }
             }
