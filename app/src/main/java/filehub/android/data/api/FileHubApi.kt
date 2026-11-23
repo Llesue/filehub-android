@@ -345,7 +345,8 @@ data class JobAcceptedDto(
 @Serializable
 data class DirSizeDto(
     val status: String = "",
-    val size: Long = 0,
+    /** Null while a local-root scan is queued or running. */
+    val size: Long? = null,
     val partial: Boolean = false,
     val error: String? = null,
 )

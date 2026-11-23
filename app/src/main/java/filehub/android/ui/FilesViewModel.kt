@@ -203,25 +203,33 @@ class FilesViewModel(
         val current = _state.value
         val profile = current.profile ?: return
         val root = current.root ?: return
-        if (!root.isRemote || !entry.isDir) return
+        if (!entry.isDir) return
         val key = dirSizeKey(entry)
         if (current.dirSizes[key] != null) return
         _state.update { it.copy(dirSizes = it.dirSizes + (key to DirSizeState.Loading)) }
         val path = if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
         dirSizeJobs[key] = viewModelScope.launch {
-            val result = dirSizeLimit.withPermit {
-                kotlinx.coroutines.withTimeoutOrNull(15_000) {
-                    runCatching { repository.dirSize(profile, root.id, path) }.getOrNull()
+            var state: DirSizeState = DirSizeState.Failed
+            var polls = 0
+            while (true) {
+                val result = dirSizeLimit.withPermit {
+                    kotlinx.coroutines.withTimeoutOrNull(15_000) {
+                        runCatching { repository.dirSize(profile, root.id, path) }.getOrNull()
+                    }
                 }
-            }
-            _state.update {
-                val state = when {
-                    result == null -> DirSizeState.Failed
-                    result.error != null -> DirSizeState.Failed
-                    else -> DirSizeState.Ready(result.size, result.partial)
+                if (result == null) break
+                if (result.status.isEmpty() || result.status == "ready") {
+                    state = DirSizeState.Ready(result.size ?: 0L, result.partial || result.error != null)
+                    break
                 }
-                it.copy(dirSizes = it.dirSizes + (key to state))
+                if (result.status == "error") break
+                // Local roots answer "queued"/"running" while the server scans
+                // the directory; keep polling until the cached value is ready.
+                if (polls >= DIR_SIZE_MAX_POLLS) break
+                polls++
+                delay(if (polls <= 5) 1_000L else 2_000L)
             }
+            _state.update { it.copy(dirSizes = it.dirSizes + (key to state)) }
             dirSizeJobs.remove(key)
         }
     }
@@ -286,6 +294,7 @@ class FilesViewModel(
                 propertiesError = null,
             )
         }
+        if (entry.isDir && entry.size <= 0) requestDirSize(entry)
         if (entry.kind == FileKind.Image) loadProperties(entry)
         if (entry.hasPreview && (entry.kind == FileKind.Image || entry.kind == FileKind.Video)) {
             val current = _state.value
@@ -1258,6 +1267,12 @@ class FilesViewModel(
 
     companion object {
         const val MAX_TEXT_EDIT_BYTES = 2L * 1024 * 1024
+
+        /**
+         * Local roots scan the directory on demand; poll for up to roughly a
+         * minute before giving up so huge folders still resolve eventually.
+         */
+        private const val DIR_SIZE_MAX_POLLS = 40
 
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {

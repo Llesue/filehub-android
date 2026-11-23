@@ -761,7 +761,6 @@ fun FileBrowserScreen(
         FileDetailsDialog(
             entry = entry,
             path = state.path,
-            remote = state.root?.isRemote == true,
             dirSizeState = viewModel.dirSizeState(entry),
             onRetryDirSize = { viewModel.retryDirSize(entry) },
             thumbStatus = state.thumbStatus,
@@ -945,22 +944,20 @@ private fun FileCard(
     var menuOpen by remember { mutableStateOf(false) }
     var thumbFailed by remember(thumbnailUrl) { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    val remoteDir = remote && entry.isDir
-    val size = if (remoteDir) {
+    val sizeUnknown = entry.isDir && entry.size <= 0
+    val size = if (sizeUnknown) {
         dirSizeLabel(dirSizeState)
     } else {
         Formatter.formatShortFileSize(context, entry.size)
     }
     val time = relativeTimeText(entry.modified)
     val meta = if (entry.isDir) {
-        if (remoteDir) "$size · $time"
-        else if (entry.size > 0) "$size · $time"
-        else time
+        if (sizeUnknown || entry.size > 0) "$size · $time" else time
     } else {
         "$size · $time"
     }
-    LaunchedEffect(entry.name, entry.modified, remoteDir) {
-        if (remoteDir && entry.size <= 0 && dirSizeState == null) onRequestDirSize()
+    LaunchedEffect(entry.name, entry.modified, sizeUnknown) {
+        if (sizeUnknown && dirSizeState == null) onRequestDirSize()
     }
 
     Row(
@@ -1132,7 +1129,6 @@ private fun FileCard(
 private fun FileDetailsDialog(
     entry: FileEntry,
     path: String,
-    remote: Boolean,
     dirSizeState: DirSizeState?,
     onRetryDirSize: () -> Unit,
     thumbStatus: filehub.android.data.api.ThumbStatusDto?,
@@ -1144,7 +1140,8 @@ private fun FileDetailsDialog(
     onDismiss: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val size = if (remote && entry.isDir) {
+    val sizeUnknown = entry.isDir && entry.size <= 0
+    val size = if (sizeUnknown) {
         dirSizeLabel(dirSizeState)
     } else {
         Formatter.formatShortFileSize(context, entry.size)
@@ -1157,7 +1154,7 @@ private fun FileDetailsDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 DetailRow(stringResource(R.string.file_type), entry.kind.name)
                 DetailRow(stringResource(R.string.file_size), size)
-                if (remote && entry.isDir && dirSizeState is DirSizeState.Failed) {
+                if (sizeUnknown && dirSizeState is DirSizeState.Failed) {
                     TextButton(onClick = onRetryDirSize) {
                         Text(stringResource(R.string.common_retry))
                     }
@@ -1178,7 +1175,9 @@ private fun FileDetailsDialog(
                 DetailRow(stringResource(R.string.file_modified), modified)
                 DetailRow(
                     stringResource(R.string.file_path),
-                    if (path.isEmpty()) "/" else "/$path",
+                    listOf(path, entry.name)
+                        .filter { it.isNotEmpty() }
+                        .joinToString("/", prefix = "/"),
                 )
                 if (entry.isSymlink) {
                     DetailRow(stringResource(R.string.file_symlink), entry.symlinkState ?: "—")
