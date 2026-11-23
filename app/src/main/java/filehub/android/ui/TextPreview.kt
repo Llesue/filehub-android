@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,6 +34,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -55,6 +58,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
@@ -617,61 +621,107 @@ fun UnsupportedPreviewDialog(
     onDismiss: () -> Unit,
 ) {
     val entry = preview.entry
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = fileIconColor(entry.kind).copy(alpha = 0.14f),
-            ) {
-                Icon(
-                    painter = painterResource(fileIconRes(entry.kind)),
-                    contentDescription = null,
-                    tint = fileIconColor(entry.kind),
-                    modifier = Modifier
-                        .padding(10.dp)
-                        .size(28.dp),
-                )
-            }
-        },
-        title = { Text(stringResource(R.string.preview_unavailable_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                FileNameText(
-                    name = entry.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                )
-                Text(
-                    text = preview.message ?: stringResource(R.string.preview_unavailable_body),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(4.dp))
-                if (preview.allowText) {
-                    TextButton(onClick = onOpenAsText) {
-                        Text(stringResource(R.string.preview_open_as_text))
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = fileIconColor(entry.kind).copy(alpha = 0.14f),
+                    ) {
+                        Icon(
+                            painter = painterResource(fileIconRes(entry.kind)),
+                            contentDescription = null,
+                            tint = fileIconColor(entry.kind),
+                            modifier = Modifier
+                                .padding(11.dp)
+                                .size(26.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.preview_unavailable_title),
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        Text(
+                            text = entry.name,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
                     }
                 }
-                Row {
-                    TextButton(onClick = onShare) {
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = preview.message
+                        ?: stringResource(R.string.preview_unavailable_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(20.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (preview.allowText) {
+                        OutlinedButton(
+                            onClick = onOpenAsText,
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.preview_open_as_text_short),
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = onDownload,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                    ) {
+                        Text(stringResource(R.string.preview_download))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = onShare,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                    ) {
                         Text(stringResource(R.string.preview_share))
                     }
-                    TextButton(onClick = onDetails) {
+                    OutlinedButton(
+                        onClick = onDetails,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                    ) {
                         Text(stringResource(R.string.preview_details))
                     }
                 }
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                ) {
+                    Text(stringResource(R.string.common_close))
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDownload) {
-                Text(stringResource(R.string.preview_download))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.common_close))
-            }
-        },
-    )
+        }
+    }
 }
