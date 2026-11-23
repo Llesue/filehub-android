@@ -581,9 +581,11 @@ fun PreviewDialog(
                         contentColor = contentColor,
                         showDetails = entry.kind == FileKind.Image,
                         showOrientation = entry.kind == FileKind.Video && activity != null,
-                        showEdit = entry.kind == FileKind.Text ||
-                            entry.kind == FileKind.Code ||
-                            entry.isMarkdown,
+                        showEdit = onEdit != null && (
+                            entry.kind == FileKind.Text ||
+                                entry.kind == FileKind.Code ||
+                                entry.isMarkdown
+                            ),
                         onEdit = onEdit ?: {},
                         onDetails = onLongPress,
                         onToggleOrientation = {
@@ -664,9 +666,11 @@ fun PreviewDialog(
                         contentColor = contentColor,
                         showDetails = false,
                         showOrientation = false,
-                        showEdit = entry.kind == FileKind.Text ||
-                            entry.kind == FileKind.Code ||
-                            entry.isMarkdown,
+                        showEdit = onEdit != null && (
+                            entry.kind == FileKind.Text ||
+                                entry.kind == FileKind.Code ||
+                                entry.isMarkdown
+                            ),
                         onEdit = onEdit ?: {},
                         onDetails = onLongPress,
                         onToggleOrientation = {},

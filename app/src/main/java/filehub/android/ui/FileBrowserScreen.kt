@@ -725,6 +725,7 @@ fun FileBrowserScreen(
             },
             onEdit = if (
                 state.textPreview?.writable == true &&
+                state.textPreview?.lossy != true &&
                 (entry.kind == FileKind.Text || entry.kind == FileKind.Code || state.previewAsText)
             ) {
                 {
