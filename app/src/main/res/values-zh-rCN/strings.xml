@@ -355,9 +355,6 @@
     <string name="exif_orientation_90">旋转 90°</string>
     <string name="exif_orientation_270_flip">旋转 270° 并翻转</string>
     <string name="exif_orientation_270">旋转 270°</string>
-    <string name="delete_code_expires_in">确认码 %1$d:%2$02d 后过期</string>
-    <string name="delete_code_expired">确认码已过期。</string>
-    <string name="delete_code_refresh">重新获取确认码</string>
     <string name="text_preview_truncated">文件较大，仅显示前一部分内容。</string>
     <string name="sort_remote_size_hint">远程目录大小可能不完整。</string>
     <string name="version_title">版本</string>

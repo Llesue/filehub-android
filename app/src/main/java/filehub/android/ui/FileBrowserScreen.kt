@@ -700,7 +700,6 @@ fun FileBrowserScreen(
             loading = state.operationLoading,
             error = state.operationError,
             onDismiss = viewModel::dismissDeletePreview,
-            onRefresh = viewModel::refreshDeletePreview,
             onConfirm = viewModel::confirmDelete,
         )
     }

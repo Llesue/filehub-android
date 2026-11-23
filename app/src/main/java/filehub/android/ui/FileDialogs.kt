@@ -18,7 +18,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
@@ -198,7 +197,6 @@ fun DeleteConfirmDialog(
     loading: Boolean,
     error: String?,
     onDismiss: () -> Unit,
-    onRefresh: () -> Unit,
     onConfirm: (String?) -> Unit,
 ) {
     var code by remember(preview.token) { mutableStateOf("") }
@@ -206,21 +204,7 @@ fun DeleteConfirmDialog(
     val totalBytes = preview.items.sumOf { it.size }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    var remainingSeconds by remember(preview.token) {
-        mutableLongStateOf(
-            (preview.expiresAt - System.currentTimeMillis() / 1000).coerceAtLeast(0),
-        )
-    }
-    LaunchedEffect(preview.token, preview.expiresAt) {
-        while (remainingSeconds > 0) {
-            delay(1000)
-            remainingSeconds = (preview.expiresAt - System.currentTimeMillis() / 1000)
-                .coerceAtLeast(0)
-        }
-    }
-    val expired = preview.expiresAt > 0 && remainingSeconds <= 0
-
-    if (preview.requiresCode && !expired) {
+    if (preview.requiresCode) {
         LaunchedEffect(preview.token) {
             focusRequester.requestFocus()
             keyboard?.show()
@@ -265,25 +249,6 @@ fun DeleteConfirmDialog(
                         text = stringResource(R.string.delete_code_prompt),
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    if (preview.expiresAt > 0) {
-                        Text(
-                            text = if (expired) {
-                                stringResource(R.string.delete_code_expired)
-                            } else {
-                                stringResource(
-                                    R.string.delete_code_expires_in,
-                                    remainingSeconds / 60,
-                                    remainingSeconds % 60,
-                                )
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (expired) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
                     Spacer(Modifier.height(4.dp))
                     OutlinedTextField(
                         value = code,
@@ -319,23 +284,17 @@ fun DeleteConfirmDialog(
             }
         },
         confirmButton = {
-            if (expired) {
-                TextButton(onClick = onRefresh, enabled = !loading) {
-                    Text(stringResource(R.string.delete_code_refresh))
-                }
-            } else {
-                TextButton(
-                    onClick = { onConfirm(if (preview.requiresCode) code else null) },
-                    enabled = !loading && (!preview.requiresCode || code.length == 4),
-                ) {
-                    if (loading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    } else {
-                        Text(stringResource(R.string.delete_confirm))
-                    }
+            TextButton(
+                onClick = { onConfirm(if (preview.requiresCode) code else null) },
+                enabled = !loading && (!preview.requiresCode || code.length == 4),
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text(stringResource(R.string.delete_confirm))
                 }
             }
         },

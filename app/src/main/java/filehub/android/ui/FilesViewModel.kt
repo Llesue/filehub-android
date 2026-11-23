@@ -140,7 +140,6 @@ class FilesViewModel(
     private var loadJob: Job? = null
     private var uploadRefreshJob: Job? = null
     private val dirSizeJobs = mutableMapOf<String, Job>()
-    private var lastDeletePaths: List<String> = emptyList()
     private val dirSizeLimit = kotlinx.coroutines.sync.Semaphore(3)
     private val seenCompletedUploads = mutableSetOf<String>()
     private var uploadsPrimed = false
@@ -382,7 +381,6 @@ class FilesViewModel(
         val paths = entries.map { entry ->
             if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
         }
-        lastDeletePaths = paths
         _state.update {
             it.copy(
                 selected = entries.map(FileEntry::name).toSet(),
@@ -395,27 +393,6 @@ class FilesViewModel(
                 .onSuccess { preview ->
                     _state.update {
                         it.copy(operationLoading = false, deletePreview = preview, operationError = null)
-                    }
-                }
-                .onFailure { error ->
-                    _state.update {
-                        it.copy(operationLoading = false, operationError = error.toUserMessage(application))
-                    }
-                }
-        }
-    }
-
-    fun refreshDeletePreview() {
-        if (lastDeletePaths.isEmpty()) return
-        val current = _state.value
-        val profile = current.profile ?: return
-        val root = current.root ?: return
-        _state.update { it.copy(operationLoading = true, operationError = null) }
-        viewModelScope.launch {
-            runCatching { repository.deletePreview(profile, root.id, lastDeletePaths) }
-                .onSuccess { preview ->
-                    _state.update {
-                        it.copy(operationLoading = false, deletePreview = preview)
                     }
                 }
                 .onFailure { error ->
