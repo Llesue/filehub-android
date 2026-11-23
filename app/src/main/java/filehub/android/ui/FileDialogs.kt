@@ -90,6 +90,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.graphicsLayer
@@ -607,18 +608,22 @@ fun PreviewDialog(
                             .padding(16.dp),
                     ) {
                         Surface(
-                            shape = RoundedCornerShape(50),
-                            color = Color.Black.copy(alpha = 0.55f),
-                            contentColor = Color.White,
-                        ) {
-                            TextButton(
-                                onClick = {
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable {
                                     if (!showOriginal && entry.size > ORIGINAL_MAX_BYTES) {
                                         originalError = true
                                     } else {
                                         showOriginal = !showOriginal
                                     }
                                 },
+                            shape = RoundedCornerShape(50),
+                            color = Color.Black.copy(alpha = 0.62f),
+                            contentColor = Color.White,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
                                     text = stringResource(
@@ -628,7 +633,8 @@ fun PreviewDialog(
                                             R.string.preview_show_original
                                         },
                                     ),
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = Color.White,
                                 )
                             }
                         }
