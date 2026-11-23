@@ -123,17 +123,18 @@ fun FileBrowserScreen(
     onSearch: (Long?) -> Unit,
     onPauseAudio: () -> Unit,
     onResumeAudio: () -> Unit,
+    directoryPicker: DirectoryPickerViewModel,
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val imageLoader by viewModel.imageLoader.collectAsStateWithLifecycle()
+    val pickerState by directoryPicker.state.collectAsStateWithLifecycle()
     var sortMenu by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf(false) }
     var newFile by remember { mutableStateOf(false) }
     var renameEntry by remember { mutableStateOf<FileEntry?>(null) }
     var moreSheet by remember { mutableStateOf(false) }
     var createSheet by remember { mutableStateOf(false) }
-    var transferOpen by remember { mutableStateOf(false) }
     var transferMove by remember { mutableStateOf(true) }
     var zipDialog by remember { mutableStateOf(false) }
     var imageMenu by remember { mutableStateOf(false) }
@@ -200,6 +201,23 @@ fun FileBrowserScreen(
         cameraFile = null
         cameraUri = null
         cameraTargetPath = null
+    }
+
+    fun openDirectoryPicker() {
+        val current = state
+        val root = current.root ?: return
+        val selected = current.entries.filter { it.name in current.selected }
+        val excluded = selected.filter { it.isDir }.map { entry ->
+            if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
+        }
+        directoryPicker.open(
+            roots = roots,
+            initialRootId = root.id,
+            initialPath = current.path,
+            mode = DirectoryPickerMode.MoveCopy,
+            excludeRootId = root.id,
+            excludePaths = excluded,
+        )
     }
 
     fun takePhoto() {
@@ -750,7 +768,7 @@ fun FileBrowserScreen(
                 showShare = canShare,
                 onMove = {
                     transferMove = true
-                    transferOpen = true
+                    openDirectoryPicker()
                 },
                 onDelete = viewModel::requestDeleteSelected,
                 onShare = viewModel::openShareSelection,
@@ -793,20 +811,17 @@ fun FileBrowserScreen(
             },
         )
     }
-    if (transferOpen) {
-        TargetPathDialog(
-            title = stringResource(if (transferMove) R.string.move_to else R.string.copy_to),
-            roots = roots,
-            initialRootId = state.root?.id,
-            initialPath = state.path,
-            onDismiss = { transferOpen = false },
-            onConfirm = { rootId, path ->
+    if (pickerState.visible) {
+        DirectoryPickerDialog(
+            state = pickerState,
+            viewModel = directoryPicker,
+            onPick = { rootId, path ->
                 if (transferMove) {
                     viewModel.moveSelected(rootId, path)
                 } else {
                     viewModel.copySelected(rootId, path)
                 }
-                transferOpen = false
+                directoryPicker.close()
             },
         )
     }
@@ -850,7 +865,7 @@ fun FileBrowserScreen(
                     SheetAction(R.string.copy_to) {
                         moreSheet = false
                         transferMove = false
-                        transferOpen = true
+                        openDirectoryPicker()
                     }
                 }
                 if (singleSelected != null) {

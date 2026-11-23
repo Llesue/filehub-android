@@ -65,7 +65,7 @@ import filehub.android.data.sync.PhotoSyncConfigEntity
 @Composable
 fun PhotoSyncScreen(
     viewModel: PhotoSyncViewModel,
-    folderPicker: RemoteFolderPickerViewModel,
+    folderPicker: DirectoryPickerViewModel,
     session: SessionState,
     onBack: () -> Unit,
 ) {
@@ -293,30 +293,20 @@ fun PhotoSyncScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedTextField(
-                value = remotePath,
-                onValueChange = { remotePath = it },
-                enabled = masterEnabled,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.photo_sync_target_path)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = clearFocusOnDone(),
-                shape = RoundedCornerShape(12.dp),
-                trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            focusManager.clearFocus()
-                            keyboard?.hide()
-                            if (root != null) folderPicker.open(root, remotePath)
-                        },
-                        enabled = masterEnabled && root != null,
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_file_folder),
-                            contentDescription = stringResource(R.string.folder_picker_title),
-                        )
-                    }
+            DirectoryField(
+                label = stringResource(R.string.photo_sync_target_path),
+                rootAlias = root?.alias.orEmpty(),
+                path = remotePath,
+                enabled = masterEnabled && root != null,
+                onClick = {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                    folderPicker.open(
+                        roots = roots,
+                        initialRootId = selectedRootId,
+                        initialPath = remotePath,
+                        mode = DirectoryPickerMode.Sync,
+                    )
                 },
             )
 
@@ -491,14 +481,11 @@ fun PhotoSyncScreen(
     }
 
     if (folderPickerState.visible) {
-        RemoteFolderPickerDialog(
+        DirectoryPickerDialog(
             state = folderPickerState,
-            onNavigate = folderPicker::navigate,
-            onUp = folderPicker::up,
-            onLoadMore = folderPicker::loadMore,
-            onCreateFolder = folderPicker::createFolder,
-            onDismiss = folderPicker::close,
-            onConfirm = { selected ->
+            viewModel = folderPicker,
+            onPick = { pickedRootId, selected ->
+                selectedRootId = pickedRootId
                 remotePath = selected
                 folderPicker.close()
                 focusManager.clearFocus()

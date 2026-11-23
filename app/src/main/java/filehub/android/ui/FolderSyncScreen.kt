@@ -60,7 +60,7 @@ import filehub.android.data.sync.FolderSyncConfigEntity
 @Composable
 fun FolderSyncScreen(
     viewModel: FolderSyncViewModel,
-    remoteFolderPicker: RemoteFolderPickerViewModel,
+    remoteFolderPicker: DirectoryPickerViewModel,
     session: SessionState,
     onBack: () -> Unit,
 ) {
@@ -244,30 +244,20 @@ fun FolderSyncScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedTextField(
-                value = remotePath,
-                onValueChange = { remotePath = it },
-                enabled = masterEnabled,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.photo_sync_target_path)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = clearFocusOnDone(),
-                shape = RoundedCornerShape(12.dp),
-                trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            focusManager.clearFocus()
-                            keyboard?.hide()
-                            if (root != null) remoteFolderPicker.open(root, remotePath)
-                        },
-                        enabled = masterEnabled && root != null,
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_file_folder),
-                            contentDescription = stringResource(R.string.folder_picker_title),
-                        )
-                    }
+            DirectoryField(
+                label = stringResource(R.string.photo_sync_target_path),
+                rootAlias = root?.alias.orEmpty(),
+                path = remotePath,
+                enabled = masterEnabled && root != null,
+                onClick = {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                    remoteFolderPicker.open(
+                        roots = roots,
+                        initialRootId = rootId,
+                        initialPath = remotePath,
+                        mode = DirectoryPickerMode.Sync,
+                    )
                 },
             )
 
@@ -400,14 +390,11 @@ fun FolderSyncScreen(
     }
 
     if (folderPickerState.visible) {
-        RemoteFolderPickerDialog(
+        DirectoryPickerDialog(
             state = folderPickerState,
-            onNavigate = remoteFolderPicker::navigate,
-            onUp = remoteFolderPicker::up,
-            onLoadMore = remoteFolderPicker::loadMore,
-            onCreateFolder = remoteFolderPicker::createFolder,
-            onDismiss = remoteFolderPicker::close,
-            onConfirm = { selected ->
+            viewModel = remoteFolderPicker,
+            onPick = { pickedRootId, selected ->
+                rootId = pickedRootId
                 remotePath = selected
                 remoteFolderPicker.close()
                 focusManager.clearFocus()

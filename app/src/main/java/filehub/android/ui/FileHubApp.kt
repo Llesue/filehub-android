@@ -112,8 +112,8 @@ fun FileHubApp(viewModel: AppViewModel) {
     val transferViewModel: TransferViewModel = viewModel(factory = TransferViewModel.factory(application))
     val photoSyncViewModel: PhotoSyncViewModel = viewModel(factory = PhotoSyncViewModel.factory(application))
     val folderSyncViewModel: FolderSyncViewModel = viewModel(factory = FolderSyncViewModel.factory(application))
-    val remoteFolderPickerViewModel: RemoteFolderPickerViewModel = viewModel(
-        factory = RemoteFolderPickerViewModel.factory(application),
+    val directoryPickerViewModel: DirectoryPickerViewModel = viewModel(
+        factory = DirectoryPickerViewModel.factory(application),
     )
     val shareViewModel: ShareViewModel = viewModel(factory = ShareViewModel.factory(application))
     val audioController = remember { application.container.audioPlayerController }
@@ -325,6 +325,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                             onSearch = { rootId -> navController.navigate("search/${rootId ?: -1}") },
                             onPauseAudio = audioController::pauseForVideo,
                             onResumeAudio = audioController::resumeAfterVideo,
+                            directoryPicker = directoryPickerViewModel,
                         )
                         MainTab.My -> MyScreen(
                             state = session,
@@ -412,7 +413,7 @@ fun FileHubApp(viewModel: AppViewModel) {
         composable("folderSync") {
             FolderSyncScreen(
                 viewModel = folderSyncViewModel,
-                remoteFolderPicker = remoteFolderPickerViewModel,
+                remoteFolderPicker = directoryPickerViewModel,
                 session = session,
                 onBack = { navController.popBackStack() },
             )
@@ -420,7 +421,7 @@ fun FileHubApp(viewModel: AppViewModel) {
         composable("photoSync") {
             PhotoSyncScreen(
                 viewModel = photoSyncViewModel,
-                folderPicker = remoteFolderPickerViewModel,
+                folderPicker = directoryPickerViewModel,
                 session = session,
                 onBack = { navController.popBackStack() },
             )

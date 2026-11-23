@@ -23,6 +23,7 @@ import filehub.android.data.api.ThumbStatusDto
 import filehub.android.data.api.TranscodeDto
 import filehub.android.data.api.TextFileDto
 import filehub.android.data.api.TextProbeDto
+import filehub.android.data.sync.RemoteDirEnsurer
 
 class FilesRepository(
     private val context: Context,
@@ -50,6 +51,11 @@ class FilesRepository(
 
     suspend fun mkdir(profile: ServerProfile, rootId: Long, path: String, name: String) =
         api(profile).mkdir(rootId, path, name)
+
+    /** Creates every missing segment, treating an existing directory as success. */
+    suspend fun ensureDirectory(profile: ServerProfile, rootId: Long, path: String) {
+        RemoteDirEnsurer(api(profile), rootId).ensure(path)
+    }
 
     suspend fun touch(profile: ServerProfile, rootId: Long, path: String, name: String) =
         api(profile).touch(rootId, path, name)
