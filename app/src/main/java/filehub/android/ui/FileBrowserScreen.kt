@@ -28,8 +28,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -67,10 +69,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -96,6 +100,7 @@ import java.io.File
 import filehub.android.R
 import filehub.android.core.model.BrowserViewMode
 import filehub.android.core.model.FileEntry
+import filehub.android.core.model.ServerProfile
 import filehub.android.core.model.FileRoot
 import filehub.android.core.model.FileKind
 import filehub.android.core.model.FileSort
@@ -116,7 +121,6 @@ fun FileBrowserScreen(
     viewModel: FilesViewModel,
     roots: List<FileRoot>,
     onSearch: (Long?) -> Unit,
-    onEditText: (FileEntry) -> Unit,
     onPauseAudio: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -234,6 +238,44 @@ fun FileBrowserScreen(
         selectedEntries.isNotEmpty() &&
         selectedEntries.size <= 100 &&
         (selectedEntries.size == 1 || selectedEntries.none { it.isDir })
+
+    val textEntry = state.previewEntry?.takeIf { entry ->
+        !entry.isDir && (
+            entry.kind == FileKind.Text ||
+                entry.kind == FileKind.Code ||
+                entry.isMarkdown ||
+                state.previewAsText
+            )
+    }
+    if (textEntry != null) {
+        val profile = state.profile
+        val root = state.root
+        if (profile != null && root != null) {
+            val path = if (state.path.isEmpty()) textEntry.name else "${state.path}/${textEntry.name}"
+            val text = state.textPreview
+            if (text != null) {
+                DocumentHost(
+                    profile = profile,
+                    root = root,
+                    path = path,
+                    entry = textEntry,
+                    initialText = text,
+                    session = state.previewSession,
+                    onClose = viewModel::closePreview,
+                    onSaved = viewModel::refresh,
+                )
+            } else {
+                DocumentLoading(
+                    name = textEntry.name,
+                    loading = state.previewLoading,
+                    error = state.previewError,
+                    onClose = viewModel::closePreview,
+                    onRetry = { viewModel.reloadPreviewText(state.previewEncoding) },
+                )
+            }
+            return
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -995,18 +1037,7 @@ fun FileBrowserScreen(
                 imageMenu = true
                 viewModel.loadProperties(entry)
             },
-            onEdit = if (
-                state.textPreview?.writable == true &&
-                state.textPreview?.lossy != true &&
-                (entry.kind == FileKind.Text || entry.kind == FileKind.Code || state.previewAsText)
-            ) {
-                {
-                    viewModel.closePreview()
-                    onEditText(entry)
-                }
-            } else {
-                null
-            },
+            onEdit = null,
             onReloadEncoding = viewModel::reloadPreviewText,
             onRetryText = { viewModel.reloadPreviewText(state.previewEncoding) },
             onDownload = {
@@ -1607,6 +1638,101 @@ private fun SheetAction(labelRes: Int, onClick: () -> Unit) {
             text = stringResource(labelRes),
             style = MaterialTheme.typography.bodyLarge,
         )
+    }
+}
+
+@Composable
+private fun DocumentHost(
+    profile: ServerProfile,
+    root: FileRoot,
+    path: String,
+    entry: FileEntry,
+    initialText: filehub.android.data.api.TextFileDto,
+    session: Long,
+    onClose: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val application = LocalContext.current.applicationContext as android.app.Application
+    val documentViewModel: TextEditorViewModel = viewModel(
+        key = "document-view-model",
+        factory = TextEditorViewModel.factory(application, "", 0, "", false),
+    )
+    LaunchedEffect(profile.id, root.id, path, session) {
+        documentViewModel.open(
+            profileId = profile.id,
+            rootId = root.id,
+            path = path,
+            markdown = entry.isMarkdown,
+            initialText = initialText,
+        )
+    }
+    key(session, path) {
+        TextEditorScreen(
+            viewModel = documentViewModel,
+            onBack = onClose,
+            startInEdit = false,
+            onSaved = onSaved,
+        )
+    }
+}
+
+@Composable
+private fun DocumentLoading(
+    name: String,
+    loading: Boolean,
+    error: String?,
+    onClose: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.common_back),
+                )
+            }
+            FileNameText(
+                name = name,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (error != null) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    if (!loading) {
+                        Spacer(Modifier.height(12.dp))
+                        TextButton(onClick = onRetry) {
+                            Text(stringResource(R.string.common_retry))
+                        }
+                    }
+                }
+            } else {
+                CircularProgressIndicator()
+            }
+        }
     }
 }
 

@@ -1,10 +1,10 @@
 package filehub.android.ui
 
+import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -33,22 +32,22 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -68,81 +67,91 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import filehub.android.R
 import filehub.android.ui.theme.LocalWarningColors
-import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import dev.snipme.highlights.model.SyntaxLanguage
+
+private val EncodingCycle = listOf(
+    "utf-8",
+    "gb18030",
+    "gbk",
+    "big5",
+    "shift_jis",
+    "euc-kr",
+    "utf-16le",
+    "utf-16be",
+    "windows-1252",
+    "windows-1251",
+    "windows-1250",
+    "iso-8859-15",
+    "iso-8859-1",
+)
 
 @Composable
 fun TextEditorScreen(
     viewModel: TextEditorViewModel,
     onBack: () -> Unit,
+    startInEdit: Boolean = false,
+    onSaved: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
-    val wideLayout = configuration.screenWidthDp >= 720
-    val split = viewModel.isMarkdown && wideLayout
+    val name = viewModel.pathLabel()
+    val language = remember(name) { syntaxLanguageFor(name) }
+    val isCode = language != SyntaxLanguage.DEFAULT && !viewModel.isMarkdown
 
+    var editing by remember { mutableStateOf(startInEdit) }
     var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
     val history = remember { EditorHistory() }
     var historyVersion by remember { mutableIntStateOf(0) }
-    var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     var encodingDialog by remember { mutableStateOf(false) }
     var eolDialog by remember { mutableStateOf(false) }
     var themeDialog by remember { mutableStateOf(false) }
     var discardDialog by remember { mutableStateOf(false) }
-    var pendingEncoding by remember { mutableStateOf<String?>(null) }
-    var preview by remember { mutableStateOf(false) }
-    var symbolsOpen by remember { mutableStateOf(false) }
-    var wrap by remember(viewModel.pathLabel()) {
-        mutableStateOf(!isCodeFile(viewModel.pathLabel()))
-    }
     var findOpen by remember { mutableStateOf(false) }
     var findQuery by remember { mutableStateOf("") }
     var findIndex by remember { mutableIntStateOf(0) }
     var findFocusRequest by remember { mutableIntStateOf(0) }
+    var wrap by remember(name) { mutableStateOf(!isCodeFile(name)) }
     var themeMode by remember { mutableStateOf(EditorThemePreference.read(context)) }
     val palette = rememberEditorPalette(themeMode)
-    val warning = LocalWarningColors.current
-    val language = remember(viewModel.pathLabel()) { syntaxLanguageFor(viewModel.pathLabel()) }
-    val code = !viewModel.isMarkdown && language != dev.snipme.highlights.model.SyntaxLanguage.DEFAULT
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     val textFocus = remember { FocusRequester() }
     val findFocus = remember { FocusRequester() }
-    val matches = remember(state.content, findQuery) {
-        if (findOpen) findTextMatches(state.content, findQuery) else emptyList()
+    val matches = remember(state.content, findQuery, findOpen, editing) {
+        if (editing && findOpen) findTextMatches(state.content, findQuery) else emptyList()
     }
-    val safeFindIndex = if (matches.isEmpty()) {
-        0
-    } else {
-        findIndex.coerceIn(0, matches.lastIndex)
-    }
+    val safeFindIndex = if (matches.isEmpty()) 0 else findIndex.coerceIn(0, matches.lastIndex)
     val matchColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
     val currentMatchColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
     val highlighted = rememberHighlightedText(
         text = state.content,
         language = language,
         theme = palette.syntax,
-        enabled = code && state.content.length <= 160_000,
-        debounceMs = 220,
-        matches = if (findOpen && findQuery.isNotEmpty()) matches else emptyList(),
+        enabled = isCode && state.content.length <= 160_000,
+        debounceMs = 180,
+        matches = if (editing && findOpen) matches else emptyList(),
         currentMatch = safeFindIndex,
         matchColor = matchColor,
         currentMatchColor = currentMatchColor,
@@ -166,8 +175,16 @@ fun TextEditorScreen(
         }
     }
 
+    LaunchedEffect(editing) {
+        if (editing) {
+            delay(60)
+            textFocus.requestFocus()
+        }
+    }
+
     LaunchedEffect(state.justSaved) {
         if (state.justSaved) {
+            onSaved?.invoke()
             delay(2_000)
             viewModel.clearJustSaved()
         }
@@ -177,13 +194,19 @@ fun TextEditorScreen(
         if (findOpen) findFocus.requestFocus()
     }
 
-    LaunchedEffect(preview, findOpen) {
-        if (preview || findOpen) symbolsOpen = false
+    LaunchedEffect(findQuery) {
+        findIndex = 0
+        if (findQuery.isEmpty()) return@LaunchedEffect
+        val first = findTextMatches(state.content, findQuery).firstOrNull() ?: return@LaunchedEffect
+        fieldValue = fieldValue.copy(selection = TextRange(first.start, first.end))
+        scrollToMatch(state.content, layoutResult, vertical, horizontal, wrap, first.start, scope)
     }
 
-    BackHandler(enabled = state.dirty) { discardDialog = true }
+    BackHandler {
+        if (state.dirty) discardDialog = true else onBack()
+    }
 
-    fun back() {
+    fun requestClose() {
         if (state.dirty) discardDialog = true else onBack()
     }
 
@@ -210,104 +233,21 @@ fun TextEditorScreen(
         historyVersion++
     }
 
-    fun scrollToMatch(offset: Int) {
-        val layout = layoutResult ?: return
-        val box = runCatching { layout.getBoundingBox(offset) }.getOrNull() ?: return
-        scope.launch {
-            val target = (vertical.value + box.top.toInt() - 120).coerceAtLeast(0)
-            vertical.animateScrollTo(target)
-            if (!wrap) {
-                horizontal.animateScrollTo((horizontal.value + box.left.toInt() - 48).coerceAtLeast(0))
-            }
-        }
-    }
-
     fun selectMatch(index: Int) {
         val match = matches.getOrNull(index) ?: return
         findIndex = index
         fieldValue = fieldValue.copy(selection = TextRange(match.start, match.end))
-        scrollToMatch(match.start)
-    }
-
-    LaunchedEffect(findQuery) {
-        findIndex = 0
-        if (findQuery.isEmpty()) return@LaunchedEffect
-        val first = findTextMatches(state.content, findQuery).firstOrNull() ?: return@LaunchedEffect
-        fieldValue = fieldValue.copy(selection = TextRange(first.start, first.end))
-        scrollToMatch(first.start)
-    }
-
-    fun insert(prefix: String, suffix: String) {
-        if (!state.writable) return
-        val start = minOf(fieldValue.selection.start, fieldValue.selection.end)
-        val end = maxOf(fieldValue.selection.start, fieldValue.selection.end)
-        val selected = fieldValue.text.substring(start, end)
-        val inserted = prefix + selected + suffix
-        val newText = fieldValue.text.replaceRange(start, end, inserted)
-        val cursor = if (selected.isEmpty() && suffix.isNotEmpty()) {
-            start + prefix.length
-        } else {
-            start + inserted.length
-        }
-        history.record(snapshot(fieldValue), System.currentTimeMillis())
-        historyVersion++
-        fieldValue = TextFieldValue(newText, TextRange(cursor, cursor))
-        viewModel.setContent(newText)
-        textFocus.requestFocus()
-    }
-
-    fun prefixLine(prefix: String) {
-        if (!state.writable) return
-        val text = fieldValue.text
-        val start = minOf(fieldValue.selection.start, fieldValue.selection.end)
-        val lineStart = text.lastIndexOf('\n', (start - 1).coerceAtLeast(0)).let {
-            if (it < 0) 0 else it + 1
-        }
-        val present = text.startsWith(prefix, lineStart)
-        val newText = if (present) {
-            text.removeRange(lineStart, lineStart + prefix.length)
-        } else {
-            text.replaceRange(lineStart, lineStart, prefix)
-        }
-        val delta = if (present) -prefix.length else prefix.length
-        val cursor = (fieldValue.selection.start + delta).coerceIn(0, newText.length)
-        val selectionEnd = (fieldValue.selection.end + delta).coerceIn(0, newText.length)
-        history.record(snapshot(fieldValue), System.currentTimeMillis())
-        historyVersion++
-        fieldValue = TextFieldValue(newText, TextRange(cursor, selectionEnd))
-        viewModel.setContent(newText)
-        textFocus.requestFocus()
-    }
-
-    fun insertLink() {
-        if (!state.writable) return
-        val start = minOf(fieldValue.selection.start, fieldValue.selection.end)
-        val end = maxOf(fieldValue.selection.start, fieldValue.selection.end)
-        val selected = fieldValue.text.substring(start, end)
-        val inserted = if (selected.isEmpty()) "[](https://)" else "[$selected](https://)"
-        val newText = fieldValue.text.replaceRange(start, end, inserted)
-        val cursor = if (selected.isEmpty()) start + 1 else start + inserted.length
-        history.record(snapshot(fieldValue), System.currentTimeMillis())
-        historyVersion++
-        fieldValue = TextFieldValue(newText, TextRange(cursor, cursor))
-        viewModel.setContent(newText)
-        textFocus.requestFocus()
+        scrollToMatch(state.content, layoutResult, vertical, horizontal, wrap, match.start, scope)
     }
 
     val canUndo = remember(historyVersion) { history.canUndo }
     val canRedo = remember(historyVersion) { history.canRedo }
-    val statusText = when {
-        !state.writable -> stringResource(R.string.editor_read_only_short)
-        state.saving -> stringResource(R.string.editor_saving)
-        state.justSaved -> stringResource(R.string.editor_saved)
-        state.dirty -> stringResource(R.string.editor_unsaved)
-        else -> stringResource(R.string.editor_saved)
+    val charCount = remember(state.content) {
+        state.content.codePointCount(0, state.content.length)
     }
+    val encodingText = encodingLabel(state.encoding) + if (state.bom) " BOM" else ""
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
-    ) {
+    Surface(modifier = Modifier.fillMaxSize(), color = palette.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -318,54 +258,25 @@ fun TextEditorScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = ::back) {
+                IconButton(onClick = ::requestClose) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.common_back),
                     )
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    FileNameText(
-                        name = viewModel.pathLabel(),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (state.dirty) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .background(MaterialTheme.colorScheme.primary, CircleShape),
-                            )
-                            Spacer(Modifier.width(5.dp))
-                        }
-                        Text(
-                            text = statusText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (state.dirty) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
-                }
-                if (viewModel.isMarkdown && !split && !state.loading && state.error == null) {
-                    TextButton(
-                        onClick = { preview = !preview },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    ) {
-                        Text(
-                            stringResource(if (preview) R.string.editor_edit else R.string.editor_preview),
-                        )
-                    }
-                }
-                if (!state.loading && state.error == null && !preview) {
+                FileNameText(
+                    name = name,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (editing) {
                     IconButton(
                         onClick = {
-                            findOpen = true
+                            findOpen = !findOpen
+                            if (!findOpen) findQuery = ""
                             findFocusRequest++
                         },
                     ) {
@@ -374,52 +285,47 @@ fun TextEditorScreen(
                             contentDescription = stringResource(R.string.editor_find),
                         )
                     }
-                }
-                if (state.saving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    Spacer(Modifier.size(6.dp))
-                }
-                Button(
-                    onClick = { viewModel.save() },
-                    enabled = state.dirty && state.writable && !state.saving,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                ) {
-                    Text(stringResource(R.string.editor_save))
-                }
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(
-                            Icons.Filled.MoreVert,
-                            contentDescription = stringResource(R.string.file_more),
-                        )
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.editor_encoding)) },
-                            onClick = {
-                                menuOpen = false
-                                encodingDialog = true
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.editor_find)) },
-                            onClick = {
-                                menuOpen = false
-                                findOpen = true
-                                findFocusRequest++
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.editor_theme)) },
-                            onClick = {
-                                menuOpen = false
-                                themeDialog = true
-                            },
-                        )
-                        if (!viewModel.isMarkdown) {
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(
+                                Icons.Filled.MoreVert,
+                                contentDescription = stringResource(R.string.file_more),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.editor_undo)) },
+                                enabled = canUndo,
+                                onClick = {
+                                    menuOpen = false
+                                    undo()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.editor_redo)) },
+                                enabled = canRedo,
+                                onClick = {
+                                    menuOpen = false
+                                    redo()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.editor_encoding)) },
+                                onClick = {
+                                    menuOpen = false
+                                    encodingDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.editor_line_ending)) },
+                                onClick = {
+                                    menuOpen = false
+                                    eolDialog = true
+                                },
+                            )
                             DropdownMenuItem(
                                 text = {
                                     Text(
@@ -433,126 +339,136 @@ fun TextEditorScreen(
                                     wrap = !wrap
                                 },
                             )
-                        }
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.editor_save_utf8)) },
-                            onClick = {
-                                menuOpen = false
-                                viewModel.useUtf8()
-                            },
-                        )
-                    }
-                }
-            }
-
-            if (findOpen) {
-                Surface(color = palette.surface) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        OutlinedTextField(
-                            value = findQuery,
-                            onValueChange = { findQuery = it },
-                            modifier = Modifier
-                                .weight(1f)
-                                .focusRequester(findFocus),
-                            singleLine = true,
-                            placeholder = { Text(stringResource(R.string.editor_find)) },
-                            textStyle = MaterialTheme.typography.bodySmall,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(
-                                onSearch = {
-                                    selectMatch(stepMatch(findIndex, matches.size, true))
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.editor_theme)) },
+                                onClick = {
+                                    menuOpen = false
+                                    themeDialog = true
                                 },
-                            ),
-                            trailingIcon = {
-                                Text(
-                                    text = if (findQuery.isBlank()) {
-                                        ""
-                                    } else if (matches.isEmpty()) {
-                                        stringResource(R.string.editor_find_none)
-                                    } else {
-                                        "${safeFindIndex + 1}/${matches.size}"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = palette.muted,
-                                )
-                            },
-                        )
-                        TextButton(
-                            onClick = { selectMatch(stepMatch(findIndex, matches.size, false)) },
-                            enabled = matches.isNotEmpty(),
-                        ) {
-                            Text("↑")
-                        }
-                        TextButton(
-                            onClick = { selectMatch(stepMatch(findIndex, matches.size, true)) },
-                            enabled = matches.isNotEmpty(),
-                        ) {
-                            Text("↓")
-                        }
-                        IconButton(
-                            onClick = {
-                                findOpen = false
-                                findQuery = ""
-                                textFocus.requestFocus()
-                            },
-                        ) {
-                            Icon(
-                                Icons.Filled.Close,
-                                contentDescription = stringResource(R.string.common_close),
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.editor_preview)) },
+                                enabled = !state.dirty && !state.saving,
+                                onClick = {
+                                    menuOpen = false
+                                    editing = false
+                                },
                             )
                         }
                     }
                 }
             }
 
-            if (state.lossy) {
-                Text(
-                    text = stringResource(R.string.text_lossy_hint),
-                    color = warning.content,
-                    style = MaterialTheme.typography.bodySmall,
+            if (findOpen && editing) {
+                OutlinedTextField(
+                    value = findQuery,
+                    onValueChange = { findQuery = it },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(warning.container)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp)
+                        .focusRequester(findFocus),
+                    placeholder = { Text(stringResource(R.string.editor_find)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { findFocusRequest++ }),
+                    trailingIcon = {
+                        Text(
+                            text = if (matches.isEmpty()) {
+                                stringResource(R.string.editor_find_none)
+                            } else {
+                                "${safeFindIndex + 1}/${matches.size}"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    },
                 )
-            }
-            state.saveError?.let { message ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.errorContainer)
-                        .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.End,
                 ) {
-                    Text(
-                        text = message,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = viewModel::clearSaveError) {
-                        Text(stringResource(R.string.common_close))
+                    IconButton(
+                        onClick = {
+                            if (matches.isNotEmpty()) {
+                                selectMatch((safeFindIndex - 1 + matches.size) % matches.size)
+                            }
+                        },
+                        enabled = matches.isNotEmpty(),
+                    ) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowUp,
+                            contentDescription = stringResource(R.string.editor_find_previous),
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            if (matches.isNotEmpty()) {
+                                selectMatch((safeFindIndex + 1) % matches.size)
+                            }
+                        },
+                        enabled = matches.isNotEmpty(),
+                    ) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowDown,
+                            contentDescription = stringResource(R.string.editor_find_next),
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            findOpen = false
+                            findQuery = ""
+                        },
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.common_close),
+                        )
                     }
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .background(palette.background),
-            ) {
-                val editorBody: @Composable (Modifier) -> Unit = { modifier ->
-                    EditorBody(
+            if (state.loading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            val readOnlyReason = state.readOnlyReason
+            if (!state.writable && readOnlyReason != null) {
+                ReadOnlyNotice(state.lossy, readOnlyReason)
+            }
+
+            state.saveError?.let { message ->
+                ErrorNotice(message = message, onDismiss = viewModel::clearSaveError)
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                when {
+                    state.loading && state.content.isEmpty() -> Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                    state.error != null && state.content.isEmpty() -> Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = state.error.orEmpty(),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        TextButton(onClick = { viewModel.load() }) {
+                            Text(stringResource(R.string.common_retry))
+                        }
+                    }
+                    editing && state.writable -> EditorBody(
                         state = state,
                         markdown = viewModel.isMarkdown,
-                        code = code,
+                        code = isCode,
                         wrap = wrap,
                         fieldValue = fieldValue,
                         palette = palette,
@@ -569,182 +485,69 @@ fun TextEditorScreen(
                             viewModel.setContent(value.text)
                         },
                         onTextLayout = { layoutResult = it },
-                        modifier = modifier,
                     )
-                }
-                when {
-                    state.loading -> Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                    state.error != null -> StatusMessage(
-                        icon = Icons.Filled.Warning,
-                        title = state.error.orEmpty(),
-                        actionLabel = stringResource(R.string.common_retry),
-                        onAction = { viewModel.load() },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    split -> Row(modifier = Modifier.fillMaxSize()) {
-                        editorBody(Modifier.weight(1f))
-                        VerticalDivider(color = palette.gutter.copy(alpha = 0.35f))
-                        MarkdownPreview(
-                            markdown = state.content,
-                            textColor = palette.text,
-                            linkColor = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    preview -> MarkdownPreview(
+                    viewModel.isMarkdown -> MarkdownPreview(
                         markdown = state.content,
                         textColor = palette.text,
                         linkColor = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(palette.background),
                     )
-                    else -> editorBody(Modifier.fillMaxSize())
-                }
-                if (symbolsOpen && !preview && state.writable && !viewModel.isMarkdown) {
-                    SymbolsPanel(
+                    isCode -> CodePreviewBlock(
+                        content = state.content,
+                        language = language,
                         palette = palette,
-                        onInsert = ::insert,
-                        onDismiss = { symbolsOpen = false },
-                        modifier = Modifier.align(Alignment.BottomCenter),
+                        wrap = wrap,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(palette.background),
+                    )
+                    else -> PlainPreviewBlock(
+                        content = state.content,
+                        palette = palette,
+                        wrap = wrap,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(palette.background),
                     )
                 }
             }
 
-            if (!preview && state.writable && !state.loading && state.error == null) {
-                EditorToolbar(
-                    markdown = viewModel.isMarkdown,
-                    palette = palette,
-                    canUndo = canUndo,
-                    canRedo = canRedo,
-                    symbolsOpen = symbolsOpen,
-                    onSymbols = { symbolsOpen = !symbolsOpen },
-                    onInsert = ::insert,
-                    onPrefix = ::prefixLine,
-                    onLink = ::insertLink,
-                    onUndo = ::undo,
-                    onRedo = ::redo,
-                )
-            }
-
-            Surface(color = palette.surface, modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    EditorPill(
-                        text = encodingLabel(state.encoding),
-                        palette = palette,
-                        onClick = { encodingDialog = true },
-                    )
-                    EditorPill(
-                        text = when (state.lineEnding) {
-                            "crlf" -> "CRLF"
-                            "mixed" -> stringResource(R.string.preview_mixed_eol)
-                            else -> "LF"
-                        },
-                        palette = palette,
-                        onClick = { eolDialog = true },
-                    )
-                    EditorPill(
-                        text = stringResource(R.string.editor_chars, state.content.length),
-                        palette = palette,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    if (!state.writable) {
-                        Text(
-                            text = stringResource(
-                                R.string.editor_read_only,
-                                state.readOnlyReason ?: stringResource(R.string.editor_read_only_short),
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
+            DocumentStatusBar(
+                encodingText = encodingText,
+                uncertain = state.lossy,
+                charCount = charCount,
+                lineEnding = state.lineEnding,
+                size = state.size,
+                dirty = state.dirty,
+                writable = state.writable,
+                editing = editing,
+                saving = state.saving,
+                onClickEncoding = {
+                    if (state.lossy) {
+                        val next = nextEncoding(state.encoding)
+                        viewModel.load(next)
                     }
-                }
-            }
+                },
+                onLongClickEncoding = { encodingDialog = true },
+                onToggleEdit = {
+                    if (editing) {
+                        viewModel.save()
+                    } else {
+                        editing = true
+                    }
+                },
+            )
         }
-    }
-
-    if (discardDialog) {
-        AlertDialog(
-            onDismissRequest = { discardDialog = false },
-            title = { Text(stringResource(R.string.editor_discard_title)) },
-            text = { Text(stringResource(R.string.editor_discard_body)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        discardDialog = false
-                        val encoding = pendingEncoding
-                        pendingEncoding = null
-                        if (encoding != null) {
-                            viewModel.load(encoding)
-                        } else {
-                            onBack()
-                        }
-                    },
-                ) {
-                    Text(stringResource(R.string.editor_discard))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { discardDialog = false; pendingEncoding = null }) {
-                    Text(stringResource(R.string.common_cancel))
-                }
-            },
-        )
-    }
-
-    if (state.conflict) {
-        AlertDialog(
-            onDismissRequest = viewModel::dismissConflict,
-            title = { Text(stringResource(R.string.editor_conflict)) },
-            text = { Text(stringResource(R.string.editor_conflict_body)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.dismissConflict()
-                        viewModel.save(force = true)
-                    },
-                ) {
-                    Text(stringResource(R.string.editor_conflict_force))
-                }
-            },
-            dismissButton = {
-                Column {
-                    TextButton(
-                        onClick = {
-                            viewModel.dismissConflict()
-                            viewModel.load()
-                        },
-                    ) {
-                        Text(stringResource(R.string.editor_conflict_reload))
-                    }
-                    TextButton(onClick = viewModel::dismissConflict) {
-                        Text(stringResource(R.string.common_cancel))
-                    }
-                }
-            },
-        )
     }
 
     if (encodingDialog) {
         EncodingPickerDialog(
             selected = state.encoding,
-            onSelect = { value ->
+            onSelect = { encoding ->
                 encodingDialog = false
-                if (state.dirty) {
-                    pendingEncoding = value
-                    discardDialog = true
-                } else {
-                    viewModel.load(value)
-                }
+                viewModel.load(encoding)
             },
             onDismiss = { encodingDialog = false },
         )
@@ -756,33 +559,25 @@ fun TextEditorScreen(
             title = { Text(stringResource(R.string.editor_line_ending)) },
             text = {
                 Column {
-                    TextButton(
-                        onClick = {
-                            eolDialog = false
-                            viewModel.setLineEnding("lf")
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.editor_eol_lf),
-                            modifier = Modifier.weight(1f),
-                            textAlign = TextAlign.Start,
-                        )
-                        if (state.lineEnding == "lf") Text("✓")
-                    }
-                    TextButton(
-                        onClick = {
-                            eolDialog = false
-                            viewModel.setLineEnding("crlf")
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.editor_eol_crlf),
-                            modifier = Modifier.weight(1f),
-                            textAlign = TextAlign.Start,
-                        )
-                        if (state.lineEnding == "crlf") Text("✓")
+                    listOf("lf", "crlf").forEach { value ->
+                        TextButton(
+                            onClick = {
+                                eolDialog = false
+                                viewModel.setLineEnding(value)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    if (value == "lf") R.string.editor_eol_lf else R.string.editor_eol_crlf,
+                                ),
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Start,
+                            )
+                            if (state.lineEnding == value) {
+                                Text("✓", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                     }
                 }
             },
@@ -807,8 +602,8 @@ fun TextEditorScreen(
                     ).forEach { (mode, label) ->
                         TextButton(
                             onClick = {
-                                themeMode = mode
                                 EditorThemePreference.write(context, mode)
+                                themeMode = mode
                                 themeDialog = false
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -818,7 +613,9 @@ fun TextEditorScreen(
                                 modifier = Modifier.weight(1f),
                                 textAlign = TextAlign.Start,
                             )
-                            if (themeMode == mode) Text("✓")
+                            if (themeMode == mode) {
+                                Text("✓", color = MaterialTheme.colorScheme.primary)
+                            }
                         }
                     }
                 }
@@ -829,6 +626,229 @@ fun TextEditorScreen(
                 }
             },
         )
+    }
+
+    if (discardDialog) {
+        AlertDialog(
+            onDismissRequest = { discardDialog = false },
+            title = { Text(stringResource(R.string.editor_discard_title)) },
+            text = { Text(stringResource(R.string.editor_discard_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        discardDialog = false
+                        viewModel.setContent(state.original)
+                        onBack()
+                    },
+                ) {
+                    Text(
+                        text = stringResource(R.string.editor_discard),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { discardDialog = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
+    }
+
+    if (state.conflict) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissConflict,
+            title = { Text(stringResource(R.string.editor_conflict)) },
+            text = { Text(stringResource(R.string.editor_conflict_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.dismissConflict()
+                        viewModel.save(force = true)
+                    },
+                ) {
+                    Text(stringResource(R.string.editor_conflict_force))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.dismissConflict()
+                        viewModel.load()
+                    },
+                ) {
+                    Text(stringResource(R.string.editor_conflict_reload))
+                }
+            },
+        )
+    }
+
+    LaunchedEffect(configuration) {
+        // Recomposition on rotation keeps the cursor; nothing else to do.
+    }
+    LaunchedEffect(density) {
+        // Density changes only affect preview metrics.
+    }
+}
+
+@Composable
+private fun ReadOnlyNotice(lossy: Boolean, reason: String) {
+    val warning = LocalWarningColors.current
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        color = warning.container,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Text(
+            text = if (lossy) {
+                stringResource(R.string.text_lossy_hint)
+            } else {
+                stringResource(R.string.editor_read_only, reason)
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = warning.content,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun ErrorNotice(message: String, onDismiss: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 10.dp, top = 6.dp, bottom = 6.dp),
+            )
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.common_close),
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DocumentStatusBar(
+    encodingText: String,
+    uncertain: Boolean,
+    charCount: Int,
+    lineEnding: String,
+    size: Long,
+    dirty: Boolean,
+    writable: Boolean,
+    editing: Boolean,
+    saving: Boolean,
+    onClickEncoding: () -> Unit,
+    onLongClickEncoding: () -> Unit,
+    onToggleEdit: () -> Unit,
+) {
+    val context = LocalContext.current
+    Surface(color = MaterialTheme.colorScheme.surface) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (uncertain) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text(
+                            text = "$encodingText?",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier
+                                .combinedClickable(
+                                    onClick = onClickEncoding,
+                                    onLongClick = onLongClickEncoding,
+                                )
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
+                    }
+                } else {
+                    Text(
+                        text = encodingText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .combinedClickable(
+                                onClick = onClickEncoding,
+                                onLongClick = onLongClickEncoding,
+                            )
+                            .padding(horizontal = 2.dp, vertical = 2.dp),
+                    )
+                }
+                Text(
+                    text = " · " + stringResource(R.string.editor_chars, charCount),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = " · " + lineEnding.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = " · " + Formatter.formatShortFileSize(context, size),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (dirty) {
+                    Text(
+                        text = " · " + stringResource(R.string.editor_unsaved),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            if (!writable) {
+                Text(
+                    text = stringResource(R.string.editor_read_only_short),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 10.dp),
+                )
+            } else {
+                TextButton(
+                    onClick = onToggleEdit,
+                    enabled = if (editing) dirty && !saving else true,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = when {
+                            !editing -> stringResource(R.string.editor_edit)
+                            saving -> stringResource(R.string.editor_saving)
+                            else -> stringResource(R.string.editor_save)
+                        },
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -845,8 +865,7 @@ private fun EditorBody(
     transformation: VisualTransformation,
     focusRequester: FocusRequester,
     onValueChange: (TextFieldValue) -> Unit,
-    onTextLayout: (androidx.compose.ui.text.TextLayoutResult) -> Unit,
-    modifier: Modifier = Modifier,
+    onTextLayout: (TextLayoutResult) -> Unit,
 ) {
     val lineCount = state.content.count { it == '\n' } + 1
     val numbers = remember(lineCount) {
@@ -857,32 +876,35 @@ private fun EditorBody(
             }
         }
     }
+    val fontSize = if (code) 14.sp else 15.sp
+    val lineHeight = if (code) 22.sp else 23.sp
     val bodyStyle: TextStyle = if (markdown) {
-        MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp, lineHeight = 24.sp)
+        MaterialTheme.typography.bodyLarge.copy(fontSize = fontSize, lineHeight = lineHeight)
     } else {
         MaterialTheme.typography.bodyLarge.copy(
             fontFamily = CodeFontFamily,
-            fontSize = 16.sp,
-            lineHeight = 24.sp,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
         )
     }
     val showGutter = !markdown && (code || !wrap)
     val gutterStyle = bodyStyle.copy(
         fontFamily = CodeFontFamily,
         fontSize = 12.sp,
-        lineHeight = 24.sp,
+        lineHeight = lineHeight,
     )
     val density = LocalDensity.current
-    val lineHeight = with(density) { 24.sp.toDp() }
+    val lineHeightDp = with(density) { lineHeight.toDp() }
     val activeLine = remember(fieldValue.text, fieldValue.selection.start) {
         fieldValue.text.take(fieldValue.selection.start.coerceIn(0, fieldValue.text.length))
             .count { it == '\n' }
     }
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .verticalScroll(vertical)
-            .padding(vertical = 8.dp),
+            .padding(vertical = 8.dp)
+            .background(palette.background),
     ) {
         if (showGutter) {
             Text(
@@ -911,8 +933,8 @@ private fun EditorBody(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .offset(y = 4.dp + lineHeight * activeLine)
-                            .height(lineHeight)
+                            .offset(y = 4.dp + lineHeightDp * activeLine)
+                            .height(lineHeightDp)
                             .background(palette.activeLine),
                     )
                 }
@@ -933,214 +955,29 @@ private fun EditorBody(
     }
 }
 
-@Composable
-private fun EditorToolbar(
-    markdown: Boolean,
-    palette: EditorPalette,
-    canUndo: Boolean,
-    canRedo: Boolean,
-    symbolsOpen: Boolean,
-    onSymbols: () -> Unit,
-    onInsert: (String, String) -> Unit,
-    onPrefix: (String) -> Unit,
-    onLink: () -> Unit,
-    onUndo: () -> Unit,
-    onRedo: () -> Unit,
-) {
-    Surface(color = palette.surface, modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 5.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            if (markdown) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    ToolKey(
-                        stringResource(R.string.editor_undo),
-                        palette,
-                        Modifier.weight(1f),
-                        enabled = canUndo,
-                        onClick = onUndo,
-                    )
-                    ToolKey(
-                        stringResource(R.string.editor_redo),
-                        palette,
-                        Modifier.weight(1f),
-                        enabled = canRedo,
-                        onClick = onRedo,
-                    )
-                    ToolKey("H1", palette, Modifier.weight(1f)) { onPrefix("# ") }
-                    ToolKey(stringResource(R.string.markdown_bold), palette, Modifier.weight(1f)) {
-                        onInsert("**", "**")
-                    }
-                    ToolKey(stringResource(R.string.markdown_italic), palette, Modifier.weight(1f)) {
-                        onInsert("*", "*")
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    ToolKey(stringResource(R.string.markdown_list), palette, Modifier.weight(1f)) {
-                        onPrefix("- ")
-                    }
-                    ToolKey(stringResource(R.string.markdown_ordered), palette, Modifier.weight(1f)) {
-                        onPrefix("1. ")
-                    }
-                    ToolKey(stringResource(R.string.markdown_quote), palette, Modifier.weight(1f)) {
-                        onPrefix("> ")
-                    }
-                    ToolKey(stringResource(R.string.markdown_code), palette, Modifier.weight(1f)) {
-                        onInsert("`", "`")
-                    }
-                    ToolKey(stringResource(R.string.markdown_link), palette, Modifier.weight(1f)) {
-                        onLink()
-                    }
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    ToolKey(
-                        stringResource(R.string.editor_undo),
-                        palette,
-                        Modifier.weight(1f),
-                        enabled = canUndo,
-                        onClick = onUndo,
-                    )
-                    ToolKey(
-                        stringResource(R.string.editor_redo),
-                        palette,
-                        Modifier.weight(1f),
-                        enabled = canRedo,
-                        onClick = onRedo,
-                    )
-                    ToolKey("Tab", palette, Modifier.weight(1f)) { onInsert("  ", "") }
-                    ToolKey(
-                        label = stringResource(R.string.editor_symbols),
-                        palette = palette,
-                        modifier = Modifier.weight(1f),
-                        selected = symbolsOpen,
-                        onClick = onSymbols,
-                    )
-                }
-            }
-        }
-    }
+private fun nextEncoding(current: String?): String {
+    if (current == null) return EncodingCycle.first()
+    val index = EncodingCycle.indexOfFirst { it.equals(current, ignoreCase = true) }
+    if (index < 0) return EncodingCycle.first()
+    return EncodingCycle[(index + 1) % EncodingCycle.size]
 }
 
-@Composable
-private fun SymbolsPanel(
-    palette: EditorPalette,
-    onInsert: (String, String) -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
+private fun scrollToMatch(
+    content: String,
+    layout: TextLayoutResult?,
+    vertical: androidx.compose.foundation.ScrollState,
+    horizontal: androidx.compose.foundation.ScrollState,
+    wrap: Boolean,
+    offset: Int,
+    scope: kotlinx.coroutines.CoroutineScope,
 ) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(12.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = palette.surface,
-        border = BorderStroke(1.dp, palette.gutter.copy(alpha = 0.35f)),
-        shadowElevation = 8.dp,
-    ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.editor_symbols),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.muted,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.editor_hide_symbols))
-                }
-            }
-            listOf(
-                listOf("\"", "'", "(", ")"),
-                listOf("{", "}", "[", "]"),
-                listOf("<", ">", "=", ":"),
-                listOf(";", "/", "\\", "|"),
-            ).forEach { keys ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    keys.forEach { symbol ->
-                        ToolKey(symbol, palette, Modifier.weight(1f)) {
-                            when (symbol) {
-                                "\"", "'", "(", ")", "{", "}", "[", "]", "<", ">" ->
-                                    onInsert(symbol, symbol)
-                                else -> onInsert(symbol, "")
-                            }
-                        }
-                    }
-                }
-            }
+    if (content.isEmpty() || layout == null) return
+    val box = runCatching { layout.getBoundingBox(offset) }.getOrNull() ?: return
+    scope.launch {
+        val target = (vertical.value + box.top.toInt() - 120).coerceAtLeast(0)
+        vertical.animateScrollTo(target)
+        if (!wrap) {
+            horizontal.animateScrollTo((horizontal.value + box.left.toInt() - 48).coerceAtLeast(0))
         }
-    }
-}
-
-@Composable
-private fun ToolKey(
-    label: String,
-    palette: EditorPalette,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    selected: Boolean = false,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        shape = RoundedCornerShape(10.dp),
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            palette.background
-        },
-        contentColor = palette.text,
-        border = BorderStroke(1.dp, palette.gutter.copy(alpha = 0.18f)),
-        modifier = modifier.height(40.dp),
-    ) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                color = if (enabled) palette.text else palette.muted.copy(alpha = 0.4f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun EditorPill(
-    text: String,
-    palette: EditorPalette,
-    onClick: (() -> Unit)? = null,
-) {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = palette.surface,
-        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = palette.muted,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-        )
     }
 }

@@ -1055,7 +1055,7 @@ fun MarkdownPreview(
                         .codeTypeface(codeTypeface)
                         .codeBlockTypeface(codeTypeface)
                         .headingTextSizeMultipliers(
-                            floatArrayOf(1.9f, 1.55f, 1.3f, 1.15f, 1.05f, 1f),
+                            floatArrayOf(1.6f, 1.4f, 1.25f, 1.15f, 1.05f, 1f),
                         )
                         .headingBreakHeight(0)
                         .headingBreakColor(android.graphics.Color.TRANSPARENT)
@@ -1081,18 +1081,30 @@ fun MarkdownPreview(
     val padding = with(density) { 20.dp.roundToPx() }
     AndroidView(
         factory = { ctx ->
-            TextView(ctx).apply {
+            val textView = TextView(ctx).apply {
                 setTextColor(textColor.toArgb())
                 setLinkTextColor(linkColor.toArgb())
-                textSize = 16f
-                setLineSpacing(0f, 1.2f)
+                textSize = 15f
+                setLineSpacing(0f, 1.533f)
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 setPadding(padding, padding, padding, padding)
                 movementMethod = android.text.method.LinkMovementMethod.getInstance()
                 setTextIsSelectable(true)
             }
+            android.widget.ScrollView(ctx).apply {
+                isFillViewport = true
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                addView(
+                    textView,
+                    android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+            }
         },
-        update = { view ->
+        update = { scroll ->
+            val view = scroll.getChildAt(0) as TextView
             view.setTextColor(textColor.toArgb())
             view.setLinkTextColor(linkColor.toArgb())
             markwon.setMarkdown(view, markdown)

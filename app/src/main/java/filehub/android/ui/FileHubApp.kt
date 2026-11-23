@@ -120,6 +120,7 @@ fun FileHubApp(viewModel: AppViewModel) {
     val audioState by audioController.state.collectAsStateWithLifecycle()
     var tab by remember { mutableStateOf(MainTab.Servers) }
     val session by viewModel.session.collectAsStateWithLifecycle()
+    val browserState by filesViewModel.state.collectAsStateWithLifecycle()
     val connection by viewModel.connection.collectAsStateWithLifecycle()
     val notificationDestination by NotificationNavigator.destination.collectAsStateWithLifecycle()
     val appImageLoader by viewModel.imageLoader.collectAsStateWithLifecycle()
@@ -140,6 +141,14 @@ fun FileHubApp(viewModel: AppViewModel) {
     }
     val transfers by transferViewModel.items.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val documentOpen = browserState.previewEntry?.let { entry ->
+        !entry.isDir && (
+            entry.kind == filehub.android.core.model.FileKind.Text ||
+                entry.kind == filehub.android.core.model.FileKind.Code ||
+                entry.isMarkdown ||
+                browserState.previewAsText
+            )
+    } == true
 
     LaunchedEffect(session.error) {
         val message = session.error ?: return@LaunchedEffect
@@ -193,7 +202,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                 containerColor = MaterialTheme.colorScheme.background,
                 snackbarHost = { SnackbarHost(snackbar) },
                 bottomBar = {
-                    Column {
+                    if (!documentOpen) Column {
                         AudioPlayerBar(
                             state = audioState,
                             onTogglePlay = audioController::togglePlayPause,
@@ -315,22 +324,6 @@ fun FileHubApp(viewModel: AppViewModel) {
                             onRetry = viewModel::refreshRoots,
                             onSearch = { rootId -> navController.navigate("search/${rootId ?: -1}") },
                             onPauseAudio = audioController::pause,
-                            onEditText = { entry ->
-                                val browser = filesViewModel.state.value
-                                val profile = browser.profile
-                                val root = browser.root
-                                if (profile != null && root != null) {
-                                    val path = if (browser.path.isEmpty()) {
-                                        entry.name
-                                    } else {
-                                        "${browser.path}/${entry.name}"
-                                    }
-                                    filesViewModel.closePreview()
-                                    navController.navigate(
-                                        "editor/${profile.id}/${root.id}/${Uri.encode(path)}",
-                                    )
-                                }
-                            },
                         )
                         MainTab.My -> MyScreen(
                             state = session,
@@ -386,30 +379,6 @@ fun FileHubApp(viewModel: AppViewModel) {
                     navController.popBackStack()
                 },
             )
-        }
-        composable("editor/{profileId}/{rootId}/{path}") { entry ->
-            val profileId = entry.arguments?.getString("profileId")
-            val rootId = entry.arguments?.getString("rootId")?.toLongOrNull()
-            val path = entry.arguments?.getString("path")?.let(Uri::decode)
-            if (profileId != null && rootId != null && path != null) {
-                val editorViewModel: TextEditorViewModel = viewModel(
-                    key = "editor-$profileId-$rootId-$path",
-                    factory = TextEditorViewModel.factory(
-                        LocalContext.current.applicationContext as android.app.Application,
-                        profileId,
-                        rootId,
-                        path,
-                        path.endsWith(".md", true) || path.endsWith(".markdown", true),
-                    ),
-                )
-                TextEditorScreen(
-                    viewModel = editorViewModel,
-                    onBack = {
-                        filesViewModel.refresh()
-                        navController.popBackStack()
-                    },
-                )
-            }
         }
         composable("shares") {
             SharesScreen(

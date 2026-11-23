@@ -54,7 +54,6 @@ fun BrowseScreen(
     onAddServer: () -> Unit,
     onRetry: () -> Unit,
     onSearch: (Long?) -> Unit,
-    onEditText: (filehub.android.core.model.FileEntry) -> Unit,
     onPauseAudio: () -> Unit,
 ) {
     val active = state.active
@@ -101,7 +100,6 @@ fun BrowseScreen(
             viewModel = filesViewModel,
             roots = state.roots,
             onSearch = onSearch,
-            onEditText = onEditText,
             onPauseAudio = onPauseAudio,
             onBack = {
                 if (files.path.isEmpty()) {

@@ -532,6 +532,8 @@
     <string name="editor_unsaved">Unsaved</string>
     <string name="editor_saving">Saving…</string>
     <string name="editor_find">Find</string>
+    <string name="editor_find_previous">Previous match</string>
+    <string name="editor_find_next">Next match</string>
     <string name="editor_find_none">No matches</string>
     <string name="editor_theme">Editor theme</string>
     <string name="editor_theme_auto">Match app</string>

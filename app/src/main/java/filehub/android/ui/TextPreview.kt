@@ -418,7 +418,7 @@ private fun MetaChip(text: String, onClick: (() -> Unit)? = null) {
 }
 
 @Composable
-private fun PlainPreviewBlock(
+internal fun PlainPreviewBlock(
     content: String,
     palette: EditorPalette,
     wrap: Boolean,
@@ -436,8 +436,8 @@ private fun PlainPreviewBlock(
                 text = content,
                 color = palette.text,
                 fontFamily = CodeFontFamily,
-                fontSize = 14.sp,
-                lineHeight = 22.sp,
+                fontSize = 15.sp,
+                lineHeight = 23.sp,
                 softWrap = wrap,
                 modifier = Modifier.padding(20.dp),
             )
@@ -446,7 +446,7 @@ private fun PlainPreviewBlock(
 }
 
 @Composable
-private fun CodePreviewBlock(
+internal fun CodePreviewBlock(
     content: String,
     language: dev.snipme.highlights.model.SyntaxLanguage,
     palette: EditorPalette,

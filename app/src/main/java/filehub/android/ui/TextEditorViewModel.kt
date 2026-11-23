@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import kotlinx.coroutines.Job
 import filehub.android.FileHubApplication
 import filehub.android.R
 import filehub.android.data.api.FileHubApiException
@@ -43,10 +44,11 @@ class TextEditorViewModel(
     private val application: Application,
     private val filesRepository: filehub.android.data.FilesRepository,
     private val sessionRepository: filehub.android.data.SessionRepository,
-    private val profileId: String,
-    private val rootId: Long,
-    private val path: String,
-    private val markdown: Boolean,
+    private var profileId: String,
+    private var rootId: Long,
+    private var path: String,
+    private var markdown: Boolean,
+    initialText: TextFileDto? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TextEditorState())
@@ -54,10 +56,39 @@ class TextEditorViewModel(
 
     val isMarkdown: Boolean get() = markdown
 
+    private var generation = 0
+    private var loadJob: Job? = null
+    private var saveJob: Job? = null
+
     fun pathLabel(): String = path.substringAfterLast('/').ifBlank { path }
 
     init {
-        load()
+        if (path.isNotEmpty()) {
+            if (initialText != null) applyText(initialText) else load()
+        }
+    }
+
+    /**
+     * Reuses one document ViewModel for every preview in the browser. The
+     * generation counter makes late responses from the previous document
+     * harmless.
+     */
+    fun open(
+        profileId: String,
+        rootId: Long,
+        path: String,
+        markdown: Boolean,
+        initialText: TextFileDto?,
+    ) {
+        generation++
+        loadJob?.cancel()
+        saveJob?.cancel()
+        this.profileId = profileId
+        this.rootId = rootId
+        this.path = path
+        this.markdown = markdown
+        _state.value = TextEditorState(loading = initialText == null)
+        if (initialText != null) applyText(initialText) else load()
     }
 
     fun load(encoding: String? = _state.value.encoding) {
@@ -68,11 +99,16 @@ class TextEditorViewModel(
             }
             return
         }
+        val gen = generation
         _state.update { it.copy(loading = true, error = null, saveError = null, conflict = false) }
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             runCatching { filesRepository.readText(profile, rootId, path, encoding) }
-                .onSuccess { text -> applyText(text) }
+                .onSuccess { text ->
+                    if (gen == generation) applyText(text)
+                }
                 .onFailure { error ->
+                    if (gen != generation) return@onFailure
                     _state.update {
                         it.copy(
                             loading = false,
@@ -141,7 +177,9 @@ class TextEditorViewModel(
         if (current.saving || !current.writable || current.etag == null) return
         val profile = sessionRepository.state.value.profiles.firstOrNull { it.id == profileId } ?: return
         _state.update { it.copy(saving = true, saveError = null) }
-        viewModelScope.launch {
+        val gen = generation
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch {
             val payload = restoreLineEndings(current.content, current.lineEnding)
             runCatching {
                 filesRepository.saveText(
@@ -155,6 +193,7 @@ class TextEditorViewModel(
                     force = force,
                 )
             }.onSuccess { result ->
+                if (gen != generation) return@onSuccess
                 _state.update {
                     it.copy(
                         saving = false,
@@ -170,6 +209,7 @@ class TextEditorViewModel(
                     )
                 }
             }.onFailure { error ->
+                if (gen != generation) return@onFailure
                 val api = error as? FileHubApiException
                 _state.update {
                     it.copy(
@@ -218,6 +258,7 @@ class TextEditorViewModel(
             rootId: Long,
             path: String,
             markdown: Boolean,
+            initialText: TextFileDto? = null,
         ): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = application as FileHubApplication
@@ -229,6 +270,7 @@ class TextEditorViewModel(
                     rootId,
                     path,
                     markdown,
+                    initialText,
                 )
             }
         }
