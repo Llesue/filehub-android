@@ -308,33 +308,19 @@ fun DeleteConfirmDialog(
 
 @Composable
 private fun DeleteItemRow(item: DeleteItemDto) {
-    var expanded by remember(item.relative) { mutableStateOf(false) }
     val name = item.relative.substringAfterLast('/')
-    val path = item.relative.substringBeforeLast('/', "")
-    Column(
+    Text(
+        text = name,
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        FileNameText(
-            name = name,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-        )
-        if (path.isNotEmpty()) {
-            Text(
-                text = path,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = if (expanded) Int.MAX_VALUE else 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+    )
 }
 
-@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun ShareCreateDialog(
     entryName: String,
