@@ -220,73 +220,50 @@ fun DeleteConfirmDialog(
     }
     val expired = preview.expiresAt > 0 && remainingSeconds <= 0
 
-    if (preview.requiresCode) {
+    if (preview.requiresCode && !expired) {
         LaunchedEffect(preview.token) {
             focusRequester.requestFocus()
             keyboard?.show()
         }
     }
 
-    Dialog(
+    AlertDialog(
         onDismissRequest = { if (!loading) onDismiss() },
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            dismissOnBackPress = !loading,
-            dismissOnClickOutside = !loading,
-        ),
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background,
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .imePadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.delete_title),
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = stringResource(
-                                R.string.delete_body,
-                                preview.items.size,
-                                Formatter.formatShortFileSize(context, totalBytes),
-                            ),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(onClick = onDismiss, enabled = !loading) {
-                        Icon(
-                            Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.common_cancel),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
+        title = {
+            Column {
+                Text(
+                    text = stringResource(R.string.delete_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.delete_body,
+                        preview.items.size,
+                        Formatter.formatShortFileSize(context, totalBytes),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 LazyColumn(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                        .fillMaxWidth()
+                        .heightIn(max = 260.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     items(preview.items, key = { it.relative }) { item ->
                         DeleteItemRow(item = item)
                     }
                 }
                 if (preview.requiresCode) {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(10.dp))
                     Text(
                         text = stringResource(R.string.delete_code_prompt),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                     )
                     if (preview.expiresAt > 0) {
                         Text(
@@ -307,7 +284,7 @@ fun DeleteConfirmDialog(
                             },
                         )
                     }
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
                     OutlinedTextField(
                         value = code,
                         onValueChange = { value ->
@@ -327,51 +304,47 @@ fun DeleteConfirmDialog(
                         ),
                         keyboardActions = clearFocusOnDone(),
                         modifier = Modifier
-                            .widthIn(max = 220.dp)
+                            .fillMaxWidth()
                             .focusRequester(focusRequester),
                     )
                 }
                 if (error != null) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
                     Text(
                         text = error,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically,
+            }
+        },
+        confirmButton = {
+            if (expired) {
+                TextButton(onClick = onRefresh, enabled = !loading) {
+                    Text(stringResource(R.string.delete_code_refresh))
+                }
+            } else {
+                TextButton(
+                    onClick = { onConfirm(if (preview.requiresCode) code else null) },
+                    enabled = !loading && (!preview.requiresCode || code.length == 4),
                 ) {
                     if (loading) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp,
                         )
-                        Spacer(Modifier.width(12.dp))
-                    }
-                    TextButton(onClick = onDismiss, enabled = !loading) {
-                        Text(stringResource(R.string.common_cancel))
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    if (expired) {
-                        TextButton(onClick = onRefresh, enabled = !loading) {
-                            Text(stringResource(R.string.delete_code_refresh))
-                        }
                     } else {
-                        TextButton(
-                            onClick = { onConfirm(if (preview.requiresCode) code else null) },
-                            enabled = !loading && (!preview.requiresCode || code.length == 4),
-                        ) {
-                            Text(stringResource(R.string.delete_confirm))
-                        }
+                        Text(stringResource(R.string.delete_confirm))
                     }
                 }
             }
-        }
-    }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !loading) {
+                Text(stringResource(R.string.common_cancel))
+            }
+        },
+    )
 }
 
 @Composable
