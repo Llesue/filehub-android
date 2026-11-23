@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import filehub.android.FileHubApplication
+import filehub.android.core.model.FileKind
 import filehub.android.core.model.SearchResult
 import filehub.android.data.FilesRepository
 import filehub.android.data.api.IndexStatusDto
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 data class SearchState(
     val query: String = "",
@@ -105,6 +107,23 @@ class SearchViewModel(
                 }
             }
         }
+    }
+
+    fun thumbnailUrl(result: SearchResult): String? {
+        if (!result.hasPreview) return null
+        val kind = result.toEntry().kind
+        if (kind != FileKind.Image && kind != FileKind.Video) return null
+        val profile = sessionRepository.state.value.active ?: return null
+        val base = profile.baseUrl.toHttpUrlOrNull() ?: return null
+        return base.newBuilder()
+            .addPathSegments("api/v1/thumb")
+            .addQueryParameter("root", result.rootId.toString())
+            .addQueryParameter("path", result.path)
+            .addQueryParameter("w", "128")
+            .addQueryParameter("wait", "1")
+            .addQueryParameter("v", result.modified.toString())
+            .build()
+            .toString()
     }
 
     fun loadMore() {

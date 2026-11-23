@@ -31,7 +31,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,7 +41,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -176,7 +174,7 @@ fun FolderSyncScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(
+                    AppSwitch(
                         checked = masterEnabled,
                         onCheckedChange = { value ->
                             masterEnabled = value
@@ -198,7 +196,6 @@ fun FolderSyncScreen(
             }
 
             Column(
-                modifier = Modifier.alpha(if (masterEnabled) 1f else 0.45f),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
             Text(
@@ -222,7 +219,6 @@ fun FolderSyncScreen(
             Box {
                 OutlinedButton(
                     onClick = { rootMenu = true },
-                    enabled = masterEnabled,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(root?.alias ?: "—")
@@ -263,7 +259,7 @@ fun FolderSyncScreen(
                             keyboard?.hide()
                             if (root != null) remoteFolderPicker.open(root, remotePath)
                         },
-                        enabled = masterEnabled && root != null,
+                        enabled = root != null,
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_file_folder),
@@ -300,9 +296,9 @@ fun FolderSyncScreen(
                 }
             }
 
-            FolderSwitch(stringResource(R.string.folder_sync_delete), deleteSync, masterEnabled) { deleteSync = it }
-            FolderSwitch(stringResource(R.string.photo_sync_wifi_only), wifiOnly, masterEnabled) { wifiOnly = it }
-            FolderSwitch(stringResource(R.string.photo_sync_charging_only), chargingOnly, masterEnabled) { chargingOnly = it }
+            FolderAppSwitch(stringResource(R.string.folder_sync_delete), deleteSync, true) { deleteSync = it }
+            FolderAppSwitch(stringResource(R.string.photo_sync_wifi_only), wifiOnly, true) { wifiOnly = it }
+            FolderAppSwitch(stringResource(R.string.photo_sync_charging_only), chargingOnly, true) { chargingOnly = it }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -315,7 +311,7 @@ fun FolderSyncScreen(
                     modifier = Modifier.weight(1f),
                 )
                 Box {
-                    OutlinedButton(onClick = { scheduleMenu = true }, enabled = masterEnabled) {
+                    OutlinedButton(onClick = { scheduleMenu = true }) {
                         Text(folderScheduleLabel(schedule))
                     }
                     DropdownMenu(expanded = scheduleMenu, onDismissRequest = { scheduleMenu = false }) {
@@ -482,23 +478,18 @@ private fun FolderStatusCard(
 }
 
 @Composable
-private fun FolderSwitch(
+private fun FolderAppSwitch(
     label: String,
     checked: Boolean,
     enabled: Boolean,
     onChange: (Boolean) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f),
-        )
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
-    }
+    AppSwitchRow(
+        label = label,
+        checked = checked,
+        onCheckedChange = onChange,
+        enabled = enabled,
+    )
 }
 
 @Composable

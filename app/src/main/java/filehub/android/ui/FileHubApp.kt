@@ -116,6 +116,7 @@ fun FileHubApp(viewModel: AppViewModel) {
     val session by viewModel.session.collectAsStateWithLifecycle()
     val connection by viewModel.connection.collectAsStateWithLifecycle()
     val notificationDestination by NotificationNavigator.destination.collectAsStateWithLifecycle()
+    val appImageLoader by viewModel.imageLoader.collectAsStateWithLifecycle()
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val language = when {
         AppCompatDelegate.getApplicationLocales().isEmpty -> "system"
@@ -328,6 +329,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                     searchViewModel.reset()
                     navController.popBackStack()
                 },
+                imageLoader = appImageLoader,
                 onOpenResult = { result ->
                     val active = session.active
                     val root = session.roots.firstOrNull { it.id == result.rootId }

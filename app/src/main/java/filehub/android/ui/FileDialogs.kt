@@ -66,7 +66,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -429,7 +428,7 @@ fun ShareCreateDialog(
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Switch(checked = readOnly, onCheckedChange = { readOnly = it })
+                    AppSwitch(checked = readOnly, onCheckedChange = { readOnly = it })
                 }
                 OutlinedTextField(
                     value = password,

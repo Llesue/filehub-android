@@ -3,6 +3,7 @@ package filehub.android.ui
 import android.text.format.Formatter
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +53,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -59,6 +61,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.ImageLoader
+import coil3.compose.AsyncImage
 import filehub.android.R
 import filehub.android.core.model.SearchResult
 import kotlinx.coroutines.delay
@@ -71,6 +75,7 @@ fun SearchScreen(
     rootAliases: Map<Long, String>,
     onBack: () -> Unit,
     onOpenResult: (SearchResult) -> Unit,
+    imageLoader: ImageLoader? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
@@ -209,6 +214,8 @@ fun SearchScreen(
                     SearchResultCard(
                         result = result,
                         rootAlias = rootAliases[result.rootId],
+                        imageLoader = imageLoader,
+                        thumbUrl = viewModel.thumbnailUrl(result),
                         onClick = { onOpenResult(result) },
                     )
                 }
@@ -312,6 +319,8 @@ private fun KindChip(label: String, value: String?, selected: String?, onSelect:
 private fun SearchResultCard(
     result: SearchResult,
     rootAlias: String?,
+    imageLoader: ImageLoader?,
+    thumbUrl: String?,
     onClick: () -> Unit,
 ) {
     val entry = result.toEntry()
@@ -344,6 +353,17 @@ private fun SearchResultCard(
                     tint = fileIconColor(entry.kind),
                     modifier = Modifier.size(24.dp),
                 )
+                if (thumbUrl != null && imageLoader != null) {
+                    AsyncImage(
+                        model = thumbUrl,
+                        imageLoader = imageLoader,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(10.dp)),
+                    )
+                }
             }
             Spacer(Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {

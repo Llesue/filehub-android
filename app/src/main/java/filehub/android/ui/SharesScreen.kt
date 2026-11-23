@@ -38,7 +38,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -242,16 +242,22 @@ private fun ShareCard(
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                val kind = if (share.isDir) {
+                    filehub.android.core.model.FileKind.Folder
+                } else {
+                    filehub.android.core.model.detectKind(name, "", false)
+                }
                 Box(
                     modifier = Modifier
                         .size(44.dp)
                         .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = if (share.isDir) "DIR" else "FILE",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                    Icon(
+                        painter = painterResource(fileIconRes(kind)),
+                        contentDescription = null,
+                        tint = fileIconColor(kind),
+                        modifier = Modifier.size(24.dp),
                     )
                 }
                 Spacer(Modifier.size(12.dp))
@@ -453,7 +459,7 @@ private fun ShareEditDialog(
                             text = stringResource(R.string.share_read_only),
                             modifier = Modifier.weight(1f),
                         )
-                        Switch(checked = readOnly, onCheckedChange = { readOnly = it })
+                        AppSwitch(checked = readOnly, onCheckedChange = { readOnly = it })
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -461,7 +467,7 @@ private fun ShareEditDialog(
                         text = stringResource(R.string.share_edit_paused),
                         modifier = Modifier.weight(1f),
                     )
-                    Switch(checked = revoked, onCheckedChange = { revoked = it })
+                    AppSwitch(checked = revoked, onCheckedChange = { revoked = it })
                 }
                 Text(
                     text = stringResource(R.string.share_edit_expiry),
@@ -513,7 +519,7 @@ private fun ShareEditDialog(
                             text = stringResource(R.string.share_edit_clear_password),
                             modifier = Modifier.weight(1f),
                         )
-                        Switch(
+                        AppSwitch(
                             checked = clearPassword,
                             onCheckedChange = {
                                 clearPassword = it
