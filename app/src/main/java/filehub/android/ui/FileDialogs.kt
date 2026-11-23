@@ -515,20 +515,24 @@ fun PreviewDialog(
     ) {
         val dialogView = LocalView.current
         val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
-        DisposableEffect(dialogWindow, entry.kind) {
-            val window = dialogWindow ?: activity?.window
-            val controller = window?.let {
-                WindowCompat.getInsetsController(it, it.decorView)
-            }
-            if (controller != null && entry.kind == FileKind.Image) {
+        val insetsController = (dialogWindow ?: activity?.window)?.let { window ->
+            WindowCompat.getInsetsController(window, window.decorView).also { controller ->
                 controller.systemBarsBehavior =
                     WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                controller.hide(WindowInsetsCompat.Type.statusBars())
-                onDispose {
-                    controller.show(WindowInsetsCompat.Type.statusBars())
+            }
+        }
+        LaunchedEffect(entry.kind, controlsVisible, insetsController) {
+            if (entry.kind == FileKind.Image && insetsController != null) {
+                if (controlsVisible) {
+                    insetsController.show(WindowInsetsCompat.Type.statusBars())
+                } else {
+                    insetsController.hide(WindowInsetsCompat.Type.statusBars())
                 }
-            } else {
-                onDispose { }
+            }
+        }
+        DisposableEffect(insetsController) {
+            onDispose {
+                insetsController?.show(WindowInsetsCompat.Type.statusBars())
             }
         }
         Box(
