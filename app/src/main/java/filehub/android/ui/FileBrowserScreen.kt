@@ -307,11 +307,7 @@ fun FileBrowserScreen(
                 IconButton(onClick = { viewModel.clearSelection() }) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.selection_cancel))
                 }
-                Text(
-                    text = stringResource(R.string.selection_selected, state.selected.size),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
+                Spacer(Modifier.weight(1f))
                 TextButton(onClick = viewModel::selectAll) {
                     Text(stringResource(R.string.selection_select_all))
                 }
@@ -765,6 +761,7 @@ fun FileBrowserScreen(
         }
         if (state.selectionMode) {
             SelectionBar(
+                count = state.selected.size,
                 showShare = canShare,
                 onMove = {
                     transferMove = true
@@ -828,25 +825,25 @@ fun FileBrowserScreen(
     if (createSheet) {
         ModalBottomSheet(onDismissRequest = { createSheet = false }) {
             Column(modifier = Modifier.padding(bottom = 12.dp)) {
-                SheetAction(R.string.action_new_folder) {
+                SheetAction(R.drawable.ic_file_folder, R.string.action_new_folder) {
                     createSheet = false
                     newFolder = true
                 }
-                SheetAction(R.string.action_new_file) {
+                SheetAction(R.drawable.ic_file_document, R.string.action_new_file) {
                     createSheet = false
                     newFile = true
                 }
-                SheetAction(R.string.transfer_upload_action) {
+                SheetAction(R.drawable.ic_camera, R.string.transfer_camera_action) {
+                    createSheet = false
+                    takePhoto()
+                }
+                SheetAction(R.drawable.ic_upload, R.string.transfer_upload_action) {
                     createSheet = false
                     filePicker.launch(arrayOf("*/*"))
                 }
-                SheetAction(R.string.transfer_photo_action) {
+                SheetAction(R.drawable.ic_file_image, R.string.transfer_photo_action) {
                     createSheet = false
                     mediaPicker.launch(arrayOf("image/*", "video/*"))
-                }
-                SheetAction(R.string.transfer_camera_action) {
-                    createSheet = false
-                    takePhoto()
                 }
             }
         }
@@ -1109,12 +1106,17 @@ fun FileBrowserScreen(
 
 @Composable
 private fun SelectionBar(
+    count: Int,
     showShare: Boolean,
     onMove: () -> Unit,
     onDelete: () -> Unit,
     onShare: () -> Unit,
     onMore: () -> Unit,
 ) {
+    val compactPadding = androidx.compose.foundation.layout.PaddingValues(
+        horizontal = 6.dp,
+        vertical = 4.dp,
+    )
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
@@ -1123,25 +1125,30 @@ private fun SelectionBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                .padding(horizontal = 12.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            TextButton(onClick = onMove) {
+            Text(
+                text = stringResource(R.string.selection_selected, count),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onMove, contentPadding = compactPadding) {
                 Text(stringResource(R.string.move_to))
             }
             if (showShare) {
-                TextButton(onClick = onShare) {
-                    Text(stringResource(R.string.share_create))
+                TextButton(onClick = onShare, contentPadding = compactPadding) {
+                    Text(stringResource(R.string.file_action_share))
                 }
             }
-            TextButton(onClick = onDelete) {
+            TextButton(onClick = onDelete, contentPadding = compactPadding) {
                 Text(
                     text = stringResource(R.string.selection_delete),
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            TextButton(onClick = onMore) {
+            TextButton(onClick = onMore, contentPadding = compactPadding) {
                 Text(stringResource(R.string.file_action_more))
             }
         }
@@ -1675,6 +1682,20 @@ private fun EmptyFolder(onAction: (() -> Unit)? = null) {
 
 @Composable
 private fun SheetAction(labelRes: Int, onClick: () -> Unit) {
+    SheetActionContent(iconRes = null, labelRes = labelRes, onClick = onClick)
+}
+
+@Composable
+private fun SheetAction(iconRes: Int, labelRes: Int, onClick: () -> Unit) {
+    SheetActionContent(iconRes = iconRes, labelRes = labelRes, onClick = onClick)
+}
+
+@Composable
+private fun SheetActionContent(
+    iconRes: Int?,
+    labelRes: Int,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1682,6 +1703,15 @@ private fun SheetAction(labelRes: Int, onClick: () -> Unit) {
             .padding(horizontal = 24.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (iconRes != null) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(Modifier.size(16.dp))
+        }
         Text(
             text = stringResource(labelRes),
             style = MaterialTheme.typography.bodyLarge,

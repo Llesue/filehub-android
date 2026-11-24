@@ -161,31 +161,36 @@ fun TextEditorScreen(
     val safeFindIndex = if (matches.isEmpty()) 0 else findIndex.coerceIn(0, matches.lastIndex)
     val matchColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
     val currentMatchColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+    val syntaxHighlightEnabled = isCode && state.content.length <= 40_000
     val highlighted = rememberHighlightedText(
         text = state.content,
         language = language,
         theme = palette.syntax,
-        enabled = isCode && state.content.length <= 160_000,
+        enabled = syntaxHighlightEnabled,
         debounceMs = 180,
         matches = if (editing && findOpen) matches else emptyList(),
         currentMatch = safeFindIndex,
         matchColor = matchColor,
         currentMatchColor = currentMatchColor,
     )
-    val transformation = remember(highlighted) {
-        VisualTransformation { input ->
-            val annotated = if (highlighted.text == input.text) {
-                highlighted
-            } else {
-                AnnotatedString(input.text)
+    val transformation = remember(highlighted, syntaxHighlightEnabled) {
+        if (!syntaxHighlightEnabled) {
+            VisualTransformation.None
+        } else {
+            VisualTransformation { input ->
+                val annotated = if (highlighted.text == input.text) {
+                    highlighted
+                } else {
+                    AnnotatedString(input.text)
+                }
+                TransformedText(annotated, OffsetMapping.Identity)
             }
-            TransformedText(annotated, OffsetMapping.Identity)
         }
     }
 
     LaunchedEffect(state.content) {
         if (fieldValue.text != state.content) {
-            fieldValue = TextFieldValue(state.content, TextRange(state.content.length))
+            fieldValue = TextFieldValue(state.content, TextRange(0))
             history.clear()
             historyVersion++
         }
@@ -193,6 +198,9 @@ fun TextEditorScreen(
 
     LaunchedEffect(editing) {
         if (editing) {
+            vertical.scrollTo(0)
+            horizontal.scrollTo(0)
+            headerOffsetPx = 0f
             delay(60)
             textFocus.requestFocus()
         }
@@ -971,7 +979,12 @@ private fun EditorBody(
     val fontSize = if (code) 14.sp else 15.sp
     val lineHeight = if (code) 22.sp else 23.sp
     val bodyStyle: TextStyle = if (markdown) {
-        MaterialTheme.typography.bodyLarge.copy(fontSize = fontSize, lineHeight = lineHeight)
+        MaterialTheme.typography.bodyLarge.copy(
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Default,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            letterSpacing = 0.sp,
+        )
     } else {
         MaterialTheme.typography.bodyLarge.copy(
             fontFamily = CodeFontFamily,
@@ -996,7 +1009,7 @@ private fun EditorBody(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(vertical)
-            .padding(vertical = 8.dp)
+            .padding(16.dp)
             .background(palette.background),
     ) {
         if (showGutter) {
@@ -1017,7 +1030,7 @@ private fun EditorBody(
                     softWrap = false,
                     modifier = Modifier
                         .width(gutterWidth)
-                        .padding(start = 12.dp, end = 8.dp),
+                        .padding(end = 8.dp),
                 )
             }
         }
@@ -1036,7 +1049,7 @@ private fun EditorBody(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .offset(y = 4.dp + lineHeightDp * activeLine)
+                            .offset(y = lineHeightDp * activeLine)
                             .height(lineHeightDp)
                             .background(palette.activeLine),
                     )
@@ -1050,7 +1063,6 @@ private fun EditorBody(
                     visualTransformation = transformation,
                     onTextLayout = onTextLayout,
                     modifier = (if (markdown || wrap) Modifier.fillMaxWidth() else Modifier)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
                         .focusRequester(focusRequester),
                 )
             }
@@ -1066,37 +1078,30 @@ private fun EditorLineNumbers(
     color: Color,
     width: androidx.compose.ui.unit.Dp,
 ) {
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    Canvas(
-        modifier = Modifier
-            .width(width)
-            .height(
-                with(density) {
-                    (layout.size.height + 8.dp.toPx()).toDp()
-                },
-            ),
-    ) {
-        var number = 1
-        for (line in 0 until layout.lineCount) {
-            val start = layout.getLineStart(line)
-            val startsLogical = line == 0 ||
-                (start > 0 && content.getOrNull(start - 1) == '\n')
-            if (!startsLogical) continue
-            val measured = measurer.measure(
-                text = AnnotatedString(number.toString()),
-                style = style.copy(color = color),
-            )
-            drawText(
-                textLayoutResult = measured,
-                topLeft = Offset(
-                    x = size.width - measured.size.width - 8.dp.toPx(),
-                    y = 4.dp.toPx() + layout.getLineTop(line),
-                ),
-            )
-            number++
+    val numbers = remember(layout, content) {
+        buildString {
+            var number = 1
+            for (line in 0 until layout.lineCount) {
+                if (line > 0) append('\n')
+                val start = layout.getLineStart(line)
+                val startsLogical = line == 0 ||
+                    (start > 0 && content.getOrNull(start - 1) == '\n')
+                if (startsLogical) {
+                    append(number)
+                    number++
+                }
+            }
         }
     }
+    Text(
+        text = numbers,
+        style = style.copy(color = color),
+        textAlign = TextAlign.End,
+        softWrap = false,
+        modifier = Modifier
+            .width(width)
+            .padding(end = 8.dp),
+    )
 }
 
 private fun nextEncoding(current: String?): String {

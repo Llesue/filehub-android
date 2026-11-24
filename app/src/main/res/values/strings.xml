@@ -111,6 +111,7 @@
     <string name="file_root">Root</string>
     <string name="file_symlink">Symlink</string>
     <string name="selection_selected">Selected %1$d</string>
+    <string name="file_action_share">Share</string>
     <string name="selection_select_all">Select all</string>
     <string name="selection_delete">Delete</string>
     <string name="selection_cancel">Cancel</string>
@@ -238,7 +239,7 @@
     <string name="share_card_password">Password required</string>
     <string name="share_card_expiry_never">No expiry</string>
     <string name="share_card_expiry_at">Expires %1$s</string>
-    <string name="share_card_footer">Scan the code or open the link</string>
+    <string name="share_card_footer">Scan to view</string>
     <string name="share_card_save">Save image</string>
     <string name="share_card_saved">Saved to Photos</string>
     <string name="share_card_save_failed">Could not save the image</string>

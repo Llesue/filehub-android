@@ -1104,7 +1104,7 @@ fun MarkdownPreview(
             .usePlugin(io.noties.markwon.linkify.LinkifyPlugin.create())
             .build()
     }
-    val padding = with(density) { 20.dp.roundToPx() }
+    val padding = with(density) { 16.dp.roundToPx() }
     val currentOnScroll = androidx.compose.runtime.rememberUpdatedState(onScroll)
     AndroidView(
         factory = { ctx ->
@@ -1112,6 +1112,7 @@ fun MarkdownPreview(
                 setTextColor(textColor.toArgb())
                 setLinkTextColor(linkColor.toArgb())
                 textSize = 15f
+                setLetterSpacing(0f)
                 setLineSpacing(0f, 1.533f)
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 setPadding(padding, padding, padding, padding)

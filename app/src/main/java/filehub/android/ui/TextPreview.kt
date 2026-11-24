@@ -439,7 +439,7 @@ internal fun PlainPreviewBlock(
                 fontSize = 15.sp,
                 lineHeight = 23.sp,
                 softWrap = wrap,
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(16.dp),
             )
         }
     }
@@ -466,7 +466,7 @@ internal fun CodePreviewBlock(
         val numbers = remember(lines) { (1..lines).joinToString("\n") }
         val vertical = rememberScrollState()
         val horizontal = rememberScrollState()
-        Column(modifier = modifier) {
+        Column(modifier = modifier.padding(16.dp)) {
             if (truncated) TruncatedNotice()
             Row(modifier = Modifier.verticalScroll(vertical)) {
                 Text(
@@ -490,7 +490,6 @@ internal fun CodePreviewBlock(
                             fontSize = 14.sp,
                             lineHeight = 22.sp,
                             softWrap = false,
-                            modifier = Modifier.padding(end = 20.dp),
                         )
                     }
                 }
@@ -500,7 +499,7 @@ internal fun CodePreviewBlock(
     }
     val lines = remember(annotated) { splitAnnotatedLines(annotated) }
     val digits = remember(lines) { lines.size.toString().length }
-    LazyColumn(modifier = modifier) {
+    LazyColumn(modifier = modifier.padding(16.dp)) {
         if (truncated) {
             item(key = "truncated") { TruncatedNotice() }
         }
@@ -526,9 +525,7 @@ internal fun CodePreviewBlock(
                         fontSize = 14.sp,
                         lineHeight = 22.sp,
                         softWrap = true,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 20.dp),
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }

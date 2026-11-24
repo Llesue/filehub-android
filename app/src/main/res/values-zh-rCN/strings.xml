@@ -110,7 +110,8 @@
     <string name="file_item_description">%1$s，%2$s</string>
     <string name="file_root">根目录</string>
     <string name="file_symlink">软链接</string>
-    <string name="selection_selected">已选 %1$d 项</string>
+    <string name="selection_selected">已选定 %1$d 项</string>
+    <string name="file_action_share">分享</string>
     <string name="selection_select_all">全选</string>
     <string name="selection_delete">删除</string>
     <string name="selection_cancel">取消</string>
@@ -238,7 +239,7 @@
     <string name="share_card_password">需要密码</string>
     <string name="share_card_expiry_never">长期有效</string>
     <string name="share_card_expiry_at">有效期至 %1$s</string>
-    <string name="share_card_footer">扫码或打开链接查看</string>
+    <string name="share_card_footer">扫码查看</string>
     <string name="share_card_save">保存图片</string>
     <string name="share_card_saved">已保存到相册</string>
     <string name="share_card_save_failed">保存图片失败</string>
