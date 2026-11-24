@@ -21,6 +21,21 @@ enum class EditorThemeMode(val key: String) {
     }
 }
 
+object EditorWrapPreference {
+    private const val FILE = "editor_preferences"
+
+    fun read(context: Context, path: String): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getBoolean("wrap:$path", true)
+
+    fun write(context: Context, path: String, wrap: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("wrap:$path", wrap)
+            .apply()
+    }
+}
+
 object EditorThemePreference {
     private const val FILE = "editor_preferences"
     private const val KEY = "theme"

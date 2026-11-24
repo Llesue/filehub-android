@@ -1354,7 +1354,7 @@ class FilesViewModel(
             .toString()
     }
 
-    fun thumbnailUrl(entry: FileEntry, width: Int = 128): String? {
+    fun thumbnailUrl(entry: FileEntry, width: Int = 512): String? {
         if (!entry.hasPreview) return null
         val current = _state.value
         val profile = current.profile ?: return null

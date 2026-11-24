@@ -1326,11 +1326,17 @@ private fun GridCard(
     onEntry: () -> Unit,
     onToggle: () -> Unit,
 ) {
+    val context = LocalContext.current
     val label = stringResource(R.string.file_item_description, entry.name, fileKindLabel(entry.kind))
-    Column(
+    val meta = if (entry.isDir) {
+        relativeTimeText(entry.modified)
+    } else {
+        Formatter.formatShortFileSize(context, entry.size) + " · " +
+            relativeTimeText(entry.modified)
+    }
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
             .combinedClickable(
                 onClick = {
                     if (selectionMode || selected) onToggle() else onEntry()
@@ -1339,28 +1345,46 @@ private fun GridCard(
             )
             .semantics(mergeDescendants = true) {
                 contentDescription = label
-            }
-            .padding(2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            },
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        border = BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        ),
     ) {
-        FileThumb(
-            entry = entry,
-            imageLoader = imageLoader,
-            thumbnailUrl = thumbnailUrl,
-            selected = selected,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f),
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = entry.name,
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Column(modifier = Modifier.padding(8.dp)) {
+            FileThumb(
+                entry = entry,
+                imageLoader = imageLoader,
+                thumbnailUrl = thumbnailUrl,
+                selected = selected,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1.5f),
+                iconSize = 48.dp,
+                corner = 8.dp,
+                badgeSize = 28.dp,
+            )
+            Spacer(Modifier.height(8.dp))
+            FileNameText(
+                name = entry.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = meta,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
     }
 }
 
@@ -1371,11 +1395,14 @@ private fun FileThumb(
     thumbnailUrl: String?,
     selected: Boolean,
     modifier: Modifier = Modifier,
+    iconSize: androidx.compose.ui.unit.Dp = 28.dp,
+    corner: androidx.compose.ui.unit.Dp = 10.dp,
+    badgeSize: androidx.compose.ui.unit.Dp = 22.dp,
 ) {
     var thumbFailed by remember(thumbnailUrl) { mutableStateOf(false) }
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(corner))
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
@@ -1383,7 +1410,7 @@ private fun FileThumb(
             painter = painterResource(fileIconRes(entry.kind)),
             contentDescription = null,
             tint = fileIconColor(entry.kind),
-            modifier = Modifier.size(28.dp),
+            modifier = Modifier.size(iconSize),
         )
         if (thumbnailUrl != null && imageLoader != null && !thumbFailed) {
             AsyncImage(
@@ -1400,7 +1427,7 @@ private fun FileThumb(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(6.dp)
-                    .size(22.dp)
+                    .size(badgeSize)
                     .background(Color.Black.copy(alpha = 0.55f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1408,7 +1435,7 @@ private fun FileThumb(
                     painter = painterResource(R.drawable.ic_play),
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(12.dp),
+                    modifier = Modifier.size(badgeSize * 0.55f),
                 )
             }
         }
@@ -1708,14 +1735,12 @@ private fun DocumentLoading(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .background(MaterialTheme.colorScheme.background),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
+                .padding(start = 4.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onClose) {

@@ -6,15 +6,16 @@
 
 - File browser: long-press multi-select with a persistent bottom action bar (move, delete, share, more), no per-row overflow menus, and back clears the selection.
 - Bottom-right FAB with one create/upload sheet (folder, file, upload, photos/videos, camera); pull-to-refresh replaces the old overflow refresh.
-- List and grid views (2 columns on phones, 3–4 on tablets), with thumbnails, video badges, selection state, paging and empty/skeleton states.
+- List and grid views (2 columns on phones, 3–4 on tablets), with card-style grid tiles (image, name, size and time), large type icons, sharper shared thumbnails, video badges, selection state, paging and empty/skeleton states.
 - Per-directory sort, view mode and scroll positions, persisted by server/root/path; list and grid remember separate positions.
 - Compact custom bottom navigation with 22dp icons, a 2dp label gap and a 58dp bar.
 - APK recognition with a green package icon, plus ebook, font, disk-image, design-file and torrent types; AAB is treated as an archive and subtitles as text.
 - Multi-file collection shares (pure files only, up to 100, forced read-only) from the selection bar, with collection-aware share lists.
-- Share QR card images: server identity, file/folder name or “N files”, type icon, expiry and password hint; forward, copy and long-press save, with TalkBack save action.
+- Share QR card images: server identity, file/folder name or “N files”, type icon, expiry and password hint; forward, copy and long-press save, with TalkBack save action; card metadata is larger, centred and kept away from the edges.
 - Permanent share deletion via `DELETE /shares/{id}/purge`, separate from revoke, with a clear irreversible warning.
-- Unified document screen: preview is the read-only mode and Edit switches in place; one status bar (encoding, characters, EOL, size) and an Edit/Save action.
+- Unified document screen: preview is the read-only mode and Edit switches in place; one status bar (encoding, characters, EOL, size) and an Edit/Save action; the title collapses when scrolling and Back in edit mode returns to the preview.
 - Encoding quick switch when detection is lossy: tap cycles candidates, long-press opens the full list; no silent automatic switching.
+- Text and code wrap by default, remember the wrap preference per file, and keep line numbers aligned on wrapped visual lines.
 - Undo/redo in the document overflow menu.
 - Image preview has an independent fullscreen mode: single tap toggles, double-tap zoom enters fullscreen, zoom-out keeps it, and pinch only zooms.
 - Video controls hidden means fullscreen: top bar and system status bar hide together and return with the controls.
@@ -24,6 +25,7 @@
 - Client update check from GitHub Releases with a 24-hour cache and a “new version” chip beside the client and server versions.
 - Search results support long-press multi-select, download and delete.
 - Download name collisions append ` (1)`, ` (2)` on Android 9 and below instead of overwriting.
+- File names keep suffixes for APK, AAB, EPUB, fonts, disk images, design files, torrents and subtitles when middle-ellipsized.
 
 ### Changed
 

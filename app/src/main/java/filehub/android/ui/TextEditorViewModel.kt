@@ -62,6 +62,10 @@ class TextEditorViewModel(
 
     fun pathLabel(): String = path.substringAfterLast('/').ifBlank { path }
 
+    fun fullPath(): String = path
+
+    fun preferenceKey(): String = "$profileId:$rootId:$path"
+
     init {
         if (path.isNotEmpty()) {
             if (initialText != null) applyText(initialText) else load()

@@ -1048,6 +1048,7 @@ fun MarkdownPreview(
     textColor: Color,
     linkColor: Color,
     modifier: Modifier = Modifier,
+    onScroll: ((scrollY: Int) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -1104,6 +1105,7 @@ fun MarkdownPreview(
             .build()
     }
     val padding = with(density) { 20.dp.roundToPx() }
+    val currentOnScroll = androidx.compose.runtime.rememberUpdatedState(onScroll)
     AndroidView(
         factory = { ctx ->
             val textView = TextView(ctx).apply {
@@ -1119,6 +1121,9 @@ fun MarkdownPreview(
             android.widget.ScrollView(ctx).apply {
                 isFillViewport = true
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                setOnScrollChangeListener { _, _, scrollY, _, _ ->
+                    currentOnScroll.value?.invoke(scrollY)
+                }
                 addView(
                     textView,
                     android.view.ViewGroup.LayoutParams(

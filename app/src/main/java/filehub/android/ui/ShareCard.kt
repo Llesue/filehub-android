@@ -148,14 +148,24 @@ object ShareCardRenderer {
             )
             canvas.restore()
         } else {
-            val logo = ContextCompat.getDrawable(context, R.drawable.ic_logo_mark)
-            logo?.setBounds(
-                iconRect.left.toInt(),
-                iconRect.top.toInt(),
-                iconRect.right.toInt(),
-                iconRect.bottom.toInt(),
+            canvas.drawRoundRect(
+                iconRect,
+                24f,
+                24f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1A71E4.toInt() },
             )
-            logo?.draw(canvas)
+            val logo = BitmapFactory.decodeResource(
+                context.resources,
+                R.drawable.ic_launcher_foreground,
+            )
+            if (logo != null) {
+                canvas.drawBitmap(
+                    logo,
+                    Rect(0, 0, logo.width, logo.height),
+                    iconRect,
+                    Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true },
+                )
+            }
         }
         val title = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF202124.toInt()
@@ -195,7 +205,7 @@ object ShareCardRenderer {
     }
 
     private fun drawQr(canvas: Canvas, url: String) {
-        val box = RectF(140f, 400f, WIDTH - 140f, 1240f)
+        val box = RectF(150f, 390f, WIDTH - 150f, 1170f)
         val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
         val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFFE3E5E8.toInt()
@@ -214,8 +224,9 @@ object ShareCardRenderer {
                 mapOf(EncodeHintType.MARGIN to 1),
             )
         }.getOrNull() ?: return
-        val module = 640f / matrix.width
-        val left = 220f
+        val qrSize = 620f
+        val module = qrSize / matrix.width
+        val left = (WIDTH - qrSize) / 2f
         val top = 470f
         val paint = Paint().apply { color = 0xFF202124.toInt() }
         for (y in 0 until matrix.height) {
@@ -236,44 +247,58 @@ object ShareCardRenderer {
     private fun drawMeta(canvas: Canvas, spec: ShareCardSpec) {
         val urlPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF5F6368.toInt()
-            textSize = 26f
+            textSize = 30f
+            textAlign = Paint.Align.CENTER
         }
         val shortUrl = shortUrl(spec.url)
         canvas.drawText(
-            ellipsize(shortUrl, urlPaint, WIDTH - 208f),
+            ellipsize(shortUrl, urlPaint, WIDTH - 240f),
             WIDTH / 2f,
-            1290f,
-            urlPaint.apply { textAlign = Paint.Align.CENTER },
+            1205f,
+            urlPaint,
         )
 
-        var x = 104f
+        val passwordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF1A73E8.toInt()
+            textSize = 30f
+        }
+        val expiryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF5F6368.toInt()
+            textSize = 30f
+        }
+        val passwordWidth = if (spec.hasPassword) {
+            passwordPaint.measureText(spec.passwordText) + 48f
+        } else {
+            0f
+        }
+        val expiryWidth = expiryPaint.measureText(spec.expiryText)
+        val gap = if (spec.hasPassword) 20f else 0f
+        val total = passwordWidth + gap + expiryWidth
+        var x = (WIDTH - total) / 2f
         if (spec.hasPassword) {
-            val pill = RectF(x, 1320f, x + 176f, 1372f)
+            val pill = RectF(x, 1238f, x + passwordWidth, 1298f)
             canvas.drawRoundRect(
                 pill,
-                26f,
-                26f,
+                30f,
+                30f,
                 Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE8F0FE.toInt() },
             )
-            val password = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = 0xFF1A73E8.toInt()
-                textSize = 24f
-            }
-            canvas.drawText(spec.passwordText, x + 20f, 1356f, password)
-            x = pill.right + 18f
+            canvas.drawText(
+                spec.passwordText,
+                x + 24f,
+                1282f,
+                passwordPaint,
+            )
+            x = pill.right + gap
         }
-        val expiry = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xFF5F6368.toInt()
-            textSize = 24f
-        }
-        canvas.drawText(spec.expiryText, x, 1356f, expiry)
+        canvas.drawText(spec.expiryText, x, 1282f, expiryPaint)
 
         val footer = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF9AA0A6.toInt()
-            textSize = 24f
+            textSize = 30f
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText(spec.footerText, WIDTH / 2f, 1400f, footer)
+        canvas.drawText(spec.footerText, WIDTH / 2f, 1355f, footer)
     }
 
     private fun shortUrl(url: String): String {

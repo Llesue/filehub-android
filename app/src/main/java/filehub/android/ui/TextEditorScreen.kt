@@ -2,6 +2,7 @@ package filehub.android.ui
 
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -52,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,10 +61,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -70,6 +78,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
@@ -77,8 +86,12 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import filehub.android.R
 import filehub.android.ui.theme.LocalWarningColors
@@ -111,9 +124,7 @@ fun TextEditorScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val configuration = LocalConfiguration.current
     val name = viewModel.pathLabel()
     val language = remember(name) { syntaxLanguageFor(name) }
     val isCode = language != SyntaxLanguage.DEFAULT && !viewModel.isMarkdown
@@ -132,8 +143,13 @@ fun TextEditorScreen(
     var findQuery by remember { mutableStateOf("") }
     var findIndex by remember { mutableIntStateOf(0) }
     var findFocusRequest by remember { mutableIntStateOf(0) }
-    var wrap by remember(name) { mutableStateOf(!isCodeFile(name)) }
+    val documentPath = viewModel.preferenceKey()
+    var wrap by remember(documentPath) {
+        mutableStateOf(EditorWrapPreference.read(context, documentPath))
+    }
     var themeMode by remember { mutableStateOf(EditorThemePreference.read(context)) }
+    var headerHeightPx by remember { mutableIntStateOf(0) }
+    var headerOffsetPx by remember { mutableFloatStateOf(0f) }
     val palette = rememberEditorPalette(themeMode)
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
@@ -202,13 +218,20 @@ fun TextEditorScreen(
         scrollToMatch(state.content, layoutResult, vertical, horizontal, wrap, first.start, scope)
     }
 
-    BackHandler {
-        if (state.dirty) discardDialog = true else onBack()
+    fun requestBack() {
+        if (!editing) {
+            onBack()
+            return
+        }
+        if (state.dirty) {
+            discardDialog = true
+        } else {
+            editing = false
+            headerOffsetPx = 0f
+        }
     }
 
-    fun requestClose() {
-        if (state.dirty) discardDialog = true else onBack()
-    }
+    BackHandler { requestBack() }
 
     fun snapshot(value: TextFieldValue) =
         EditorSnapshot(value.text, value.selection.start, value.selection.end)
@@ -247,270 +270,342 @@ fun TextEditorScreen(
     }
     val encodingText = encodingLabel(state.encoding) + if (state.bom) " BOM" else ""
 
+    val density = LocalDensity.current
+    val contentTopPadding = with(density) {
+        (headerHeightPx + headerOffsetPx).coerceAtLeast(0f).toDp()
+    }
+    val headerConnection = remember(headerHeightPx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                if (delta < 0f && headerOffsetPx > -headerHeightPx) {
+                    val next = (headerOffsetPx + delta)
+                        .coerceIn(-headerHeightPx.toFloat(), 0f)
+                    val consumed = next - headerOffsetPx
+                    headerOffsetPx = next
+                    return Offset(0f, consumed)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                val delta = available.y
+                if (delta > 0f && headerOffsetPx < 0f) {
+                    val next = (headerOffsetPx + delta)
+                        .coerceIn(-headerHeightPx.toFloat(), 0f)
+                    val consumedByHeader = next - headerOffsetPx
+                    headerOffsetPx = next
+                    return Offset(0f, consumedByHeader)
+                }
+                return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(headerHeightPx) {
+        headerOffsetPx = headerOffsetPx.coerceIn(-headerHeightPx.toFloat(), 0f)
+    }
+
     Surface(modifier = Modifier.fillMaxSize(), color = palette.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
                 .imePadding(),
         ) {
-            Row(
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .weight(1f)
+                    .fillMaxWidth(),
             ) {
-                IconButton(onClick = ::requestClose) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.common_back),
-                    )
-                }
-                FileNameText(
-                    name = name,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (editing) {
-                    IconButton(
-                        onClick = {
-                            findOpen = !findOpen
-                            if (!findOpen) findQuery = ""
-                            findFocusRequest++
-                        },
-                    ) {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = stringResource(R.string.editor_find),
-                        )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(headerConnection)
+                        .padding(top = contentTopPadding),
+                ) {
+                    if (state.loading) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
-                    Box {
-                        IconButton(onClick = { menuOpen = true }) {
-                            Icon(
-                                Icons.Filled.MoreVert,
-                                contentDescription = stringResource(R.string.file_more),
+
+                    val readOnlyReason = state.readOnlyReason
+                    if (!state.writable && readOnlyReason != null) {
+                        ReadOnlyNotice(state.lossy, readOnlyReason)
+                    }
+
+                    state.saveError?.let { message ->
+                        ErrorNotice(message = message, onDismiss = viewModel::clearSaveError)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .clipToBounds(),
+                    ) {
+                        when {
+                            state.loading && state.content.isEmpty() -> Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator()
+                            }
+                            state.error != null && state.content.isEmpty() -> Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(32.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    text = state.error.orEmpty(),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                TextButton(onClick = { viewModel.load() }) {
+                                    Text(stringResource(R.string.common_retry))
+                                }
+                            }
+                            editing && state.writable -> EditorBody(
+                                state = state,
+                                markdown = viewModel.isMarkdown,
+                                code = isCode,
+                                wrap = wrap,
+                                fieldValue = fieldValue,
+                                palette = palette,
+                                vertical = vertical,
+                                horizontal = horizontal,
+                                transformation = transformation,
+                                focusRequester = textFocus,
+                                layout = layoutResult,
+                                onValueChange = { value ->
+                                    if (value.text != fieldValue.text) {
+                                        history.record(snapshot(fieldValue), System.currentTimeMillis())
+                                        historyVersion++
+                                    }
+                                    fieldValue = value
+                                    viewModel.setContent(value.text)
+                                },
+                                onTextLayout = { layoutResult = it },
+                            )
+                            viewModel.isMarkdown -> MarkdownPreview(
+                                markdown = state.content,
+                                textColor = palette.text,
+                                linkColor = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(palette.background),
+                                onScroll = { scrollY ->
+                                    headerOffsetPx = -minOf(scrollY, headerHeightPx).toFloat()
+                                },
+                            )
+                            isCode -> CodePreviewBlock(
+                                content = state.content,
+                                language = language,
+                                palette = palette,
+                                wrap = wrap,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(palette.background),
+                            )
+                            else -> PlainPreviewBlock(
+                                content = state.content,
+                                palette = palette,
+                                wrap = wrap,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(palette.background),
                             )
                         }
-                        DropdownMenu(
-                            expanded = menuOpen,
-                            onDismissRequest = { menuOpen = false },
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset { IntOffset(0, headerOffsetPx.roundToInt()) }
+                        .onSizeChanged { headerHeightPx = it.height }
+                        .zIndex(2f),
+                    color = palette.background,
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 4.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.editor_undo)) },
-                                enabled = canUndo,
-                                onClick = {
-                                    menuOpen = false
-                                    undo()
-                                },
+                            IconButton(onClick = ::requestBack) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = stringResource(R.string.common_back),
+                                )
+                            }
+                            FileNameText(
+                                name = name,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.titleMedium,
                             )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.editor_redo)) },
-                                enabled = canRedo,
-                                onClick = {
-                                    menuOpen = false
-                                    redo()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.editor_encoding)) },
-                                onClick = {
-                                    menuOpen = false
-                                    encodingDialog = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.editor_line_ending)) },
-                                onClick = {
-                                    menuOpen = false
-                                    eolDialog = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = {
+                            if (editing) {
+                                IconButton(
+                                    onClick = {
+                                        findOpen = !findOpen
+                                        if (!findOpen) findQuery = ""
+                                        findFocusRequest++
+                                    },
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Search,
+                                        contentDescription = stringResource(R.string.editor_find),
+                                    )
+                                }
+                                Box {
+                                    IconButton(onClick = { menuOpen = true }) {
+                                        Icon(
+                                            Icons.Filled.MoreVert,
+                                            contentDescription = stringResource(R.string.file_more),
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = menuOpen,
+                                        onDismissRequest = { menuOpen = false },
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.editor_undo)) },
+                                            enabled = canUndo,
+                                            onClick = {
+                                                menuOpen = false
+                                                undo()
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.editor_redo)) },
+                                            enabled = canRedo,
+                                            onClick = {
+                                                menuOpen = false
+                                                redo()
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.editor_encoding)) },
+                                            onClick = {
+                                                menuOpen = false
+                                                encodingDialog = true
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.editor_line_ending)) },
+                                            onClick = {
+                                                menuOpen = false
+                                                eolDialog = true
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    stringResource(
+                                                        if (wrap) R.string.editor_no_wrap else R.string.editor_wrap,
+                                                    ),
+                                                )
+                                            },
+                                            onClick = {
+                                                menuOpen = false
+                                                wrap = !wrap
+                                                EditorWrapPreference.write(context, documentPath, wrap)
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.editor_theme)) },
+                                            onClick = {
+                                                menuOpen = false
+                                                themeDialog = true
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.editor_preview)) },
+                                            enabled = !state.dirty && !state.saving,
+                                            onClick = {
+                                                menuOpen = false
+                                                editing = false
+                                                headerOffsetPx = 0f
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (findOpen && editing) {
+                            OutlinedTextField(
+                                value = findQuery,
+                                onValueChange = { findQuery = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp)
+                                    .focusRequester(findFocus),
+                                placeholder = { Text(stringResource(R.string.editor_find)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { findFocusRequest++ }),
+                                trailingIcon = {
                                     Text(
-                                        stringResource(
-                                            if (wrap) R.string.editor_no_wrap else R.string.editor_wrap,
-                                        ),
+                                        text = if (matches.isEmpty()) {
+                                            stringResource(R.string.editor_find_none)
+                                        } else {
+                                            "${safeFindIndex + 1}/${matches.size}"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
                                     )
                                 },
-                                onClick = {
-                                    menuOpen = false
-                                    wrap = !wrap
-                                },
                             )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.editor_theme)) },
-                                onClick = {
-                                    menuOpen = false
-                                    themeDialog = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.editor_preview)) },
-                                enabled = !state.dirty && !state.saving,
-                                onClick = {
-                                    menuOpen = false
-                                    editing = false
-                                },
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        if (matches.isNotEmpty()) {
+                                            selectMatch((safeFindIndex - 1 + matches.size) % matches.size)
+                                        }
+                                    },
+                                    enabled = matches.isNotEmpty(),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.KeyboardArrowUp,
+                                        contentDescription = stringResource(R.string.editor_find_previous),
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (matches.isNotEmpty()) {
+                                            selectMatch((safeFindIndex + 1) % matches.size)
+                                        }
+                                    },
+                                    enabled = matches.isNotEmpty(),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.KeyboardArrowDown,
+                                        contentDescription = stringResource(R.string.editor_find_next),
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        findOpen = false
+                                        findQuery = ""
+                                    },
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = stringResource(R.string.common_close),
+                                    )
+                                }
+                            }
                         }
                     }
-                }
-            }
-
-            if (findOpen && editing) {
-                OutlinedTextField(
-                    value = findQuery,
-                    onValueChange = { findQuery = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
-                        .focusRequester(findFocus),
-                    placeholder = { Text(stringResource(R.string.editor_find)) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { findFocusRequest++ }),
-                    trailingIcon = {
-                        Text(
-                            text = if (matches.isEmpty()) {
-                                stringResource(R.string.editor_find_none)
-                            } else {
-                                "${safeFindIndex + 1}/${matches.size}"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    },
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    IconButton(
-                        onClick = {
-                            if (matches.isNotEmpty()) {
-                                selectMatch((safeFindIndex - 1 + matches.size) % matches.size)
-                            }
-                        },
-                        enabled = matches.isNotEmpty(),
-                    ) {
-                        Icon(
-                            Icons.Filled.KeyboardArrowUp,
-                            contentDescription = stringResource(R.string.editor_find_previous),
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            if (matches.isNotEmpty()) {
-                                selectMatch((safeFindIndex + 1) % matches.size)
-                            }
-                        },
-                        enabled = matches.isNotEmpty(),
-                    ) {
-                        Icon(
-                            Icons.Filled.KeyboardArrowDown,
-                            contentDescription = stringResource(R.string.editor_find_next),
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            findOpen = false
-                            findQuery = ""
-                        },
-                    ) {
-                        Icon(
-                            Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.common_close),
-                        )
-                    }
-                }
-            }
-
-            if (state.loading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
-
-            val readOnlyReason = state.readOnlyReason
-            if (!state.writable && readOnlyReason != null) {
-                ReadOnlyNotice(state.lossy, readOnlyReason)
-            }
-
-            state.saveError?.let { message ->
-                ErrorNotice(message = message, onDismiss = viewModel::clearSaveError)
-            }
-
-            Box(modifier = Modifier.weight(1f)) {
-                when {
-                    state.loading && state.content.isEmpty() -> Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                    state.error != null && state.content.isEmpty() -> Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(32.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            text = state.error.orEmpty(),
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        TextButton(onClick = { viewModel.load() }) {
-                            Text(stringResource(R.string.common_retry))
-                        }
-                    }
-                    editing && state.writable -> EditorBody(
-                        state = state,
-                        markdown = viewModel.isMarkdown,
-                        code = isCode,
-                        wrap = wrap,
-                        fieldValue = fieldValue,
-                        palette = palette,
-                        vertical = vertical,
-                        horizontal = horizontal,
-                        transformation = transformation,
-                        focusRequester = textFocus,
-                        onValueChange = { value ->
-                            if (value.text != fieldValue.text) {
-                                history.record(snapshot(fieldValue), System.currentTimeMillis())
-                                historyVersion++
-                            }
-                            fieldValue = value
-                            viewModel.setContent(value.text)
-                        },
-                        onTextLayout = { layoutResult = it },
-                    )
-                    viewModel.isMarkdown -> MarkdownPreview(
-                        markdown = state.content,
-                        textColor = palette.text,
-                        linkColor = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(palette.background),
-                    )
-                    isCode -> CodePreviewBlock(
-                        content = state.content,
-                        language = language,
-                        palette = palette,
-                        wrap = wrap,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(palette.background),
-                    )
-                    else -> PlainPreviewBlock(
-                        content = state.content,
-                        palette = palette,
-                        wrap = wrap,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(palette.background),
-                    )
                 }
             }
 
@@ -536,6 +631,7 @@ fun TextEditorScreen(
                         viewModel.save()
                     } else {
                         editing = true
+                        headerOffsetPx = 0f
                     }
                 },
             )
@@ -638,7 +734,8 @@ fun TextEditorScreen(
                     onClick = {
                         discardDialog = false
                         viewModel.setContent(state.original)
-                        onBack()
+                        editing = false
+                        headerOffsetPx = 0f
                     },
                 ) {
                     Text(
@@ -683,12 +780,6 @@ fun TextEditorScreen(
         )
     }
 
-    LaunchedEffect(configuration) {
-        // Recomposition on rotation keeps the cursor; nothing else to do.
-    }
-    LaunchedEffect(density) {
-        // Density changes only affect preview metrics.
-    }
 }
 
 @Composable
@@ -864,6 +955,7 @@ private fun EditorBody(
     horizontal: androidx.compose.foundation.ScrollState,
     transformation: VisualTransformation,
     focusRequester: FocusRequester,
+    layout: TextLayoutResult?,
     onValueChange: (TextFieldValue) -> Unit,
     onTextLayout: (TextLayoutResult) -> Unit,
 ) {
@@ -893,6 +985,7 @@ private fun EditorBody(
         fontSize = 12.sp,
         lineHeight = lineHeight,
     )
+    val gutterWidth = (lineCount.toString().length * 8 + 20).dp
     val density = LocalDensity.current
     val lineHeightDp = with(density) { lineHeight.toDp() }
     val activeLine = remember(fieldValue.text, fieldValue.selection.start) {
@@ -907,16 +1000,26 @@ private fun EditorBody(
             .background(palette.background),
     ) {
         if (showGutter) {
-            Text(
-                text = numbers,
-                style = gutterStyle,
-                color = palette.gutter,
-                textAlign = TextAlign.End,
-                softWrap = false,
-                modifier = Modifier
-                    .width((lineCount.toString().length * 8 + 20).dp)
-                    .padding(start = 12.dp, end = 8.dp),
-            )
+            if (layout != null) {
+                EditorLineNumbers(
+                    content = state.content,
+                    layout = layout,
+                    style = gutterStyle,
+                    color = palette.gutter,
+                    width = gutterWidth,
+                )
+            } else {
+                Text(
+                    text = numbers,
+                    style = gutterStyle,
+                    color = palette.gutter,
+                    textAlign = TextAlign.End,
+                    softWrap = false,
+                    modifier = Modifier
+                        .width(gutterWidth)
+                        .padding(start = 12.dp, end = 8.dp),
+                )
+            }
         }
         CompositionLocalProvider(
             LocalTextSelectionColors provides TextSelectionColors(
@@ -951,6 +1054,47 @@ private fun EditorBody(
                         .focusRequester(focusRequester),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun EditorLineNumbers(
+    content: String,
+    layout: TextLayoutResult,
+    style: TextStyle,
+    color: Color,
+    width: androidx.compose.ui.unit.Dp,
+) {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    Canvas(
+        modifier = Modifier
+            .width(width)
+            .height(
+                with(density) {
+                    (layout.size.height + 8.dp.toPx()).toDp()
+                },
+            ),
+    ) {
+        var number = 1
+        for (line in 0 until layout.lineCount) {
+            val start = layout.getLineStart(line)
+            val startsLogical = line == 0 ||
+                (start > 0 && content.getOrNull(start - 1) == '\n')
+            if (!startsLogical) continue
+            val measured = measurer.measure(
+                text = AnnotatedString(number.toString()),
+                style = style.copy(color = color),
+            )
+            drawText(
+                textLayoutResult = measured,
+                topLeft = Offset(
+                    x = size.width - measured.size.width - 8.dp.toPx(),
+                    y = 4.dp.toPx() + layout.getLineTop(line),
+                ),
+            )
+            number++
         }
     }
 }

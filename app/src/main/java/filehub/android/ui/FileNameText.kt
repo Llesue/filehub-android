@@ -33,6 +33,9 @@ private val KNOWN_EXTENSIONS = setOf(
     "yml", "toml", "xml", "ini", "conf", "cfg", "properties", "env", "bat", "cmd",
     "ps1", "psm1", "vbs", "reg", "ahk", "md", "markdown",
     "txt", "log", "html", "css", "scss", "vue", "svelte", "lua", "pl", "swift", "dart",
+    "apk", "aab", "epub", "mobi", "azw", "azw3", "fb2", "djvu", "ttf", "otf", "woff",
+    "woff2", "eot", "iso", "img", "dmg", "vhd", "vhdx", "vmdk", "psd", "ai", "xcf",
+    "sketch", "fig", "afdesign", "afphoto", "torrent", "srt", "ass", "ssa", "vtt", "sub",
 )
 
 private val NUMERIC_SUFFIX_WHITELIST = setOf("7z", "3gp", "3g2")
