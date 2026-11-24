@@ -302,7 +302,7 @@
     <string name="server_add_address">Add address</string>
     <string name="server_save">Save</string>
     <string name="server_address">Address</string>
-    <string name="server_addresses_hint">Tried from top to bottom until one responds; put the LAN address first</string>
+    <string name="server_addresses_hint">Tried from top to bottom until one responds; put the LAN address first and the WAN address last</string>
     <string name="preview_show_original">View original</string>
     <string name="preview_show_preview">View preview</string>
     <string name="preview_original_failed">Could not load the original; showing the preview.</string>
@@ -350,6 +350,7 @@
     <string name="job_failed">Failed</string>
     <string name="job_cancelled">Cancelled</string>
     <string name="job_cancel">Cancel task</string>
+    <string name="usage_ring_description">%1$d%% of storage quota used, %2$s</string>
     <string name="usage_title">Storage quota</string>
     <string name="usage_unlimited">Unlimited</string>
     <string name="usage_computing">Calculating…</string>

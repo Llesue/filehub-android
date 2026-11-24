@@ -302,7 +302,7 @@
     <string name="server_add_address">添加地址</string>
     <string name="server_save">保存</string>
     <string name="server_address">地址</string>
-    <string name="server_addresses_hint">从上到下依次尝试，直到有一个可用；内网地址建议放在最上面</string>
+    <string name="server_addresses_hint">从上到下依次尝试，直到有一个可用；内网地址建议放在最上面，外网地址放后面</string>
     <string name="preview_show_original">查看原图</string>
     <string name="preview_show_preview">查看预览图</string>
     <string name="preview_original_failed">原图加载失败，已回到预览图。</string>
@@ -350,6 +350,7 @@
     <string name="job_failed">失败</string>
     <string name="job_cancelled">已取消</string>
     <string name="job_cancel">取消任务</string>
+    <string name="usage_ring_description">已用 %1$d%% 存储配额，%2$s</string>
     <string name="usage_title">存储配额</string>
     <string name="usage_unlimited">不限</string>
     <string name="usage_computing">计算中…</string>

@@ -1,6 +1,7 @@
 package filehub.android.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,18 +42,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
 import android.text.format.Formatter
 import filehub.android.BuildConfig
 import filehub.android.R
 import filehub.android.data.SessionState
+import kotlin.math.roundToInt
 
 @Composable
 fun MyScreen(
@@ -68,12 +74,10 @@ fun MyScreen(
     usage: UsageUiState,
     serverVersion: filehub.android.data.api.VersionDto?,
     clientUpdate: ClientUpdateUiState,
-    serverVersionLoading: Boolean,
     versionError: String?,
     onLoadUsage: () -> Unit,
     onLoadServerVersion: () -> Unit,
     onLoadClientUpdate: () -> Unit,
-    onRefreshVersions: () -> Unit,
     theme: String,
     onThemeChange: (String) -> Unit,
     language: String,
@@ -183,6 +187,8 @@ fun MyScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                Spacer(Modifier.size(8.dp))
+                QuotaRing(usage)
             }
         }
 
@@ -215,20 +221,17 @@ fun MyScreen(
             InfoRow(stringResource(R.string.my_security_note), "")
         }
 
+        VersionCard(
+            serverVersion = serverVersion,
+            clientUpdate = clientUpdate,
+            versionError = versionError,
+        )
+
         AppearanceCard(
             theme = theme,
             onThemeChange = onThemeChange,
             language = language,
             onLanguageChange = onLanguageChange,
-        )
-        UsageCard(usage = usage, onRefresh = onLoadUsage)
-
-        VersionCard(
-            serverVersion = serverVersion,
-            clientUpdate = clientUpdate,
-            serverVersionLoading = serverVersionLoading,
-            versionError = versionError,
-            onRefresh = onRefreshVersions,
         )
 
         Spacer(Modifier.height(8.dp))
@@ -304,98 +307,77 @@ fun MyScreen(
 }
 
 @Composable
-private fun UsageCard(usage: UsageUiState, onRefresh: () -> Unit) {
+private fun QuotaRing(usage: UsageUiState) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    val data = usage.usage
+    val used = data?.usedBytes
+    val quota = data?.quotaBytes
+    val fraction = if (used != null && quota != null && quota > 0) {
+        (used.toFloat() / quota).coerceIn(0f, 1f)
+    } else {
+        null
+    }
+    val color = if (fraction != null && fraction >= 0.9f) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+    val track = MaterialTheme.colorScheme.outlineVariant
+    val percent = if (fraction != null) {
+        "${(fraction * 100).roundToInt()}%"
+    } else if (data == null) {
+        "…"
+    } else {
+        "∞"
+    }
+    val detail = if (used != null) {
+        val usedText = Formatter.formatShortFileSize(context, used)
+        val quotaText = if (quota != null && quota > 0) {
+            Formatter.formatShortFileSize(context, quota)
+        } else {
+            stringResource(R.string.usage_unlimited)
+        }
+        "$usedText / $quotaText"
+    } else {
+        null
+    }
+    val description = if (fraction != null && detail != null) {
+        stringResource(R.string.usage_ring_description, (fraction * 100).roundToInt(), detail)
+    } else {
+        stringResource(R.string.usage_title)
+    }
+    Column(
+        modifier = Modifier.semantics { contentDescription = description },
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-            val data = usage.usage
-            val used = data?.usedBytes
-            when {
-                usage.error != null -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = usage.error,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = onRefresh) {
-                            Text(stringResource(R.string.common_retry))
-                        }
-                    }
-                }
-                data == null || used == null -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                        )
-                        Spacer(Modifier.size(8.dp))
-                        Text(
-                            text = stringResource(R.string.usage_title) + " · " +
-                                stringResource(R.string.usage_computing),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                else -> {
-                    val quota = data.quotaBytes ?: 0
-                    val usedText = Formatter.formatShortFileSize(context, used)
-                    val quotaText = if (quota > 0) {
-                        Formatter.formatShortFileSize(context, quota)
-                    } else {
-                        stringResource(R.string.usage_unlimited)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.usage_title),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = "$usedText / $quotaText",
-                                style = MaterialTheme.typography.titleSmall,
-                            )
-                        }
-                        if (data.stale || data.computing) {
-                            Text(
-                                text = stringResource(R.string.usage_refreshing),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        IconButton(onClick = onRefresh, enabled = !usage.loading) {
-                            Icon(
-                                Icons.Filled.Refresh,
-                                contentDescription = stringResource(R.string.common_refresh),
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-                    if (quota > 0) {
-                        val fraction = (used.toFloat() / quota).coerceIn(0f, 1f)
-                        LinearProgressIndicator(
-                            progress = { fraction },
-                            color = if (fraction >= 0.9f) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 6.dp)
-                                .height(4.dp),
-                        )
-                    }
+        Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val stroke = 5.dp.toPx()
+                drawCircle(color = track, style = Stroke(width = stroke))
+                if (fraction != null) {
+                    drawArc(
+                        color = color,
+                        startAngle = -90f,
+                        sweepAngle = fraction * 360f,
+                        useCenter = false,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
                 }
             }
+            Text(
+                text = percent,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        if (detail != null) {
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                modifier = Modifier.padding(top = 2.dp),
+            )
         }
     }
 }
@@ -404,9 +386,7 @@ private fun UsageCard(usage: UsageUiState, onRefresh: () -> Unit) {
 private fun VersionCard(
     serverVersion: filehub.android.data.api.VersionDto?,
     clientUpdate: ClientUpdateUiState,
-    serverVersionLoading: Boolean,
     versionError: String?,
-    onRefresh: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val release = clientUpdate.release
@@ -429,21 +409,7 @@ private fun VersionCard(
         }
     }
 
-    InfoCard(
-        title = stringResource(R.string.version_title),
-        action = {
-            if (clientUpdate.checking || serverVersionLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            } else {
-                IconButton(onClick = onRefresh) {
-                    Icon(
-                        Icons.Filled.Refresh,
-                        contentDescription = stringResource(R.string.common_refresh),
-                    )
-                }
-            }
-        },
-    ) {
+    InfoCard(title = stringResource(R.string.version_title)) {
         VersionRow(
             label = stringResource(R.string.client_version),
             value = BuildConfig.VERSION_NAME,
