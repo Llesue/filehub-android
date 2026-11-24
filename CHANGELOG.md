@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.3 - 2026-11-24
+
+### Fixed
+
+- Moving or copying files from subdirectories now sends root-relative paths, so bulk operations no longer fail with “not found”.
+- The move/copy directory picker no longer offers manual path entry; manual entry remains available for sync targets.
+- A lost server connection marks the active server offline, and the directory retry re-probes every configured address before reloading.
+
 ## v0.1.2 - 2026-11-24
 
 ### Added
@@ -39,7 +47,6 @@
 ### Fixed
 
 - Search selection keyed by root and path so identical names in different folders cannot collide.
-
 ## v0.1.1 - 2026-11-23
 
 ### Added

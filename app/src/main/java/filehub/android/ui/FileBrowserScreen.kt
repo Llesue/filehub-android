@@ -550,7 +550,7 @@ fun FileBrowserScreen(
                     title = state.error.orEmpty(),
                     body = stringResource(R.string.file_error_body),
                     actionLabel = stringResource(R.string.common_retry),
-                    onAction = viewModel::refresh,
+                    onAction = viewModel::retry,
                 )
                 state.loading && state.entries.isEmpty() ->
                     if (state.view == BrowserViewMode.Grid) SkeletonGrid() else SkeletonList()
@@ -576,7 +576,7 @@ fun FileBrowserScreen(
                                     color = MaterialTheme.colorScheme.onErrorContainer,
                                     modifier = Modifier.weight(1f),
                                 )
-                                TextButton(onClick = viewModel::refresh) {
+                                TextButton(onClick = viewModel::retry) {
                                     Text(stringResource(R.string.common_retry))
                                 }
                             }
@@ -602,7 +602,7 @@ fun FileBrowserScreen(
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    TextButton(onClick = viewModel::refresh) {
+                                    TextButton(onClick = viewModel::retry) {
                                         Text(stringResource(R.string.common_retry))
                                     }
                                 }

@@ -51,6 +51,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
+/** The server resolves move/copy paths relative to the source root. */
+internal fun resolveTransferPaths(currentPath: String, names: List<String>): List<String> =
+    names.map { name -> if (currentPath.isEmpty()) name else "$currentPath/$name" }
+
 sealed interface DirSizeState {
     data object Loading : DirSizeState
     data class Ready(val size: Long, val partial: Boolean) : DirSizeState
@@ -146,6 +150,7 @@ class FilesViewModel(
     private val previewDownloader: PreviewDownloader,
     private val transferRepository: TransferRepository,
     private val shareRepository: ShareRepository,
+    private val sessionRepository: filehub.android.data.SessionRepository,
     private val directoryCache: DirectoryCacheRepository,
     private val browserStateRepository: BrowserStateRepository,
     private val audioPlayerController: AudioPlayerController,
@@ -740,6 +745,44 @@ class FilesViewModel(
         _state.update { it.copy(operationError = null) }
     }
 
+    fun updateProfile(profile: ServerProfile) {
+        val current = _state.value
+        if (current.profile?.id != profile.id) return
+        _state.update { it.copy(profile = profile) }
+    }
+
+    /**
+     * Error-banner retry: re-probe every configured address before reloading.
+     * A plain refresh would keep using the stale, unreachable base URL.
+     */
+    fun retry() {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        if (current.loading) return
+        _state.update { it.copy(loading = true, error = null, loginRequired = false) }
+        viewModelScope.launch {
+            runCatching { sessionRepository.connect(profile.id) }
+                .onSuccess {
+                    val updated = sessionRepository.state.value.active ?: profile
+                    _state.update { it.copy(profile = updated) }
+                    repository.tokenFor(updated)?.let { token ->
+                        activeToken = token
+                        _imageLoader.value = thumbnailLoaderFactory.get(updated.id, token)
+                    }
+                    load(path = current.path, append = false)
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            loading = false,
+                            error = error.toUserMessage(application),
+                        )
+                    }
+                }
+        }
+    }
+
     fun goUp() {
         val current = _state.value
         if (current.path.isEmpty()) return
@@ -1029,20 +1072,21 @@ class FilesViewModel(
         val current = _state.value
         val profile = current.profile ?: return
         val root = current.root ?: return
+        val fullPaths = resolveTransferPaths(current.path, paths)
         _state.update { it.copy(operationLoading = true, operationError = null) }
         viewModelScope.launch {
             runCatching {
                 if (move) {
-                    repository.move(profile, root.id, paths, destRootId, destPath)
+                    repository.move(profile, root.id, fullPaths, destRootId, destPath)
                 } else {
-                    repository.copy(profile, root.id, paths, destRootId, destPath)
+                    repository.copy(profile, root.id, fullPaths, destRootId, destPath)
                 }
             }.onSuccess { job ->
                 _state.update { it.copy(operationLoading = false, selected = emptySet()) }
                 trackJob(
                     profile = profile,
                     jobId = job.jobId,
-                    label = paths.firstOrNull() ?: "",
+                    label = fullPaths.firstOrNull() ?: "",
                 )
             }.onFailure { error ->
                 _state.update {
@@ -1455,6 +1499,7 @@ class FilesViewModel(
                     includeSizes = true,
                 )
             }.onSuccess { listing ->
+                sessionRepository.clearConnectionFailure(profile.id)
                 if (!append && cursor == null) {
                     directoryCache.put(
                         profile.id, root.id, path, current.sort, current.order, listing,
@@ -1494,7 +1539,14 @@ class FilesViewModel(
                 }
             }.onFailure { error ->
                 if (error is CancellationException) throw error
-                val needsLogin = (error as? FileHubApiException)?.statusCode == 401
+                val apiError = error as? FileHubApiException
+                val needsLogin = apiError?.statusCode == 401
+                if (apiError != null && (apiError.statusCode == 0 || apiError.code == "NETWORK_ERROR")) {
+                    sessionRepository.reportConnectionFailure(
+                        profile.id,
+                        error.toUserMessage(application),
+                    )
+                }
                 _state.update {
                     it.copy(
                         loading = false,
@@ -1530,6 +1582,7 @@ class FilesViewModel(
                     app.container.previewDownloader,
                     app.container.transferRepository,
                     app.container.shareRepository,
+                    app.container.sessionRepository,
                     app.container.directoryCacheRepository,
                     app.container.browserStateRepository,
                     app.container.audioPlayerController,

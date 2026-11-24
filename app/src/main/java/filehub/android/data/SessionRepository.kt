@@ -216,6 +216,25 @@ class SessionRepository(
         _connection.value = null
     }
 
+    /** Marks the active server offline after a request failed to reach it. */
+    fun reportConnectionFailure(profileId: String, message: String) {
+        _connection.value = ServerConnection(
+            profileId = profileId,
+            attempt = 0,
+            total = 0,
+            status = ServerConnectionStatus.Failed,
+            message = message,
+        )
+    }
+
+    /** Clears an offline badge after a later request succeeds; no reconnect. */
+    fun clearConnectionFailure(profileId: String) {
+        val current = _connection.value ?: return
+        if (current.profileId == profileId && current.status == ServerConnectionStatus.Failed) {
+            _connection.value = null
+        }
+    }
+
     suspend fun updateProfile(
         profileId: String,
         displayName: String,

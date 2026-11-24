@@ -252,7 +252,7 @@ private fun ServerCard(
                                 status.total,
                             )
                             ServerConnectionStatus.Success -> stringResource(R.string.server_connected)
-                            ServerConnectionStatus.Failed -> stringResource(R.string.server_connect_failed)
+                            ServerConnectionStatus.Failed -> stringResource(R.string.browse_root_offline)
                         }
                         Surface(
                             color = when (status.status) {

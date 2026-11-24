@@ -169,12 +169,14 @@ fun DirectoryPickerDialog(
                             )
                         }
                     }
-                    TextButton(onClick = viewModel::toggleManual) {
-                        Text(stringResource(R.string.directory_picker_manual))
+                    if (state.mode == DirectoryPickerMode.Sync) {
+                        TextButton(onClick = viewModel::toggleManual) {
+                            Text(stringResource(R.string.directory_picker_manual))
+                        }
                     }
                 }
 
-                if (state.manualOpen) {
+                if (state.manualOpen && state.mode == DirectoryPickerMode.Sync) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,

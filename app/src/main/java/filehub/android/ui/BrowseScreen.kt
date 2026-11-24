@@ -68,6 +68,16 @@ fun BrowseScreen(
         }
     }
 
+    LaunchedEffect(active?.id, active?.baseUrl) {
+        val currentProfile = filesViewModel.state.value.profile
+        if (active != null && currentProfile?.id == active.id) {
+            filesViewModel.updateProfile(active)
+            if (filesViewModel.state.value.error != null) {
+                filesViewModel.retry()
+            }
+        }
+    }
+
     if (active == null) {
         Column(
             modifier = Modifier
