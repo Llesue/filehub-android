@@ -65,7 +65,6 @@ fun MyScreen(
     state: SessionState,
     imageLoader: ImageLoader?,
     onLogout: () -> Unit,
-    onRemove: () -> Unit,
     onRefresh: () -> Unit,
     onTransfers: () -> Unit,
     onPhotoSync: () -> Unit,
@@ -84,7 +83,6 @@ fun MyScreen(
     onLanguageChange: (String) -> Unit,
 ) {
     val profile = state.active
-    var confirmRemove by remember { mutableStateOf(false) }
     val avatarUrl = profile?.avatarVersion?.takeIf { it > 0 }?.let { version ->
         "${profile.baseUrl.trimEnd('/')}/api/v1/me/avatar?v=$version"
     }
@@ -235,7 +233,7 @@ fun MyScreen(
         )
 
         Spacer(Modifier.height(8.dp))
-        Button(
+        OutlinedButton(
             onClick = onTransfers,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -268,41 +266,13 @@ fun MyScreen(
         Button(
             onClick = onLogout,
             modifier = Modifier.fillMaxWidth(),
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+            ),
         ) {
             Text(stringResource(R.string.my_logout))
         }
-        TextButton(
-            onClick = { confirmRemove = true },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                text = stringResource(R.string.servers_remove),
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-    }
-
-    if (confirmRemove) {
-        AlertDialog(
-            onDismissRequest = { confirmRemove = false },
-            title = { Text(stringResource(R.string.servers_remove_title)) },
-            text = { Text(stringResource(R.string.servers_remove_body)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmRemove = false
-                        onRemove()
-                    },
-                ) {
-                    Text(stringResource(R.string.common_remove))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmRemove = false }) {
-                    Text(stringResource(R.string.common_cancel))
-                }
-            },
-        )
     }
 }
 
@@ -350,9 +320,9 @@ private fun QuotaRing(usage: UsageUiState) {
         modifier = Modifier.semantics { contentDescription = description },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(modifier = Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(38.dp), contentAlignment = Alignment.Center) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val stroke = 4.dp.toPx()
+                val stroke = 3.dp.toPx()
                 drawCircle(color = track, style = Stroke(width = stroke))
                 if (fraction != null) {
                     drawArc(

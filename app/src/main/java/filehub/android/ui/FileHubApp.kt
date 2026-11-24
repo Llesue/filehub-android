@@ -332,7 +332,6 @@ fun FileHubApp(viewModel: AppViewModel) {
                             state = session,
                             imageLoader = viewModel.imageLoader.collectAsStateWithLifecycle().value,
                             onLogout = viewModel::logout,
-                            onRemove = { session.active?.let { viewModel.removeProfile(it.id) } },
                             onRefresh = viewModel::refreshRoots,
                             onTransfers = { navController.navigate("transfers") },
                             onPhotoSync = { navController.navigate("photoSync") },

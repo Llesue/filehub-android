@@ -22,8 +22,9 @@
 - Music resumes after a video ends or the preview closes, unless the user paused/stopped/changed music during the video.
 - Unified directory picker for move/copy and both sync screens: root switch, breadcrumbs, manual path, paging, new folder, refresh, read-only/offline badges, self/subfolder protection.
 - Missing target folders ask for confirmation and are created segment by segment before selection.
+- My page actions are visually consistent: Transfer and the sync/share/refresh entries are outlined buttons, Logout is filled in the error colour, and server removal lives only on the server list.
 - Client update check from GitHub Releases with a 24-hour cache and a “new version” chip beside the client and server versions; the version card sits directly below the server card and has no refresh button.
-- Storage quota is shown as a compact 46dp progress ring in the account card (percentage plus used/total), replacing the separate quota card; long server URLs are ellipsized on the account and edit-server screens.
+- Storage quota is shown as a compact 38dp progress ring in the account card (percentage plus used/total), replacing the separate quota card; long server URLs are ellipsized on the account and edit-server screens.
 - Search results support long-press multi-select, download and delete.
 - Download name collisions append ` (1)`, ` (2)` on Android 9 and below instead of overwriting.
 - Large code files stay responsive in the editor by skipping syntax colouring above 40k characters; the preview still highlights the full file.
