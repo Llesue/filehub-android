@@ -1376,6 +1376,7 @@ private fun GridCard(
                 iconSize = 48.dp,
                 corner = 8.dp,
                 badgeSize = 28.dp,
+                showPlayBadge = true,
             )
             Spacer(Modifier.height(8.dp))
             FileNameText(
@@ -1405,6 +1406,7 @@ private fun FileThumb(
     iconSize: androidx.compose.ui.unit.Dp = 28.dp,
     corner: androidx.compose.ui.unit.Dp = 10.dp,
     badgeSize: androidx.compose.ui.unit.Dp = 22.dp,
+    showPlayBadge: Boolean = false,
 ) {
     var thumbFailed by remember(thumbnailUrl) { mutableStateOf(false) }
     Box(
@@ -1429,7 +1431,7 @@ private fun FileThumb(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (entry.kind == FileKind.Video) {
+        if (entry.kind == FileKind.Video && showPlayBadge) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)

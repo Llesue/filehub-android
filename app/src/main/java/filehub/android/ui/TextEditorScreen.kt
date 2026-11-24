@@ -1,5 +1,7 @@
 package filehub.android.ui
 
+import android.content.Context
+
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -50,6 +52,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,8 +74,10 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -92,12 +98,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import androidx.compose.ui.zIndex
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import filehub.android.R
 import filehub.android.ui.theme.LocalWarningColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import dev.snipme.highlights.model.SyntaxLanguage
+
+/** Lets the host Scaffold paint the status/navigation bar area with the editor page colour. */
+object DocumentBackdrop {
+    var color by mutableStateOf<Color?>(null)
+}
 
 private val EncodingCycle = listOf(
     "utf-8",
@@ -151,6 +163,24 @@ fun TextEditorScreen(
     var headerHeightPx by remember { mutableIntStateOf(0) }
     var headerOffsetPx by remember { mutableFloatStateOf(0f) }
     val palette = rememberEditorPalette(themeMode)
+    val activity = remember(context) { context.findDocumentActivity() }
+    val view = LocalView.current
+    SideEffect { DocumentBackdrop.color = palette.background }
+    DisposableEffect(Unit) {
+        onDispose { DocumentBackdrop.color = null }
+    }
+    val appLightChrome = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    DisposableEffect(activity, palette, view, appLightChrome) {
+        val window = activity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        val light = palette.background.luminance() > 0.5f
+        controller?.isAppearanceLightStatusBars = light
+        controller?.isAppearanceLightNavigationBars = light
+        onDispose {
+            controller?.isAppearanceLightStatusBars = appLightChrome
+            controller?.isAppearanceLightNavigationBars = appLightChrome
+        }
+    }
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     val textFocus = remember { FocusRequester() }
@@ -437,6 +467,7 @@ fun TextEditorScreen(
                         .onSizeChanged { headerHeightPx = it.height }
                         .zIndex(2f),
                     color = palette.background,
+                    contentColor = palette.text,
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
@@ -627,6 +658,9 @@ fun TextEditorScreen(
                 writable = state.writable,
                 editing = editing,
                 saving = state.saving,
+                background = palette.surface,
+                textColor = palette.text,
+                mutedColor = palette.muted,
                 onClickEncoding = {
                     if (state.lossy && !state.loading) {
                         val next = nextEncoding(state.encoding)
@@ -853,12 +887,15 @@ private fun DocumentStatusBar(
     writable: Boolean,
     editing: Boolean,
     saving: Boolean,
+    background: Color,
+    textColor: Color,
+    mutedColor: Color,
     onClickEncoding: () -> Unit,
     onLongClickEncoding: () -> Unit,
     onToggleEdit: () -> Unit,
 ) {
     val context = LocalContext.current
-    Surface(color = MaterialTheme.colorScheme.surface) {
+    Surface(color = background, contentColor = textColor) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -892,7 +929,7 @@ private fun DocumentStatusBar(
                     Text(
                         text = encodingText,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = mutedColor,
                         modifier = Modifier
                             .combinedClickable(
                                 onClick = onClickEncoding,
@@ -904,17 +941,17 @@ private fun DocumentStatusBar(
                 Text(
                     text = " · " + stringResource(R.string.editor_chars, charCount),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = mutedColor,
                 )
                 Text(
                     text = " · " + lineEnding.uppercase(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = mutedColor,
                 )
                 Text(
                     text = " · " + Formatter.formatShortFileSize(context, size),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = mutedColor,
                 )
                 if (dirty) {
                     Text(
@@ -928,7 +965,7 @@ private fun DocumentStatusBar(
                 Text(
                     text = stringResource(R.string.editor_read_only_short),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = mutedColor,
                     modifier = Modifier.padding(horizontal = 10.dp),
                 )
             } else {
@@ -1129,4 +1166,10 @@ private fun scrollToMatch(
             horizontal.animateScrollTo((horizontal.value + box.left.toInt() - 48).coerceAtLeast(0))
         }
     }
+}
+
+private tailrec fun Context.findDocumentActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findDocumentActivity()
+    else -> null
 }

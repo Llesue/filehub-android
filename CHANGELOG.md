@@ -6,7 +6,7 @@
 
 - File browser: long-press multi-select with a persistent bottom action bar showing the selected count plus move, share, delete and more; no per-row overflow menus, and back clears the selection.
 - Bottom-right FAB with one icon-labelled create/upload sheet (folder, file, camera, upload files, photos/videos); pull-to-refresh replaces the old overflow refresh.
-- List and grid views (2 columns on phones, 3–4 on tablets), with card-style grid tiles (image, name, size and time), large type icons, sharper shared thumbnails, video badges, selection state, paging and empty/skeleton states.
+- List and grid views (2 columns on phones, 3–4 on tablets), with card-style grid tiles (image, name, size and time), large type icons, sharper shared thumbnails, video badges in grid only (no play badge in the list), selection state, paging and empty/skeleton states.
 - Per-directory sort, view mode and scroll positions, persisted by server/root/path; list and grid remember separate positions.
 - Compact custom bottom navigation with 22dp icons, a 2dp label gap and a 58dp bar.
 - APK recognition with a green package icon, plus ebook, font, disk-image, design-file and torrent types; AAB is treated as an archive and subtitles as text.
@@ -23,7 +23,7 @@
 - Unified directory picker for move/copy and both sync screens: root switch, breadcrumbs, manual path, paging, new folder, refresh, read-only/offline badges, self/subfolder protection.
 - Missing target folders ask for confirmation and are created segment by segment before selection.
 - Client update check from GitHub Releases with a 24-hour cache and a “new version” chip beside the client and server versions; the version card sits directly below the server card and has no refresh button.
-- Storage quota is shown as a progress ring in the account card (percentage plus used/total), replacing the separate quota card.
+- Storage quota is shown as a compact 46dp progress ring in the account card (percentage plus used/total), replacing the separate quota card; long server URLs are ellipsized on the account and edit-server screens.
 - Search results support long-press multi-select, download and delete.
 - Download name collisions append ` (1)`, ` (2)` on Android 9 and below instead of overwriting.
 - Large code files stay responsive in the editor by skipping syntax colouring above 40k characters; the preview still highlights the full file.
@@ -52,7 +52,7 @@
 - Reader-style text preview: document header with size, time, encoding, line-ending, character and BOM chips, a padded page surface, copy-all, download and direct encoding switching; lossy text gets an inline "try another encoding" action.
 - Syntax highlighting for Kotlin, Java, Python, JavaScript/TypeScript, C/C++, Rust, Go, shell and other common grammars, using the bundled JetBrains Mono font; search matches are highlighted without losing syntax colours.
 - Text editor with saved/unsaved state, a filled save action, tappable encoding and line-ending chips, LF/CRLF switching, find-in-file with match count and next/previous navigation, a symbol/Tab toolbar, a Markdown formatting bar, and side-by-side Markdown preview on wide screens.
-- Editor themes: follow the app, fixed light, or sepia, persisted per device.
+- Editor themes: follow the app, fixed light, or sepia, persisted per device; the selected page colour paints the status/navigation bar area, the document header and the bottom status bar while a document is open.
 - Unsupported file types open an action dialog (download, share, properties, open as text when possible) instead of a dead-end full-screen message; read failures use the same dialog.
 - Shared empty/error states with an icon, an explanation and a single recovery action.
 - On-demand directory sizes for local and remote roots, with a concurrency limit, polling for server-side scans, cache and `≥` marker for partial results.

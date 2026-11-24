@@ -350,9 +350,9 @@ private fun QuotaRing(usage: UsageUiState) {
         modifier = Modifier.semantics { contentDescription = description },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(46.dp), contentAlignment = Alignment.Center) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val stroke = 5.dp.toPx()
+                val stroke = 4.dp.toPx()
                 drawCircle(color = track, style = Stroke(width = stroke))
                 if (fraction != null) {
                     drawArc(

@@ -141,6 +141,7 @@ fun FileHubApp(viewModel: AppViewModel) {
     }
     val transfers by transferViewModel.items.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val documentBackdrop = DocumentBackdrop.color
     val documentOpen = browserState.previewEntry?.let { entry ->
         !entry.isDir && (
             entry.kind == filehub.android.core.model.FileKind.Text ||
@@ -199,7 +200,7 @@ fun FileHubApp(viewModel: AppViewModel) {
     ) {
         composable("main") {
             Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
+                containerColor = documentBackdrop ?: MaterialTheme.colorScheme.background,
                 snackbarHost = { SnackbarHost(snackbar) },
                 bottomBar = {
                     if (!documentOpen) Column {
