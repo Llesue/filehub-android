@@ -19,6 +19,12 @@ import filehub.android.data.SessionRepository
 import filehub.android.data.SessionState
 import filehub.android.data.api.UsageDto
 import filehub.android.data.api.VersionDto
+import filehub.android.data.events.EventStreamClient
+import filehub.android.data.events.RootsChangedPayload
+import filehub.android.data.events.ServerEvent
+import filehub.android.data.events.ServerEventNames
+import filehub.android.data.events.UsageUpdatedPayload
+import filehub.android.data.events.decodePayload
 import filehub.android.data.local.SettingsStore
 import filehub.android.data.media.ThumbnailLoaderFactory
 import filehub.android.data.sync.FolderSyncRepository
@@ -30,6 +36,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -38,6 +45,15 @@ data class UsageUiState(
     val usage: UsageDto? = null,
     val error: String? = null,
 )
+
+internal fun mergeUsageEvent(current: UsageDto?, payload: UsageUpdatedPayload): UsageDto =
+    (current ?: UsageDto()).copy(
+        usedBytes = payload.usedBytes ?: current?.usedBytes,
+        quotaBytes = payload.quotaBytes ?: current?.quotaBytes,
+        computedAt = payload.computedAt ?: current?.computedAt,
+        computing = false,
+        stale = false,
+    )
 
 data class LoginUiState(
     val loading: Boolean = false,
@@ -61,6 +77,7 @@ class AppViewModel(
     private val folderSyncRepository: FolderSyncRepository,
     private val clientUpdateChecker: ClientUpdateChecker,
     private val browserStateRepository: BrowserStateRepository,
+    private val eventStreamClient: EventStreamClient,
 ) : ViewModel() {
 
     val session: StateFlow<SessionState> = repository.state
@@ -88,6 +105,8 @@ class AppViewModel(
     val login: StateFlow<LoginUiState> = _login.asStateFlow()
 
     private var connectJob: Job? = null
+    private var rootsRefreshJob: Job? = null
+    private var versionRefreshJob: Job? = null
 
     private val _imageLoader = MutableStateFlow<ImageLoader?>(null)
     val imageLoader: StateFlow<ImageLoader?> = _imageLoader.asStateFlow()
@@ -114,6 +133,60 @@ class AppViewModel(
                     null
                 }
             }
+        }
+        viewModelScope.launch {
+            eventStreamClient.events.collect(::handleServerEvent)
+        }
+    }
+
+    private fun handleServerEvent(event: ServerEvent) {
+        val active = session.value.active ?: return
+        if (event.profileId != active.id) return
+        when (event.name) {
+            ServerEventNames.USAGE_UPDATED -> applyUsageEvent(event)
+            ServerEventNames.ROOTS_CHANGED -> {
+                val payload = event.data.decodePayload(RootsChangedPayload.serializer())
+                val rootId = payload?.rootId
+                val online = payload?.online
+                if (rootId != null && online != null) {
+                    repository.applyRootOnline(rootId, online)
+                }
+                scheduleRootsRefresh()
+            }
+            ServerEventNames.UPDATES_CHANGED -> scheduleVersionRefresh()
+            ServerEventNames.SETTINGS_CHANGED,
+            ServerEventNames.USER_FEATURES_CHANGED -> scheduleRootsRefresh()
+            ServerEventNames.RESYNC -> {
+                rootsRefreshJob?.cancel()
+                refreshRoots()
+                loadUsage()
+                loadServerVersion()
+            }
+        }
+    }
+
+    private fun applyUsageEvent(event: ServerEvent) {
+        val payload = event.data.decodePayload(UsageUpdatedPayload.serializer()) ?: return
+        _usage.value = UsageUiState(
+            loading = false,
+            usage = mergeUsageEvent(_usage.value.usage, payload),
+            error = null,
+        )
+    }
+
+    private fun scheduleRootsRefresh() {
+        rootsRefreshJob?.cancel()
+        rootsRefreshJob = viewModelScope.launch {
+            delay(300)
+            repository.refreshRoots()
+        }
+    }
+
+    private fun scheduleVersionRefresh() {
+        versionRefreshJob?.cancel()
+        versionRefreshJob = viewModelScope.launch {
+            delay(300)
+            loadServerVersion()
         }
     }
 
@@ -337,6 +410,7 @@ class AppViewModel(
                     app.container.folderSyncRepository,
                     app.container.clientUpdateChecker,
                     app.container.browserStateRepository,
+                    app.container.eventStreamClient,
                 )
             }
         }

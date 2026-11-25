@@ -6,12 +6,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -27,6 +29,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -81,6 +86,11 @@ fun MyScreen(
     onThemeChange: (String) -> Unit,
     language: String,
     onLanguageChange: (String) -> Unit,
+    onOpenDrawer: (() -> Unit)? = null,
+    onClose: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
+    showQuota: Boolean = true,
+    showVersion: Boolean = true,
 ) {
     val profile = state.active
     val avatarUrl = profile?.avatarVersion?.takeIf { it > 0 }?.let { version ->
@@ -96,183 +106,317 @@ fun MyScreen(
     }
 
     if (profile == null) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 32.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = stringResource(R.string.my_version_format, BuildConfig.VERSION_NAME),
-                style = MaterialTheme.typography.titleLarge,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = stringResource(R.string.browse_no_server_body),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = stringResource(R.string.my_version_format, BuildConfig.VERSION_NAME),
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.browse_no_server_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            onOpenDrawer?.let { open ->
+                IconButton(
+                    onClick = open,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Menu,
+                        contentDescription = stringResource(R.string.nav_menu),
+                    )
+                }
+            }
         }
         return
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.my_account),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
-        )
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val wide = maxWidth >= 900.dp
+        Column(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onBack != null) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.common_back),
+                        )
+                    }
+                } else {
+                    onOpenDrawer?.let { open ->
+                        IconButton(onClick = open) {
+                            Icon(
+                                Icons.Filled.Menu,
+                                contentDescription = stringResource(R.string.nav_menu),
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = stringResource(R.string.my_account),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = profile.username.take(1).uppercase(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
+                        .weight(1f)
+                        .padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+                )
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = stringResource(R.string.common_refresh),
                     )
-                    if (avatarUrl != null && imageLoader != null) {
-                        AsyncImage(
-                            model = avatarUrl,
-                            imageLoader = imageLoader,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(CircleShape),
+                }
+                onClose?.let { close ->
+                    IconButton(onClick = close) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.common_close),
                         )
                     }
                 }
-                Spacer(Modifier.size(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = profile.username,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = profile.displayName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = profile.baseUrl,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.size(8.dp))
-                QuotaRing(usage)
             }
-        }
 
-        if (state.needsLogin) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.errorContainer,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
             ) {
-                Text(
-                    text = stringResource(R.string.servers_needs_login),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(12.dp),
+                Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = profile.username.take(1).uppercase(),
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        if (avatarUrl != null && imageLoader != null) {
+                            AsyncImage(
+                                model = avatarUrl,
+                                imageLoader = imageLoader,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.size(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = profile.username,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = profile.displayName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = profile.baseUrl,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (showQuota) {
+                        Spacer(Modifier.size(8.dp))
+                        QuotaRing(usage)
+                    }
+                }
+            }
+
+            if (state.needsLogin) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.servers_needs_login),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
+
+            val serverCard: @Composable () -> Unit = {
+                InfoCard(title = stringResource(R.string.my_server)) {
+                    val expiresAt = profile.tokenExpiresAt
+                    InfoRow(
+                        label = stringResource(R.string.my_token_expiry),
+                        value = tokenValidityText(expiresAt),
+                    )
+                    Text(
+                        text = stringResource(R.string.my_token_expiry_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    InfoRow(stringResource(R.string.my_security_note), "")
+                }
+            }
+            val versionCard: @Composable () -> Unit = {
+                VersionCard(
+                    serverVersion = serverVersion,
+                    clientUpdate = clientUpdate,
+                    versionError = versionError,
                 )
             }
-        }
+            val appearanceCard: @Composable () -> Unit = {
+                AppearanceCard(
+                    theme = theme,
+                    onThemeChange = onThemeChange,
+                    language = language,
+                    onLanguageChange = onLanguageChange,
+                )
+            }
+            val actions: @Composable () -> Unit = {
+                ActionGrid(
+                    onTransfers = onTransfers,
+                    onPhotoSync = onPhotoSync,
+                    onFolderSync = onFolderSync,
+                    onShares = onShares,
+                )
+            }
 
-        InfoCard(title = stringResource(R.string.my_server)) {
-            val expiresAt = profile.tokenExpiresAt
-            InfoRow(
-                label = stringResource(R.string.my_token_expiry),
-                value = tokenValidityText(expiresAt),
-            )
-            Text(
-                text = stringResource(R.string.my_token_expiry_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            InfoRow(stringResource(R.string.my_security_note), "")
-        }
+            if (wide) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        serverCard()
+                        if (showVersion) versionCard()
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        appearanceCard()
+                        actions()
+                    }
+                }
+            } else {
+                serverCard()
+                if (showVersion) versionCard()
+                appearanceCard()
+                actions()
+            }
 
-        VersionCard(
-            serverVersion = serverVersion,
-            clientUpdate = clientUpdate,
-            versionError = versionError,
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Button(
+                    onClick = onLogout,
+                    modifier = Modifier
+                        .widthIn(max = 220.dp)
+                        .height(44.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) {
+                    Text(stringResource(R.string.my_logout))
+                }
+            }
+        }
+    }
+
+}
+
+@Composable
+private fun ActionGrid(
+    onTransfers: () -> Unit,
+    onPhotoSync: () -> Unit,
+    onFolderSync: () -> Unit,
+    onShares: () -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val fourColumn = maxWidth >= 480.dp
+        if (fourColumn) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ActionButton(stringResource(R.string.my_transfers), onTransfers, Modifier.weight(1f))
+                ActionButton(stringResource(R.string.photo_sync_screen), onPhotoSync, Modifier.weight(1f))
+                ActionButton(stringResource(R.string.folder_sync_screen), onFolderSync, Modifier.weight(1f))
+                ActionButton(stringResource(R.string.shares_title), onShares, Modifier.weight(1f))
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ActionButton(stringResource(R.string.my_transfers), onTransfers, Modifier.weight(1f))
+                    ActionButton(stringResource(R.string.photo_sync_screen), onPhotoSync, Modifier.weight(1f))
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ActionButton(stringResource(R.string.folder_sync_screen), onFolderSync, Modifier.weight(1f))
+                    ActionButton(stringResource(R.string.shares_title), onShares, Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(44.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+    ) {
+        Text(
+            text = label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-
-        AppearanceCard(
-            theme = theme,
-            onThemeChange = onThemeChange,
-            language = language,
-            onLanguageChange = onLanguageChange,
-        )
-
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = onTransfers,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.my_transfers))
-        }
-        OutlinedButton(
-            onClick = onPhotoSync,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.photo_sync_screen))
-        }
-        OutlinedButton(
-            onClick = onFolderSync,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.folder_sync_screen))
-        }
-        OutlinedButton(
-            onClick = onShares,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.shares_title))
-        }
-        OutlinedButton(
-            onClick = onRefresh,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.common_refresh))
-        }
-        Button(
-            onClick = onLogout,
-            modifier = Modifier.fillMaxWidth(),
-            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.error,
-                contentColor = MaterialTheme.colorScheme.onError,
-            ),
-        ) {
-            Text(stringResource(R.string.my_logout))
-        }
     }
 }
 
@@ -384,7 +528,7 @@ private fun VersionCard(
             label = stringResource(R.string.client_version),
             value = BuildConfig.VERSION_NAME,
             chip = if (clientNewer) {
-                stringResource(R.string.version_new, release?.version.orEmpty())
+                stringResource(R.string.version_new, release.version)
             } else {
                 null
             },

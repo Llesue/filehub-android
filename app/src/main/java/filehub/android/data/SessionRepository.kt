@@ -37,6 +37,13 @@ data class SessionState(
     val error: String? = null,
 )
 
+internal fun List<FileRoot>.withRootOnline(rootId: Long, online: Boolean): List<FileRoot> =
+    if (none { it.id == rootId }) {
+        this
+    } else {
+        map { root -> if (root.id == rootId) root.copy(online = online) else root }
+    }
+
 class SessionRepository(
     private val context: Context,
     private val store: ProfileStore,
@@ -232,6 +239,20 @@ class SessionRepository(
         val current = _connection.value ?: return
         if (current.profileId == profileId && current.status == ServerConnectionStatus.Failed) {
             _connection.value = null
+        }
+    }
+
+    /** The event stream hit 401; stop using the current token until login. */
+    fun reportUnauthorized() {
+        _state.update {
+            it.copy(needsLogin = true, rootsLoading = false, error = null)
+        }
+    }
+
+    /** Applies a remote mount health change before the full root refresh lands. */
+    fun applyRootOnline(rootId: Long, online: Boolean) {
+        _state.update { current ->
+            current.copy(roots = current.roots.withRootOnline(rootId, online))
         }
     }
 

@@ -249,6 +249,7 @@ fun TextPreviewScaffold(
                         code -> CodePreviewBlock(
                             content = text.content,
                             language = syntaxLanguageFor(entry.name),
+                            customSyntax = customSyntaxFor(entry.name),
                             palette = palette,
                             wrap = wrap,
                             modifier = Modifier.fillMaxSize(),
@@ -452,6 +453,7 @@ internal fun CodePreviewBlock(
     palette: EditorPalette,
     wrap: Boolean,
     modifier: Modifier = Modifier,
+    customSyntax: CustomSyntax? = null,
 ) {
     val truncated = content.length > CODE_PREVIEW_MAX_CHARS
     val shown = if (truncated) content.take(CODE_PREVIEW_MAX_CHARS) else content
@@ -459,7 +461,9 @@ internal fun CodePreviewBlock(
         text = shown,
         language = language,
         theme = palette.syntax,
-        enabled = language != dev.snipme.highlights.model.SyntaxLanguage.DEFAULT,
+        enabled = language != dev.snipme.highlights.model.SyntaxLanguage.DEFAULT ||
+            customSyntax != null,
+        customSyntax = customSyntax,
     )
     if (!wrap) {
         val lines = remember(annotated) { annotated.text.split('\n').size }

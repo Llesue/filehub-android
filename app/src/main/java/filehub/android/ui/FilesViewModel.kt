@@ -38,6 +38,10 @@ import filehub.android.data.transfer.TransferKind
 import filehub.android.data.transfer.TransferRepository
 import filehub.android.data.transfer.TransferStatus
 import filehub.android.data.api.FileHubApiException
+import filehub.android.data.events.EventStreamClient
+import filehub.android.data.events.JobUpdatedPayload
+import filehub.android.data.events.ServerEventNames
+import filehub.android.data.events.decodePayload
 import filehub.android.data.toUserMessage
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -154,6 +158,7 @@ class FilesViewModel(
     private val directoryCache: DirectoryCacheRepository,
     private val browserStateRepository: BrowserStateRepository,
     private val audioPlayerController: AudioPlayerController,
+    private val eventStreamClient: EventStreamClient,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileBrowserState())
@@ -168,6 +173,8 @@ class FilesViewModel(
     private var navJob: Job? = null
     private var persistScrollJob: Job? = null
     private var uploadRefreshJob: Job? = null
+    private var jobCompensationJob: Job? = null
+    private val finishingJobs = mutableSetOf<String>()
     private val dirSizeJobs = mutableMapOf<String, Job>()
     private val dirSizeLimit = kotlinx.coroutines.sync.Semaphore(3)
     private val seenCompletedUploads = mutableSetOf<String>()
@@ -199,6 +206,44 @@ class FilesViewModel(
                         item.remoteDir == current.path
                 }
                 if (affectsCurrent) scheduleUploadRefresh()
+            }
+        }
+        viewModelScope.launch {
+            sessionRepository.state.collect { session ->
+                val profile = _state.value.profile ?: return@collect
+                if (session.active?.id != profile.id || session.rootsLoading) return@collect
+                val root = _state.value.root ?: return@collect
+                val refreshed = session.roots.firstOrNull { it.id == root.id }
+                if (refreshed == null) {
+                    clear()
+                } else if (refreshed != root) {
+                    _state.update { it.copy(root = refreshed) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            eventStreamClient.events.collect { event ->
+                val current = _state.value
+                val profileId = current.profile?.id ?: return@collect
+                if (event.profileId != profileId) return@collect
+                when (event.name) {
+                    ServerEventNames.JOB_UPDATED -> {
+                        val payload = event.data
+                            .decodePayload(JobUpdatedPayload.serializer())
+                            ?: return@collect
+                        applyJobUpdate(
+                            jobId = payload.id,
+                            status = payload.status,
+                            progress = payload.progress,
+                            total = payload.total,
+                            error = payload.error,
+                        )
+                    }
+                    ServerEventNames.RESYNC -> {
+                        if (current.root != null) refresh()
+                        compensateActiveJobs()
+                    }
+                }
             }
         }
     }
@@ -237,6 +282,46 @@ class FilesViewModel(
             if (current.root?.id != root.id || current.path != normalized) return@launch
             applyBrowserState(saved)
             load(path = normalized, append = false)
+        }
+    }
+
+    /**
+     * Shows a cached directory level immediately, without a network round trip.
+     * Column navigation uses this when the user steps back to an ancestor.
+     */
+    fun restoreColumn(
+        profile: ServerProfile,
+        root: FileRoot,
+        path: String,
+        entries: List<FileEntry>,
+        nextCursor: String? = null,
+        sort: FileSort,
+        order: SortOrder,
+        view: BrowserViewMode,
+    ) {
+        val normalized = normalizePath(path)
+        persistCurrentState()
+        loadJob?.cancel()
+        navJob?.cancel()
+        cancelDirSizes()
+        resetScrollPosition()
+        _state.value = FileBrowserState(
+            profile = profile,
+            root = root,
+            path = normalized,
+            entries = entries,
+            loading = false,
+            nextCursor = nextCursor,
+            readOnly = root.readOnly,
+            sort = sort,
+            order = order,
+            view = view,
+        )
+        viewModelScope.launch {
+            repository.tokenFor(profile)?.let { token ->
+                activeToken = token
+                _imageLoader.value = thumbnailLoaderFactory.get(profile.id, token)
+            }
         }
     }
 
@@ -1021,6 +1106,38 @@ class FilesViewModel(
         )
     }
 
+    fun moveEntries(entries: List<FileEntry>, destRootId: Long, destPath: String) {
+        transferPaths(entries.map { it.name }, destRootId, destPath, move = true)
+    }
+
+    fun copyEntries(entries: List<FileEntry>, destRootId: Long, destPath: String) {
+        transferPaths(entries.map { it.name }, destRootId, destPath, move = false)
+    }
+
+    fun zipEntries(entries: List<FileEntry>, name: String) {
+        val current = _state.value
+        val profile = current.profile ?: return
+        val root = current.root ?: return
+        val names = entries.map { it.name }
+        if (names.isEmpty()) return
+        _state.update { it.copy(operationLoading = true, operationError = null) }
+        viewModelScope.launch {
+            runCatching { repository.archiveZip(profile, root.id, current.path, names, name) }
+                .onSuccess { job ->
+                    _state.update { it.copy(operationLoading = false, selected = emptySet()) }
+                    trackJob(profile, job.jobId, name)
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            operationLoading = false,
+                            operationError = error.toUserMessage(application),
+                        )
+                    }
+                }
+        }
+    }
+
     fun zipSelected(name: String) {
         val current = _state.value
         val profile = current.profile ?: return
@@ -1116,51 +1233,102 @@ class FilesViewModel(
         )
         _state.update { it.copy(activeJobs = it.activeJobs + initial) }
         viewModelScope.launch {
+            var wasConnected = false
             while (true) {
-                delay(1500)
-                val job = runCatching { repository.jobStatus(profile, jobId) }.getOrNull()
-                if (job == null) {
-                    _state.update {
-                        it.copy(
-                            activeJobs = it.activeJobs.filterNot { item -> item.id == jobId },
-                            operationError = application.getString(R.string.operation_error),
-                        )
-                    }
-                    break
+                if (_state.value.activeJobs.none { it.id == jobId }) break
+                val connected = eventStreamClient.isConnected(profile.id)
+                if (connected && !wasConnected) {
+                    wasConnected = true
+                } else {
+                    delay(if (connected) JOB_POLL_CONNECTED_MS else JOB_POLL_FALLBACK_MS)
                 }
-                val active = ActiveJob(
-                    id = job.id,
-                    label = label,
-                    status = job.status,
-                    progress = job.progress,
-                    total = job.total,
-                    bytesDone = job.bytesDone,
-                    bytesTotal = job.bytesTotal,
-                )
+                if (_state.value.activeJobs.none { it.id == jobId }) break
+                if (!pollJobOnce(profile, jobId)) break
+            }
+        }
+    }
+
+    private suspend fun pollJobOnce(profile: ServerProfile, jobId: String): Boolean {
+        val job = runCatching { repository.jobStatus(profile, jobId) }.getOrNull()
+        if (job == null) {
+            if (_state.value.activeJobs.any { it.id == jobId }) {
                 _state.update {
                     it.copy(
-                        activeJobs = it.activeJobs.map { item ->
-                            if (item.id == jobId) active else item
-                        },
+                        activeJobs = it.activeJobs.filterNot { item -> item.id == jobId },
+                        operationError = application.getString(R.string.operation_error),
                     )
                 }
-                if (job.status == "completed" || job.status == "failed" || job.status == "cancelled") {
-                    if (job.status == "completed") {
-                        refresh()
-                    } else if (job.status == "failed") {
-                        _state.update {
-                            it.copy(
-                                operationError = job.error
-                                    ?: application.getString(R.string.operation_error),
-                            )
-                        }
-                    }
-                    delay(1200)
-                    _state.update {
-                        it.copy(activeJobs = it.activeJobs.filterNot { item -> item.id == jobId })
-                    }
-                    break
-                }
+            }
+            return false
+        }
+        if (_state.value.activeJobs.none { it.id == jobId }) return false
+        applyJobUpdate(
+            jobId = job.id,
+            status = job.status,
+            progress = job.progress,
+            total = job.total,
+            bytesDone = job.bytesDone,
+            bytesTotal = job.bytesTotal,
+            error = job.error,
+        )
+        return !isTerminalJobStatus(job.status)
+    }
+
+    private fun applyJobUpdate(
+        jobId: String,
+        status: String,
+        progress: Int,
+        total: Int,
+        bytesDone: Long? = null,
+        bytesTotal: Long? = null,
+        error: String? = null,
+    ) {
+        val existing = _state.value.activeJobs.firstOrNull { it.id == jobId } ?: return
+        val updated = mergeJobUpdate(
+            existing = existing,
+            status = status,
+            progress = progress,
+            total = total,
+            bytesDone = bytesDone,
+            bytesTotal = bytesTotal,
+        )
+        _state.update {
+            it.copy(
+                activeJobs = it.activeJobs.map { item ->
+                    if (item.id == jobId) updated else item
+                },
+            )
+        }
+        if (isTerminalJobStatus(updated.status)) finishJob(jobId, updated.status, error)
+    }
+
+    private fun finishJob(jobId: String, status: String, error: String?) {
+        if (!finishingJobs.add(jobId)) return
+        when (status) {
+            "completed" -> refresh()
+            "failed" -> _state.update {
+                it.copy(operationError = error ?: application.getString(R.string.operation_error))
+            }
+        }
+        viewModelScope.launch {
+            delay(1200)
+            _state.update {
+                it.copy(activeJobs = it.activeJobs.filterNot { job -> job.id == jobId })
+            }
+            finishingJobs.remove(jobId)
+        }
+    }
+
+    private fun compensateActiveJobs() {
+        if (jobCompensationJob?.isActive == true) return
+        val profile = _state.value.profile ?: return
+        val jobs = _state.value.activeJobs
+        if (jobs.isEmpty()) return
+        jobCompensationJob = viewModelScope.launch {
+            for (job in jobs) {
+                if (_state.value.profile?.id != profile.id) break
+                if (_state.value.activeJobs.none { it.id == job.id }) continue
+                pollJobOnce(profile, job.id)
             }
         }
     }
@@ -1570,6 +1738,8 @@ class FilesViewModel(
          * minute before giving up so huge folders still resolve eventually.
          */
         private const val DIR_SIZE_MAX_POLLS = 40
+        private const val JOB_POLL_CONNECTED_MS = 15_000L
+        private const val JOB_POLL_FALLBACK_MS = 1_500L
 
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -1586,6 +1756,7 @@ class FilesViewModel(
                     app.container.directoryCacheRepository,
                     app.container.browserStateRepository,
                     app.container.audioPlayerController,
+                    app.container.eventStreamClient,
                 )
             }
         }

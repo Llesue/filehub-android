@@ -8,6 +8,7 @@
 
     <string name="servers_empty_title">还没有服务器</string>
     <string name="servers_empty_body">添加你的第一个 FileHub 实例，之后可以在多个服务器之间切换。</string>
+    <string name="server_picker_title">选择服务器</string>
     <string name="servers_add">添加服务器</string>
 
     <string name="browse_no_server_title">先添加服务器</string>
@@ -132,6 +133,7 @@
     <string name="operation_error">操作失败</string>
     <string name="preview_close">关闭</string>
     <string name="preview_loading">正在加载预览…</string>
+    <string name="preview_zoom_reset">还原缩放</string>
     <string name="preview_unsupported">该类型暂不支持预览。</string>
     <string name="preview_text">文本预览</string>
     <string name="selection_properties">属性</string>
@@ -283,6 +285,8 @@
     <string name="copy_to">复制到</string>
     <string name="target_root">目标位置</string>
     <string name="target_path">目标文件夹</string>
+    <string name="context_details">详情</string>
+    <string name="context_zip">打包为 ZIP</string>
     <string name="zip_create">创建 ZIP</string>
     <string name="zip_name">ZIP 名称</string>
     <string name="extract">解压 ZIP</string>
@@ -310,6 +314,21 @@
     <string name="file_offline_cached">离线，当前显示缓存内容。</string>
     <string name="browse_root_online">在线</string>
     <string name="browse_root_offline">离线</string>
+    <string name="browse_offline_group">离线目录（%1$d）</string>
+    <string name="browse_root_offline_toast">目录离线</string>
+    <string name="sidebar_locations">位置</string>
+    <string name="sidebar_directories">目录</string>
+    <string name="sidebar_server_version_format">服务端版本：%1$s</string>
+    <string name="sidebar_client_version_format">客户端版本：%1$s</string>
+    <string name="version_update_available">（有新版本）</string>
+    <string name="sidebar_shares">分享管理</string>
+    <string name="sidebar_quota">配额</string>
+    <string name="nav_menu">打开导航</string>
+    <string name="column_roots">目录</string>
+    <string name="column_empty_title">选择目录</string>
+    <string name="column_empty_body">在左栏选择目录，右栏显示内容。</string>
+    <string name="column_no_folders">没有子目录</string>
+    <string name="column_no_roots">没有目录</string>
     <string name="browse_root_unknown">状态未知</string>
     <string name="sync_remote_auth">远程授权已失效，请重新授权挂载。</string>
     <string name="sync_remote_offline">远程服务器离线，同步会稍后重试。</string>

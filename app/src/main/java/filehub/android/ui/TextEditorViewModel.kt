@@ -59,6 +59,7 @@ class TextEditorViewModel(
     private var generation = 0
     private var loadJob: Job? = null
     private var saveJob: Job? = null
+    private var autoSaveJob: Job? = null
 
     fun pathLabel(): String = path.substringAfterLast('/').ifBlank { path }
 
@@ -69,6 +70,20 @@ class TextEditorViewModel(
     init {
         if (path.isNotEmpty()) {
             if (initialText != null) applyText(initialText) else load()
+        }
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(15_000)
+                val current = _state.value
+                if (current.dirty &&
+                    !current.saving &&
+                    current.writable &&
+                    !current.conflict &&
+                    current.saveError == null
+                ) {
+                    save(auto = true)
+                }
+            }
         }
     }
 
@@ -87,6 +102,7 @@ class TextEditorViewModel(
         generation++
         loadJob?.cancel()
         saveJob?.cancel()
+        autoSaveJob?.cancel()
         this.profileId = profileId
         this.rootId = rootId
         this.path = path
@@ -159,6 +175,7 @@ class TextEditorViewModel(
                 justSaved = false,
             )
         }
+        scheduleAutoSave()
     }
 
     fun setLineEnding(value: String) {
@@ -170,21 +187,26 @@ class TextEditorViewModel(
                 justSaved = false,
             )
         }
+        scheduleAutoSave()
     }
 
     fun clearJustSaved() {
         _state.update { it.copy(justSaved = false) }
     }
 
-    fun save(force: Boolean = false) {
+    fun save(force: Boolean = false, auto: Boolean = false) {
         val current = _state.value
-        if (current.saving || !current.writable || current.etag == null) return
+        if (current.saving || !current.writable) return
+        if (auto && (!current.dirty || current.conflict || current.saveError != null)) return
         val profile = sessionRepository.state.value.profiles.firstOrNull { it.id == profileId } ?: return
+        autoSaveJob?.cancel()
         _state.update { it.copy(saving = true, saveError = null) }
         val gen = generation
+        val savedContent = current.content
+        val savedLineEnding = current.lineEnding
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
-            val payload = restoreLineEndings(current.content, current.lineEnding)
+            val payload = restoreLineEndings(savedContent, savedLineEnding)
             runCatching {
                 filesRepository.saveText(
                     profile = profile,
@@ -193,8 +215,8 @@ class TextEditorViewModel(
                     content = payload,
                     encoding = current.encoding,
                     bom = current.bom,
-                    etag = if (force) null else current.etag,
-                    force = force,
+                    etag = if (force || current.etag == null) null else current.etag,
+                    force = force || current.etag == null,
                 )
             }.onSuccess { result ->
                 if (gen != generation) return@onSuccess
@@ -204,14 +226,16 @@ class TextEditorViewModel(
                         etag = result.etag.takeIf { value -> value.isNotBlank() } ?: it.etag,
                         size = result.size.takeIf { value -> value > 0 } ?: it.size,
                         modified = System.currentTimeMillis() / 1000,
-                        original = it.content,
-                        originalLineEnding = it.lineEnding,
-                        dirty = false,
+                        original = savedContent,
+                        originalLineEnding = savedLineEnding,
+                        dirty = it.content != savedContent ||
+                            it.lineEnding != savedLineEnding,
                         conflict = false,
                         saveError = null,
-                        justSaved = true,
+                        justSaved = !auto,
                     )
                 }
+                if (auto && _state.value.dirty) scheduleAutoSave()
             }.onFailure { error ->
                 if (gen != generation) return@onFailure
                 val api = error as? FileHubApiException
@@ -247,6 +271,16 @@ class TextEditorViewModel(
 
     fun dismissError() {
         _state.update { it.copy(error = null) }
+    }
+
+    private fun scheduleAutoSave() {
+        val current = _state.value
+        if (!current.writable || current.conflict) return
+        autoSaveJob?.cancel()
+        autoSaveJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(1_500)
+            save(auto = true)
+        }
     }
 
     private fun normalizeLineEndings(content: String, lineEnding: String): String =

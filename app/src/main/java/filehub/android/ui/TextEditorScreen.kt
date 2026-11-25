@@ -1,6 +1,7 @@
 package filehub.android.ui
 
 import android.content.Context
+import android.content.res.Configuration
 
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -78,6 +80,8 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -99,6 +103,8 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import filehub.android.R
 import filehub.android.ui.theme.LocalWarningColors
@@ -133,15 +139,28 @@ fun TextEditorScreen(
     onBack: () -> Unit,
     startInEdit: Boolean = false,
     onSaved: (() -> Unit)? = null,
+    allowEditing: Boolean = true,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && viewModel.state.value.dirty) {
+                viewModel.save(auto = true)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val name = viewModel.pathLabel()
     val language = remember(name) { syntaxLanguageFor(name) }
-    val isCode = language != SyntaxLanguage.DEFAULT && !viewModel.isMarkdown
+    val customSyntax = remember(name) { customSyntaxFor(name) }
+    val isCode = (language != SyntaxLanguage.DEFAULT || customSyntax != null) &&
+        !viewModel.isMarkdown
 
-    var editing by remember { mutableStateOf(startInEdit) }
+    var editing by remember(allowEditing) { mutableStateOf(startInEdit && allowEditing) }
     var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
     val history = remember { EditorHistory() }
     var historyVersion by remember { mutableIntStateOf(0) }
@@ -202,6 +221,7 @@ fun TextEditorScreen(
         currentMatch = safeFindIndex,
         matchColor = matchColor,
         currentMatchColor = currentMatchColor,
+        customSyntax = customSyntax,
     )
     val transformation = remember(highlighted, syntaxHighlightEnabled) {
         if (!syntaxHighlightEnabled) {
@@ -224,6 +244,10 @@ fun TextEditorScreen(
             history.clear()
             historyVersion++
         }
+    }
+
+    LaunchedEffect(allowEditing) {
+        if (!allowEditing) editing = false
     }
 
     LaunchedEffect(editing) {
@@ -383,6 +407,11 @@ fun TextEditorScreen(
                             .fillMaxWidth()
                             .clipToBounds(),
                     ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.TopCenter,
+                        ) {
+                        Box(modifier = Modifier.widthIn(max = 880.dp).fillMaxSize()) {
                         when {
                             state.loading && state.content.isEmpty() -> Box(
                                 modifier = Modifier.fillMaxSize(),
@@ -442,6 +471,7 @@ fun TextEditorScreen(
                             isCode -> CodePreviewBlock(
                                 content = state.content,
                                 language = language,
+                                customSyntax = customSyntax,
                                 palette = palette,
                                 wrap = wrap,
                                 modifier = Modifier
@@ -457,6 +487,8 @@ fun TextEditorScreen(
                                     .background(palette.background),
                             )
                         }
+                        }
+                        }
                     }
                 }
 
@@ -469,7 +501,11 @@ fun TextEditorScreen(
                     color = palette.background,
                     contentColor = palette.text,
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                    Column(modifier = Modifier.widthIn(max = 880.dp).fillMaxWidth()) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -645,6 +681,7 @@ fun TextEditorScreen(
                             }
                         }
                     }
+                    }
                 }
             }
 
@@ -657,6 +694,7 @@ fun TextEditorScreen(
                 dirty = state.dirty,
                 writable = state.writable,
                 editing = editing,
+                allowEditing = allowEditing,
                 saving = state.saving,
                 background = palette.surface,
                 textColor = palette.text,
@@ -886,6 +924,7 @@ private fun DocumentStatusBar(
     dirty: Boolean,
     writable: Boolean,
     editing: Boolean,
+    allowEditing: Boolean,
     saving: Boolean,
     background: Color,
     textColor: Color,
@@ -896,8 +935,10 @@ private fun DocumentStatusBar(
 ) {
     val context = LocalContext.current
     Surface(color = background, contentColor = textColor) {
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Row(
             modifier = Modifier
+                .widthIn(max = 880.dp)
                 .fillMaxWidth()
                 .padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -968,7 +1009,7 @@ private fun DocumentStatusBar(
                     color = mutedColor,
                     modifier = Modifier.padding(horizontal = 10.dp),
                 )
-            } else {
+            } else if (allowEditing) {
                 TextButton(
                     onClick = onToggleEdit,
                     enabled = if (editing) dirty && !saving else true,
@@ -983,7 +1024,15 @@ private fun DocumentStatusBar(
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
+            } else {
+                Text(
+                    text = stringResource(R.string.file_read_only),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = mutedColor,
+                    modifier = Modifier.padding(horizontal = 10.dp),
+                )
             }
+        }
         }
     }
 }
@@ -1139,6 +1188,13 @@ private fun EditorLineNumbers(
             .width(width)
             .padding(end = 8.dp),
     )
+}
+
+@Composable
+internal fun hasHardwareKeyboard(): Boolean {
+    val configuration = LocalConfiguration.current
+    return configuration.keyboard != Configuration.KEYBOARD_NOKEYS &&
+        configuration.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
 }
 
 private fun nextEncoding(current: String?): String {

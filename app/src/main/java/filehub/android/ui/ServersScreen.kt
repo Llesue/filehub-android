@@ -14,11 +14,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -60,6 +63,7 @@ fun ServersScreen(
     onSelect: (String) -> Unit,
     onRemove: (String) -> Unit,
     onEdit: (String) -> Unit,
+    onOpenDrawer: (() -> Unit)? = null,
 ) {
     var pendingRemoval by remember { mutableStateOf<ServerProfile?>(null) }
 
@@ -70,6 +74,14 @@ fun ServersScreen(
                 .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            onOpenDrawer?.let { open ->
+                IconButton(onClick = open) {
+                    Icon(
+                        Icons.Filled.Menu,
+                        contentDescription = stringResource(R.string.nav_menu),
+                    )
+                }
+            }
             Text(
                 text = stringResource(R.string.tab_servers),
                 style = MaterialTheme.typography.headlineSmall,
@@ -111,26 +123,31 @@ fun ServersScreen(
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 4.dp,
-                    bottom = 24.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(state.profiles, key = { it.id }) { profile ->
-                    ServerCard(
-                        profile = profile,
-                        active = state.active?.id == profile.id,
-                        needsLogin = state.active?.id == profile.id && state.needsLogin,
-                        connection = connection?.takeIf { it.profileId == profile.id },
-                        onClick = { onSelect(profile.id) },
-                        onRemove = { pendingRemoval = profile },
-                        onEdit = { onEdit(profile.id) },
-                    )
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val columns = if (maxWidth >= 600.dp) 2 else 1
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 4.dp,
+                        bottom = 24.dp,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(state.profiles, key = { it.id }) { profile ->
+                        ServerCard(
+                            profile = profile,
+                            active = state.active?.id == profile.id,
+                            needsLogin = state.active?.id == profile.id && state.needsLogin,
+                            connection = connection?.takeIf { it.profileId == profile.id },
+                            onClick = { onSelect(profile.id) },
+                            onRemove = { pendingRemoval = profile },
+                            onEdit = { onEdit(profile.id) },
+                        )
+                    }
                 }
             }
         }

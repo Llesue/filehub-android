@@ -1,5 +1,6 @@
 package filehub.android.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -15,11 +16,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
@@ -32,20 +35,28 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -53,6 +64,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -62,6 +75,7 @@ import filehub.android.FileHubApplication
 import filehub.android.R
 import filehub.android.data.ServerConnectionStatus
 import filehub.android.data.api.PublicLink
+import filehub.android.core.model.FileRoot
 import filehub.android.data.transfer.TransferStatus
 
 enum class MainTab(
@@ -119,9 +133,21 @@ fun FileHubApp(viewModel: AppViewModel) {
     val audioController = remember { application.container.audioPlayerController }
     val audioState by audioController.state.collectAsStateWithLifecycle()
     var tab by remember { mutableStateOf(MainTab.Servers) }
+    var myModal by remember { mutableStateOf(false) }
+    var serverModal by remember { mutableStateOf(false) }
     val session by viewModel.session.collectAsStateWithLifecycle()
     val browserState by filesViewModel.state.collectAsStateWithLifecycle()
     val connection by viewModel.connection.collectAsStateWithLifecycle()
+    val usage by viewModel.usage.collectAsStateWithLifecycle()
+    val serverVersion by viewModel.serverVersion.collectAsStateWithLifecycle()
+    val clientUpdate by viewModel.clientUpdate.collectAsStateWithLifecycle()
+    val versionError by viewModel.versionError.collectAsStateWithLifecycle()
+    val configuration = LocalConfiguration.current
+    val shellMode = shellModeFor(
+        configuration.screenWidthDp,
+        configuration.screenHeightDp,
+        configuration.smallestScreenWidthDp,
+    )
     val notificationDestination by NotificationNavigator.destination.collectAsStateWithLifecycle()
     val appImageLoader by viewModel.imageLoader.collectAsStateWithLifecycle()
     val theme by viewModel.theme.collectAsStateWithLifecycle()
@@ -151,6 +177,22 @@ fun FileHubApp(viewModel: AppViewModel) {
             )
     } == true
 
+    val hostView = LocalView.current
+    val hostActivity = remember(hostView) { hostView.context.findHostActivity() }
+    DisposableEffect(shellMode, documentOpen, hostActivity) {
+        val window = hostActivity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, hostView) }
+        val hide = shellMode == ShellMode.Wide
+        if (hide) {
+            controller?.hide(WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller?.show(WindowInsetsCompat.Type.statusBars())
+        }
+        onDispose {
+            controller?.show(WindowInsetsCompat.Type.statusBars())
+        }
+    }
+
     LaunchedEffect(session.error) {
         val message = session.error ?: return@LaunchedEffect
         snackbar.showSnackbar(message)
@@ -166,6 +208,22 @@ fun FileHubApp(viewModel: AppViewModel) {
 
     LaunchedEffect(session.active?.id) {
         if (session.active == null) audioController.stop()
+    }
+
+    LaunchedEffect(shellMode) {
+        if (shellMode == ShellMode.Wide) tab = MainTab.Browse
+    }
+
+    BackHandler(enabled = shellMode == ShellMode.Landscape && tab == MainTab.My) {
+        tab = MainTab.Browse
+    }
+
+    LaunchedEffect(shellMode, session.active?.id) {
+        if (shellMode != ShellMode.Compact && session.active != null) {
+            tab = MainTab.Browse
+            viewModel.loadUsage()
+            viewModel.loadServerVersion()
+        }
     }
 
     LaunchedEffect(connection?.status, connection?.profileId) {
@@ -199,11 +257,86 @@ fun FileHubApp(viewModel: AppViewModel) {
         },
     ) {
         composable("main") {
-            Scaffold(
-                containerColor = documentBackdrop ?: MaterialTheme.colorScheme.background,
-                snackbarHost = { SnackbarHost(snackbar) },
-                bottomBar = {
-                    if (!documentOpen) Column {
+            val showDrawer: (() -> Unit)? = null
+            val renderTab: @Composable (MainTab, ShellMode) -> Unit = { currentTab, mode ->
+                val drawerAction = if (mode != ShellMode.Compact) showDrawer else null
+                when (currentTab) {
+                    MainTab.Servers -> ServersScreen(
+                        state = session,
+                        connection = connection,
+                        onAddServer = { navController.navigate("addServer") },
+                        onSelect = viewModel::connectProfile,
+                        onRemove = viewModel::removeProfile,
+                        onEdit = { id -> navController.navigate("editServer/$id") },
+                        onOpenDrawer = drawerAction,
+                    )
+                    MainTab.Browse -> BrowseScreen(
+                        state = session,
+                        filesViewModel = filesViewModel,
+                        onAddServer = { navController.navigate("addServer") },
+                        onRetry = viewModel::refreshRoots,
+                        onSearch = { rootId -> navController.navigate("search/${rootId ?: -1}") },
+                        onPauseAudio = audioController::pauseForVideo,
+                        onResumeAudio = audioController::resumeAfterVideo,
+                        directoryPicker = directoryPickerViewModel,
+                        shell = mode,
+                        onOpenDrawer = drawerAction,
+                        onOpenMy = {
+                            if (mode == ShellMode.Wide) myModal = true else tab = MainTab.My
+                        },
+                        onOpenServerPicker = if (mode != ShellMode.Compact) {
+                            { serverModal = true }
+                        } else {
+                            null
+                        },
+                        onShares = { navController.navigate("shares") },
+                        usage = usage,
+                        serverVersion = serverVersion,
+                        clientUpdate = clientUpdate,
+                        theme = theme,
+                        onToggleTheme = {
+                            viewModel.setTheme(if (theme == "light") "dark" else "light")
+                        },
+                        imageLoader = appImageLoader,
+                    )
+                    MainTab.My -> MyScreen(
+                        state = session,
+                        imageLoader = viewModel.imageLoader.collectAsStateWithLifecycle().value,
+                        onLogout = viewModel::logout,
+                        onRefresh = viewModel::refreshRoots,
+                        onTransfers = { navController.navigate("transfers") },
+                        onPhotoSync = { navController.navigate("photoSync") },
+                        onFolderSync = { navController.navigate("folderSync") },
+                        onShares = { navController.navigate("shares") },
+                        usage = usage,
+                        serverVersion = serverVersion,
+                        clientUpdate = clientUpdate,
+                        versionError = versionError,
+                        onLoadUsage = viewModel::loadUsage,
+                        onLoadServerVersion = viewModel::loadServerVersion,
+                        onLoadClientUpdate = { viewModel.loadClientUpdate() },
+                        theme = theme,
+                        onThemeChange = viewModel::setTheme,
+                        language = language,
+                        onLanguageChange = onLanguageChange,
+                        onOpenDrawer = drawerAction,
+                        onBack = if (mode == ShellMode.Landscape) {
+                            { tab = MainTab.Browse }
+                        } else {
+                            null
+                        },
+                    )
+                }
+            }
+            val bottomBars: @Composable () -> Unit = {
+                if (!documentOpen) {
+                    Column(
+                        modifier = if (shellMode == ShellMode.Wide) {
+                            Modifier.navigationBarsPadding()
+                        } else {
+                            Modifier
+                        },
+                    ) {
                         AudioPlayerBar(
                             state = audioState,
                             onTogglePlay = audioController::togglePlayPause,
@@ -223,136 +356,103 @@ fun FileHubApp(viewModel: AppViewModel) {
                                 onClick = { navController.navigate("transfers") },
                             )
                         }
-                        Surface(color = MaterialTheme.colorScheme.surface) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .navigationBarsPadding()
-                                    .height(58.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                MainTab.entries.forEach { item ->
-                                    val selected = tab == item
-                                    Column(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .selectable(
-                                                selected = selected,
-                                                role = Role.Tab,
-                                                onClick = { tab = item },
-                                            ),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center,
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(width = 48.dp, height = 28.dp)
-                                                .background(
-                                                    color = if (selected) {
-                                                        MaterialTheme.colorScheme.primaryContainer
-                                                    } else {
-                                                        androidx.compose.ui.graphics.Color.Transparent
-                                                    },
-                                                    shape = CircleShape,
-                                                ),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Icon(
-                                                item.icon,
-                                                contentDescription = null,
-                                                tint = if (selected) {
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                } else {
-                                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                                },
-                                                modifier = Modifier.size(22.dp),
-                                            )
-                                        }
-                                        Spacer(Modifier.height(2.dp))
-                                        Text(
-                                            text = stringResource(item.labelRes),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (selected) {
-                                                MaterialTheme.colorScheme.onSurface
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-            ) { innerPadding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                ) {
-                    AnimatedContent(
-                        targetState = tab,
-                        transitionSpec = {
-                            val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                            (slideInHorizontally(
-                                tween(200, easing = FastOutSlowInEasing),
-                            ) { direction * it / 12 } +
-                                fadeIn(tween(180, easing = FastOutSlowInEasing)))
-                                .togetherWith(
-                                    slideOutHorizontally(
-                                        tween(160, easing = FastOutSlowInEasing),
-                                    ) { -direction * it / 24 } +
-                                        fadeOut(tween(140, easing = FastOutSlowInEasing)),
-                                )
-                        },
-                        label = "main-tab",
-                        modifier = Modifier.fillMaxSize(),
-                    ) { currentTab ->
-                    when (currentTab) {
-                        MainTab.Servers -> ServersScreen(
-                            state = session,
-                            connection = connection,
-                            onAddServer = { navController.navigate("addServer") },
-                            onSelect = viewModel::connectProfile,
-                            onRemove = viewModel::removeProfile,
-                            onEdit = { id -> navController.navigate("editServer/$id") },
-                        )
-                        MainTab.Browse -> BrowseScreen(
-                            state = session,
-                            filesViewModel = filesViewModel,
-                            onAddServer = { navController.navigate("addServer") },
-                            onRetry = viewModel::refreshRoots,
-                            onSearch = { rootId -> navController.navigate("search/${rootId ?: -1}") },
-                            onPauseAudio = audioController::pauseForVideo,
-                            onResumeAudio = audioController::resumeAfterVideo,
-                            directoryPicker = directoryPickerViewModel,
-                        )
-                        MainTab.My -> MyScreen(
-                            state = session,
-                            imageLoader = viewModel.imageLoader.collectAsStateWithLifecycle().value,
-                            onLogout = viewModel::logout,
-                            onRefresh = viewModel::refreshRoots,
-                            onTransfers = { navController.navigate("transfers") },
-                            onPhotoSync = { navController.navigate("photoSync") },
-                            onFolderSync = { navController.navigate("folderSync") },
-                            onShares = { navController.navigate("shares") },
-                            usage = viewModel.usage.collectAsStateWithLifecycle().value,
-                            serverVersion = viewModel.serverVersion.collectAsStateWithLifecycle().value,
-                            clientUpdate = viewModel.clientUpdate.collectAsStateWithLifecycle().value,
-                            versionError = viewModel.versionError.collectAsStateWithLifecycle().value,
-                            onLoadUsage = viewModel::loadUsage,
-                            onLoadServerVersion = viewModel::loadServerVersion,
-                            onLoadClientUpdate = { viewModel.loadClientUpdate() },
-                            theme = theme,
-                            onThemeChange = viewModel::setTheme,
-                            language = language,
-                            onLanguageChange = onLanguageChange,
-                        )
-                    }
                     }
                 }
             }
+
+                val mainContent: @Composable () -> Unit = {
+                    Scaffold(
+                        containerColor = documentBackdrop ?: MaterialTheme.colorScheme.background,
+                        contentWindowInsets = if (shellMode == ShellMode.Wide) {
+                            WindowInsets(0, 0, 0, 0)
+                        } else {
+                            ScaffoldDefaults.contentWindowInsets
+                        },
+                        snackbarHost = { SnackbarHost(snackbar) },
+                        bottomBar = {
+                            Column {
+                                bottomBars()
+                                if (shellMode == ShellMode.Compact && !documentOpen) {
+                                    MainTabBar(
+                                        selected = tab,
+                                        onSelect = { tab = it },
+                                    )
+                                }
+                            }
+                        },
+                    ) { innerPadding ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding),
+                        ) {
+                            AnimatedContent(
+                                targetState = tab,
+                                transitionSpec = {
+                                    val direction =
+                                        if (targetState.ordinal > initialState.ordinal) 1 else -1
+                                    (slideInHorizontally(
+                                        tween(200, easing = FastOutSlowInEasing),
+                                    ) { direction * it / 12 } +
+                                        fadeIn(tween(180, easing = FastOutSlowInEasing)))
+                                        .togetherWith(
+                                            slideOutHorizontally(
+                                                tween(160, easing = FastOutSlowInEasing),
+                                            ) { -direction * it / 24 } +
+                                                fadeOut(tween(140, easing = FastOutSlowInEasing)),
+                                        )
+                                },
+                                label = "main-tab",
+                                modifier = Modifier.fillMaxSize(),
+                            ) { currentTab ->
+                                renderTab(
+                                    if (shellMode == ShellMode.Wide) MainTab.Browse else currentTab,
+                                    shellMode,
+                                )
+                            }
+                        }
+                    }
+                }
+                mainContent()
+
+                if (shellMode == ShellMode.Wide && myModal) {
+                    MyAccountModal(
+                        state = session,
+                        imageLoader = appImageLoader,
+                        usage = usage,
+                        serverVersion = serverVersion,
+                        clientUpdate = clientUpdate,
+                        versionError = versionError,
+                        theme = theme,
+                        language = language,
+                        onThemeChange = viewModel::setTheme,
+                        onLanguageChange = onLanguageChange,
+                        onClose = { myModal = false },
+                        onLogout = viewModel::logout,
+                        onRefresh = viewModel::refreshRoots,
+                        onTransfers = { navController.navigate("transfers") },
+                        onPhotoSync = { navController.navigate("photoSync") },
+                        onFolderSync = { navController.navigate("folderSync") },
+                        onShares = { navController.navigate("shares") },
+                        onLoadUsage = viewModel::loadUsage,
+                        onLoadServerVersion = viewModel::loadServerVersion,
+                        onLoadClientUpdate = { viewModel.loadClientUpdate() },
+                    )
+                }
+                if (shellMode != ShellMode.Compact && serverModal) {
+                    TabletServerPickerModal(
+                        state = session,
+                        connection = connection,
+                        onSelect = { id ->
+                            serverModal = false
+                            viewModel.connectProfile(id)
+                        },
+                        onAddServer = { navController.navigate("addServer") },
+                        onEditServer = { id -> navController.navigate("editServer/$id") },
+                        onRemoveServer = viewModel::removeProfile,
+                        onClose = { serverModal = false },
+                    )
+                }
         }
         composable("search/{rootId}") { entry ->
             val rootId = entry.arguments?.getString("rootId")?.toLongOrNull()?.takeIf { it >= 0 }
@@ -464,4 +564,77 @@ fun FileHubApp(viewModel: AppViewModel) {
             )
         }
     }
+}
+
+@Composable
+private fun MainTabBar(
+    selected: MainTab,
+    onSelect: (MainTab) -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.surface) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .height(58.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MainTab.entries.forEach { item ->
+                val active = selected == item
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .selectable(
+                            selected = active,
+                            role = Role.Tab,
+                            onClick = { onSelect(item) },
+                        ),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 48.dp, height = 28.dp)
+                            .background(
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    androidx.compose.ui.graphics.Color.Transparent
+                                },
+                                shape = CircleShape,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            item.icon,
+                            contentDescription = null,
+                            tint = if (active) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = stringResource(item.labelRes),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (active) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private tailrec fun Context.findHostActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findHostActivity()
+    else -> null
 }

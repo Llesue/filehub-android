@@ -30,8 +30,96 @@ class SyntaxSupportTest {
         assertEquals(SyntaxLanguage.TYPESCRIPT, syntaxLanguageFor("view.tsx"))
         assertEquals(SyntaxLanguage.DEFAULT, syntaxLanguageFor("notes.md"))
         assertEquals(SyntaxLanguage.DEFAULT, syntaxLanguageFor("data.json"))
+        assertEquals(CustomSyntax.JSON, customSyntaxFor("data.json"))
+        assertEquals(CustomSyntax.XML, customSyntaxFor("layout.xml"))
+        assertEquals(CustomSyntax.HTML, customSyntaxFor("index.html"))
+        assertEquals(CustomSyntax.CSS, customSyntaxFor("theme.css"))
+        assertEquals(CustomSyntax.SQL, customSyntaxFor("query.sql"))
         assertTrue(isCodeFile("main.rs"))
+        assertTrue(isCodeFile("data.json"))
+        assertTrue(isCodeFile("query.sql"))
         assertTrue(!isCodeFile("readme.txt"))
+    }
+
+    @Test
+    fun jsonMarksKeysStringsAndLiterals() {
+        val source = """{"name": "demo", "count": 2, "ok": true, "none": null}"""
+        val tokens = tokenizeCustom(source, CustomSyntax.JSON)
+        val key = tokens.first { source.substring(it.start, it.end) == "\"name\"" }
+        assertEquals(SyntaxTokenType.Metadata, key.type)
+        val value = tokens.first { source.substring(it.start, it.end) == "\"demo\"" }
+        assertEquals(SyntaxTokenType.String, value.type)
+        assertTrue(tokens.any { source.substring(it.start, it.end) == "true" })
+        assertTrue(tokens.any { source.substring(it.start, it.end) == "null" })
+    }
+
+    @Test
+    fun markupMarksTagsAttributesAndComments() {
+        val source = """<root id="1"><!-- note --><child>text</child></root>"""
+        val tokens = tokenizeCustom(source, CustomSyntax.XML)
+        assertTrue(
+            tokens.any {
+                source.substring(it.start, it.end) == "root" &&
+                    it.type == SyntaxTokenType.Keyword
+            },
+        )
+        assertTrue(
+            tokens.any {
+                source.substring(it.start, it.end) == "id" &&
+                    it.type == SyntaxTokenType.Metadata
+            },
+        )
+        assertTrue(
+            tokens.any {
+                source.substring(it.start, it.end) == "\"1\"" &&
+                    it.type == SyntaxTokenType.String
+            },
+        )
+        assertTrue(
+            tokens.any {
+                source.substring(it.start, it.end) == "<!-- note -->" &&
+                    it.type == SyntaxTokenType.Comment
+            },
+        )
+    }
+
+    @Test
+    fun cssMarksPropertiesAtRulesAndComments() {
+        val source = """@media screen { .card { color: #fff; margin: 4px; } } /* done */"""
+        val tokens = tokenizeCustom(source, CustomSyntax.CSS)
+        assertTrue(tokens.any { source.substring(it.start, it.end) == "@media" })
+        assertTrue(tokens.any { source.substring(it.start, it.end) == "color" })
+        assertTrue(tokens.any { source.substring(it.start, it.end) == "margin" })
+        assertTrue(
+            tokens.any {
+                source.substring(it.start, it.end) == "/* done */" &&
+                    it.type == SyntaxTokenType.Comment
+            },
+        )
+    }
+
+    @Test
+    fun sqlMarksKeywordsStringsAndComments() {
+        val source = """SELECT id FROM users WHERE name = 'Ada' -- note"""
+        val tokens = tokenizeCustom(source, CustomSyntax.SQL)
+        assertTrue(tokens.any { source.substring(it.start, it.end) == "SELECT" })
+        assertTrue(tokens.any { source.substring(it.start, it.end) == "FROM" })
+        assertTrue(tokens.any { source.substring(it.start, it.end) == "'Ada'" })
+        assertTrue(tokens.any { source.substring(it.start, it.end) == "-- note" })
+    }
+
+    @Test
+    fun customSyntaxProducesColourSpans() {
+        val source = """{"key": "value"}"""
+        val annotated = buildHighlightedText(
+            text = source,
+            language = SyntaxLanguage.DEFAULT,
+            theme = theme,
+            customSyntax = CustomSyntax.JSON,
+        )
+        assertEquals(source, annotated.text)
+        assertTrue(annotated.spanStyles.any { it.item.color == Color(0xFF6633CC) })
+        assertTrue(annotated.spanStyles.any { it.item.color == Color(0xFF00AA00) })
     }
 
     @Test

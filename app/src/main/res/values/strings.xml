@@ -8,6 +8,7 @@
 
     <string name="servers_empty_title">No servers yet</string>
     <string name="servers_empty_body">Add your first FileHub instance, then switch between servers from here.</string>
+    <string name="server_picker_title">Select server</string>
     <string name="servers_add">Add server</string>
 
     <string name="browse_no_server_title">Add a server first</string>
@@ -132,6 +133,7 @@
     <string name="operation_error">Operation failed</string>
     <string name="preview_close">Close</string>
     <string name="preview_loading">Loading preview…</string>
+    <string name="preview_zoom_reset">Reset zoom</string>
     <string name="preview_unsupported">Preview is not available for this file yet.</string>
     <string name="preview_text">Text preview</string>
     <string name="selection_properties">Properties</string>
@@ -283,6 +285,8 @@
     <string name="copy_to">Copy to</string>
     <string name="target_root">Target location</string>
     <string name="target_path">Target folder</string>
+    <string name="context_details">Details</string>
+    <string name="context_zip">Compress to ZIP</string>
     <string name="zip_create">Create ZIP</string>
     <string name="zip_name">ZIP name</string>
     <string name="extract">Extract ZIP</string>
@@ -310,6 +314,21 @@
     <string name="file_offline_cached">Offline — showing cached contents.</string>
     <string name="browse_root_online">Online</string>
     <string name="browse_root_offline">Offline</string>
+    <string name="browse_offline_group">Offline directories (%1$d)</string>
+    <string name="browse_root_offline_toast">Directory offline</string>
+    <string name="sidebar_locations">Locations</string>
+    <string name="sidebar_directories">Directories</string>
+    <string name="sidebar_server_version_format">Server version: %1$s</string>
+    <string name="sidebar_client_version_format">Client version: %1$s</string>
+    <string name="version_update_available"> (update available)</string>
+    <string name="sidebar_shares">Share management</string>
+    <string name="sidebar_quota">Quota</string>
+    <string name="nav_menu">Open navigation</string>
+    <string name="column_roots">Directories</string>
+    <string name="column_empty_title">Select a directory</string>
+    <string name="column_empty_body">Pick a directory in the left column to show its contents.</string>
+    <string name="column_no_folders">No folders</string>
+    <string name="column_no_roots">No directories</string>
     <string name="browse_root_unknown">Status unknown</string>
     <string name="sync_remote_auth">Remote authorization expired. Reconnect the mount.</string>
     <string name="sync_remote_offline">Remote server is offline. Sync will retry later.</string>

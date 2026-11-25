@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.1.4 - 2026-11-25
+
+### Added
+
+- Foreground-only SSE connection to `GET /api/v1/events` with automatic reconnect and backoff, a 60-second idle watchdog, a 401 stop and a 404/405 fallback to polling.
+- Real-time job progress from `job.updated`; while SSE is connected the job poll drops from 1.5 seconds to a 15-second safety net, and reconnect/resync compensates once.
+- Real-time quota from `usage.updated`, server version refresh from `updates.changed`, root online/order refresh from `roots.changed`, and settings/feature refresh; `resync` refetches the visible snapshot.
+- Tablet and car layouts keep the same two-pane shell in portrait and landscape; the sidebar and list columns adapt to the available width instead of falling back to the phone portrait layout.
+- PDF preview zooms down to a computed fit-page scale, so pinch-out stops with the whole page filling the viewport instead of shrinking the pager layer.
+- Tablet-mode image previews on Android 11 and below use a neutral gradient lightbox instead of a thumbnail background or pure black.
+- Deleting a root, or removing the root currently being browsed, returns the file browser to the root list instead of leaving stale contents.
+- SSE parser and connection tests for multi-line data, CRLF, chunked input, request headers, reconnect, 401 and 404.
+- Self-built syntax highlighting for JSON, XML, HTML, CSS and SQL in both preview and edit, without adding a dependency.
+- Phone landscape uses a permanent left column with the server selector, roots, share management, quota and versions, while the right pane starts empty and follows folder drill-down; the left list switches to folder contents after a folder is opened. The server header, roots, shares, quota and versions share one scrolling column, so nothing is sticky.
+- Car and tablet layouts use a fixed root sidebar and a right-hand file browser, with 1–4 list columns that adapt to width; tablet list rows are 76dp tall with 56dp thumbnails and 8dp spacing.
+- The tablet now has a full-width top bar with the server picker, search aligned to the file list, list/grid switch, sort, theme toggle, upload and avatar.
+- Selecting a folder on tablet navigates inside the right pane; the sidebar root selection stays fixed.
+- Tablet list cards have a thin grey outline, a selection checkbox on the icon and a thicker row with a larger thumbnail; long-press opens an action menu with details, download, ZIP, share, rename, copy, move and delete.
+- The tablet breadcrumb is a thin row, the shell hides the system status bar, and the context menu is wider with tighter item spacing.
+- Images and video open in the existing fullscreen viewer/player, PDFs in the fullscreen PDF viewer with pinch zoom, a left page rail capped at eight visible page numbers, full-width pages in landscape and a top bar that overlays the page and hides while scrolling without resizing the document, and text/code/Markdown in the unified document screen.
+- Phone landscape drops the bottom tab bar and drawer in favour of the permanent left column; the avatar enters My and the back arrow returns to browsing.
+- Offline remote roots are collapsed by default on the Locations page; expanding shows them dimmed and tapping one only shows a “Directory offline” toast.
+
+### Improved
+
+- The inline preview pane and its text-preview fallback were removed; text always uses the unified document screen.
+- The directory picker hides offline roots completely instead of offering them.
+- File grid columns adapt from 2 to 6 instead of stopping at 3–4; root cards adapt up to 4 outlined columns on wide screens.
+- The tablet sidebar holds roots, offline roots, share management, a thicker quota bar and server/client version lines with update hints; the avatar opens a narrow My popover without quota or versions, and the server name opens the server picker.
+- Document text is capped at 880dp, and the tablet header is a single row with a separate breadcrumb.
+- Landscape and wide layouts move upload and selection actions to the top instead of the FAB and bottom selection bar.
+- Tablet text editing opens in a modal editor, and the text editor auto-saves 1.5 seconds after typing stops plus every 15 seconds while dirty.
+- Landscape My actions use four columns when space allows, and the logout button is centred across layouts.
+- Uploads that collide with an existing name are always auto-renamed; the client never overwrites or skips.
+
 ## v0.1.3 - 2026-11-24
 
 ### Fixed

@@ -71,12 +71,15 @@ class DirectoryPickerViewModel(
         excludeRootId: Long? = null,
         excludePaths: List<String> = emptyList(),
     ) {
-        val root = roots.firstOrNull { it.id == initialRootId } ?: roots.firstOrNull() ?: return
+        val availableRoots = selectableRoots(roots)
+        val root = availableRoots.firstOrNull { it.id == initialRootId }
+            ?: availableRoots.firstOrNull()
+            ?: return
         val path = normalize(initialPath)
         loadJob?.cancel()
         _state.value = DirectoryPickerState(
             visible = true,
-            roots = roots,
+            roots = availableRoots,
             rootId = root.id,
             rootAlias = root.alias,
             rootReadOnly = root.readOnly,

@@ -9,19 +9,27 @@ import androidx.compose.ui.res.painterResource
 
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
+import android.os.Build
 import android.os.ParcelFileDescriptor
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import kotlin.math.roundToInt
 import coil3.request.ImageRequest
+import kotlin.math.sqrt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -41,6 +49,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -54,7 +63,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -79,6 +90,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -93,8 +105,10 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -135,6 +149,8 @@ import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
 import io.noties.markwon.ext.tasklist.TaskListPlugin
 import io.noties.markwon.linkify.LinkifyPlugin
+import filehub.android.ui.theme.FileHubLightboxCenter
+import filehub.android.ui.theme.FileHubLightboxEdge
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -435,6 +451,8 @@ fun PreviewDialog(
     mediaReady: Int,
     error: String?,
     previewAsText: Boolean,
+    pdfFullWidth: Boolean = false,
+    tabletMode: Boolean = false,
     encoding: String?,
     playerFactory: () -> ExoPlayer?,
     onPageChanged: (FileEntry) -> Unit,
@@ -455,17 +473,23 @@ fun PreviewDialog(
     val overlayBar = entry.kind == FileKind.Image ||
         entry.kind == FileKind.Video ||
         entry.kind == FileKind.Audio
+    val lightboxBackdrop = usesLightboxBackdrop(tabletMode, Build.VERSION.SDK_INT)
     val background = if (isMedia) Color.Black else MaterialTheme.colorScheme.background
     val contentColor = if (isMedia) Color.White else MaterialTheme.colorScheme.onBackground
     val context = LocalContext.current
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val activity = remember(context) { context.findActivity() }
     val originalOrientation = remember(activity) { activity?.requestedOrientation }
-    var controlsVisible by remember { mutableStateOf(true) }
-    var imageFullscreen by remember { mutableStateOf(false) }
+    var controlsVisible by remember(entry.name, entry.modified) {
+        mutableStateOf(entry.kind != FileKind.Video)
+    }
+    var imageFullscreen by remember(entry.name, entry.modified) {
+        mutableStateOf(entry.kind == FileKind.Image)
+    }
     var zoomed by remember { mutableStateOf(false) }
     var showOriginal by remember(session) { mutableStateOf(false) }
     var originalError by remember(session) { mutableStateOf(false) }
+    var pdfHeaderVisible by remember(entry.name, entry.modified) { mutableStateOf(true) }
 
     val pages = if (entry.kind == FileKind.Image) {
         imageEntries.ifEmpty { listOf(entry) }
@@ -538,10 +562,16 @@ fun PreviewDialog(
         val hideStatusBar = when (entry.kind) {
             FileKind.Image -> imageFullscreen
             FileKind.Video -> !controlsVisible
+            FileKind.Pdf -> pdfFullWidth || !pdfHeaderVisible
             else -> false
         }
         LaunchedEffect(entry.kind, hideStatusBar, insetsController) {
-            if (insetsController != null && (entry.kind == FileKind.Image || entry.kind == FileKind.Video)) {
+            if (insetsController != null && (
+                    entry.kind == FileKind.Image ||
+                        entry.kind == FileKind.Video ||
+                        entry.kind == FileKind.Pdf
+                    )
+            ) {
                 if (hideStatusBar) {
                     insetsController.hide(WindowInsetsCompat.Type.statusBars())
                 } else {
@@ -584,6 +614,7 @@ fun PreviewDialog(
                     onImageDoubleTapZoomIn = { imageFullscreen = true },
                     onControlsVisibilityChanged = { controlsVisible = it },
                     onVideoEnded = onVideoEnded,
+                    useLightboxBackdrop = lightboxBackdrop,
                     modifier = Modifier.fillMaxSize(),
                 )
                 val showBar = when (entry.kind) {
@@ -697,23 +728,11 @@ fun PreviewDialog(
                         onClose = onClose,
                     )
                 } else {
-                    Column(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .navigationBarsPadding(),
                     ) {
-                        PreviewTopBar(
-                            entry = entry,
-                            contentColor = contentColor,
-                            showDetails = false,
-                            showOrientation = false,
-                            showEdit = false,
-                            onEdit = {},
-                            onDetails = onLongPress,
-                            onToggleOrientation = {},
-                            onClose = onClose,
-                            scrim = false,
-                        )
                         PreviewBody(
                             entry = entry,
                             pages = pages,
@@ -738,10 +757,32 @@ fun PreviewDialog(
                             onImageDoubleTapZoomIn = {},
                             onControlsVisibilityChanged = {},
                             onVideoEnded = onVideoEnded,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
+                            pdfFullWidth = pdfFullWidth,
+                            onPdfScrollDirection = { direction ->
+                                pdfHeaderVisible = direction < 0
+                            },
+                            useLightboxBackdrop = lightboxBackdrop,
+                            modifier = Modifier.fillMaxSize(),
                         )
+                        AnimatedVisibility(
+                            visible = entry.kind != FileKind.Pdf || pdfHeaderVisible,
+                            enter = slideInVertically(tween(180)) { -it } + fadeIn(tween(140)),
+                            exit = slideOutVertically(tween(180)) { -it } + fadeOut(tween(120)),
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        ) {
+                            PreviewTopBar(
+                                entry = entry,
+                                contentColor = contentColor,
+                                showDetails = false,
+                                showOrientation = false,
+                                showEdit = false,
+                                onEdit = {},
+                                onDetails = onLongPress,
+                                onToggleOrientation = {},
+                                onClose = onClose,
+                                scrim = entry.kind == FileKind.Pdf,
+                            )
+                        }
                     }
                 }
             }
@@ -852,6 +893,9 @@ private fun PreviewBody(
     onImageDoubleTapZoomIn: () -> Unit,
     onControlsVisibilityChanged: (Boolean) -> Unit,
     onVideoEnded: () -> Unit,
+    pdfFullWidth: Boolean = false,
+    onPdfScrollDirection: ((Int) -> Unit)? = null,
+    useLightboxBackdrop: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
@@ -903,6 +947,7 @@ private fun PreviewBody(
                             onTap = onImageTap,
                             onDoubleTapZoomIn = onImageDoubleTapZoomIn,
                             onError = if (original) onOriginalError else null,
+                            useLightboxBackdrop = useLightboxBackdrop,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -975,7 +1020,13 @@ private fun PreviewBody(
                 }
             }
             entry.kind == FileKind.Pdf && pdfFile != null -> {
-                PdfPreview(file = pdfFile)
+                key(pdfFile, entry.name, entry.modified) {
+                    PdfPreview(
+                        file = pdfFile,
+                        fullWidth = pdfFullWidth,
+                        onScrollDirection = onPdfScrollDirection,
+                    )
+                }
             }
             (entry.kind == FileKind.Video || entry.kind == FileKind.Audio) && downloadUrlFor(entry) != null -> {
                 val url = downloadUrlFor(entry).orEmpty()
@@ -1004,6 +1055,7 @@ private fun PreviewBody(
                         factory = { context ->
                             PlayerView(context).apply {
                                 useController = true
+                                controllerAutoShow = false
                                 controllerShowTimeoutMs = 3500
                                 setControllerVisibilityListener(
                                     object : PlayerView.ControllerVisibilityListener {
@@ -1013,6 +1065,7 @@ private fun PreviewBody(
                                     },
                                 )
                                 this.player = player
+                                hideController()
                             }
                         },
                         update = { it.player = player },
@@ -1145,7 +1198,11 @@ fun MarkdownPreview(
 }
 
 @Composable
-private fun PdfPreview(file: File) {
+internal fun PdfPreview(
+    file: File,
+    fullWidth: Boolean = false,
+    onScrollDirection: ((Int) -> Unit)? = null,
+) {
     val renderer by produceState<PdfRenderer?>(initialValue = null, file) {
         value = withContext(Dispatchers.IO) {
             runCatching {
@@ -1163,13 +1220,258 @@ private fun PdfPreview(file: File) {
         }
         return
     }
-    LazyColumn(
+
+    val pages = current.pageCount
+    val pagerState = rememberPagerState(pageCount = { pages })
+    val scaleState = remember { mutableFloatStateOf(1f) }
+    val offsetState = remember { mutableStateOf(Offset.Zero) }
+    val containerState = remember { mutableStateOf(IntSize.Zero) }
+    val pageAspectState = remember { mutableStateOf<Float?>(null) }
+    val minScale by remember(fullWidth) {
+        androidx.compose.runtime.derivedStateOf {
+            if (!fullWidth) {
+                1f
+            } else {
+                val aspect = pageAspectState.value
+                val container = containerState.value
+                if (aspect == null || aspect <= 0f ||
+                    container.width <= 0 || container.height <= 0
+                ) {
+                    1f
+                } else {
+                    val pageHeightAtWidth = container.width / aspect
+                    (container.height * 0.98f / pageHeightAtWidth)
+                        .coerceIn(PDF_MIN_SCALE, 1f)
+                }
+            }
+        }
+    }
+    val minScaleState = androidx.compose.runtime.rememberUpdatedState(minScale)
+    LaunchedEffect(minScale) {
+        if (scaleState.floatValue < minScale) {
+            scaleState.floatValue = minScale
+        }
+    }
+    val scope = rememberCoroutineScope()
+    val renderScale by remember {
+        androidx.compose.runtime.derivedStateOf {
+            when {
+                scaleState.floatValue > 3.2f -> 2f
+                scaleState.floatValue > 1.8f -> 1.5f
+                else -> 1f
+            }
+        }
+    }
+    var lastPage by remember { mutableIntStateOf(pagerState.currentPage) }
+    LaunchedEffect(pagerState.currentPage) {
+        if (!fullWidth) {
+            if (pagerState.currentPage > lastPage) {
+                onScrollDirection?.invoke(1)
+            } else if (pagerState.currentPage < lastPage) {
+                onScrollDirection?.invoke(-1)
+            }
+        }
+        lastPage = pagerState.currentPage
+        scaleState.floatValue = 1f
+        offsetState.value = Offset.Zero
+    }
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF303030)),
     ) {
-        items(current.pageCount) { index ->
-            PdfPage(renderer = current, index = index)
+        val showRail = maxWidth >= 420.dp
+        Row(modifier = Modifier.fillMaxSize()) {
+            if (showRail) {
+                PdfPageRail(
+                    pageCount = pages,
+                    currentPage = pagerState.currentPage,
+                    onPage = { page ->
+                        scope.launch { pagerState.animateScrollToPage(page) }
+                    },
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .clipToBounds()
+                    .onSizeChanged { containerState.value = it }
+                    .pointerInput(current) {
+                        awaitEachGesture {
+                            awaitFirstDown(
+                                requireUnconsumed = false,
+                                pass = PointerEventPass.Initial,
+                            )
+                            do {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val pressed = event.changes.count { it.pressed }
+                                val size = containerState.value
+                                if (pressed >= 2) {
+                                    // Stop the pager from claiming the gesture before
+                                    // the first non-identity zoom/pan arrives.
+                                    event.changes.forEach { it.consume() }
+                                    val zoom = event.calculateZoom()
+                                    val pan = event.calculatePan()
+                                    if (zoom != 1f || pan != Offset.Zero) {
+                                        val oldScale = scaleState.floatValue
+                                        val newScale = (oldScale * zoom)
+                                            .coerceIn(minScaleState.value, PDF_MAX_SCALE)
+                                        val ratio = newScale / oldScale
+                                        val center = Offset(size.width / 2f, size.height / 2f)
+                                        val centroid = event.calculateCentroid(useCurrent = true)
+                                        val next = (offsetState.value + pan) * ratio +
+                                            (centroid - center) * (1f - ratio)
+                                        scaleState.floatValue = newScale
+                                        offsetState.value = clampPdfOffset(next, newScale, size)
+                                    }
+                                } else if (scaleState.floatValue > 1.01f && pressed == 1) {
+                                    val pan = event.calculatePan()
+                                    if (pan != Offset.Zero) {
+                                        offsetState.value = clampPdfOffset(
+                                            offsetState.value + pan,
+                                            scaleState.floatValue,
+                                            size,
+                                        )
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                            } while (event.changes.any { it.pressed })
+                        }
+                    },
+            ) {
+                if (fullWidth) {
+                    HorizontalPager(
+                        state = pagerState,
+                        userScrollEnabled = scaleState.floatValue <= 1.01f,
+                        modifier = Modifier.fillMaxSize(),
+                    ) { index ->
+                        PdfPageView(
+                            renderer = current,
+                            index = index,
+                            renderScale = renderScale,
+                            fullWidth = true,
+                            scrollEnabled = scaleState.floatValue in 0.99f..1.01f,
+                            active = pagerState.currentPage == index,
+                            onScrollDirection = onScrollDirection,
+                            onPageMetrics = { width, height ->
+                                pageAspectState.value = width.toFloat() / height
+                            },
+                            zoomScale = scaleState.floatValue,
+                            zoomOffset = offsetState.value,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                } else {
+                    val pagerModifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scaleState.floatValue
+                            scaleY = scaleState.floatValue
+                            translationX = offsetState.value.x
+                            translationY = offsetState.value.y
+                        }
+                    VerticalPager(
+                        state = pagerState,
+                        userScrollEnabled = scaleState.floatValue <= 1.01f,
+                        modifier = pagerModifier,
+                    ) { index ->
+                        PdfPageView(
+                            renderer = current,
+                            index = index,
+                            renderScale = renderScale,
+                            fullWidth = false,
+                            scrollEnabled = false,
+                            active = pagerState.currentPage == index,
+                            onScrollDirection = null,
+                            onPageMetrics = { width, height ->
+                                pageAspectState.value = width.toFloat() / height
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+                if (scaleState.floatValue !in 0.99f..1.01f) {
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp)
+                            .clip(RoundedCornerShape(50))
+                            .clickable {
+                                scaleState.floatValue = 1f
+                                offsetState.value = Offset.Zero
+                            },
+                        shape = RoundedCornerShape(50),
+                        color = Color.Black.copy(alpha = 0.66f),
+                        contentColor = Color.White,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.preview_zoom_reset),
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun clampPdfOffset(value: Offset, scale: Float, size: IntSize): Offset {
+    if (scale <= 1f) return Offset.Zero
+    val maxX = size.width * (scale - 1f) / 2f
+    val maxY = size.height * (scale - 1f) / 2f
+    return Offset(
+        value.x.coerceIn(-maxX, maxX),
+        value.y.coerceIn(-maxY, maxY),
+    )
+}
+
+@Composable
+private fun PdfPageRail(
+    pageCount: Int,
+    currentPage: Int,
+    onPage: (Int) -> Unit,
+) {
+    val railState = rememberLazyListState()
+    LaunchedEffect(currentPage) {
+        if (pageCount > 0) {
+            railState.animateScrollToItem(currentPage.coerceIn(0, pageCount - 1))
+        }
+    }
+    LazyColumn(
+        state = railState,
+        modifier = Modifier
+            .width(64.dp)
+            .heightIn(max = (8 * 36 + 72).dp)
+            .fillMaxHeight()
+            .background(Color(0xFF232323)),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            top = 64.dp,
+            bottom = 8.dp,
+        ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        items(pageCount) { index ->
+            val selected = index == currentPage
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 2.dp)
+                    .size(width = 44.dp, height = 32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (selected) Color.White.copy(alpha = 0.94f) else Color.Transparent,
+                    )
+                    .clickable { onPage(index) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = (index + 1).toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (selected) Color(0xFF202020) else Color.White.copy(alpha = 0.72f),
+                )
+            }
         }
     }
 }
@@ -1182,8 +1484,56 @@ private data class PdfPageBitmap(
 )
 
 @Composable
-private fun PdfPage(renderer: PdfRenderer, index: Int) {
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+private fun PdfPageView(
+    renderer: PdfRenderer,
+    index: Int,
+    renderScale: Float,
+    fullWidth: Boolean,
+    scrollEnabled: Boolean,
+    active: Boolean,
+    onScrollDirection: ((Int) -> Unit)?,
+    onPageMetrics: ((width: Int, height: Int) -> Unit)? = null,
+    zoomScale: Float = 1f,
+    zoomOffset: Offset = Offset.Zero,
+    modifier: Modifier = Modifier,
+) {
+    val scrollState = rememberScrollState()
+    val scrollCallback = onScrollDirection
+    val threshold = with(LocalDensity.current) { 20.dp.toPx() }
+    LaunchedEffect(active, scrollState, fullWidth, threshold) {
+        if (!active || !fullWidth) return@LaunchedEffect
+        var last = scrollState.value
+        var accumulatedDown = 0f
+        var accumulatedUp = 0f
+        snapshotFlow {
+            scrollState.value to scrollState.isScrollInProgress
+        }.collect { (value, scrolling) ->
+            if (value == 0) {
+                scrollCallback?.invoke(-1)
+                accumulatedDown = 0f
+                accumulatedUp = 0f
+            } else if (scrolling) {
+                val delta = value - last
+                if (delta > 0) {
+                    accumulatedDown += delta
+                    accumulatedUp = 0f
+                } else if (delta < 0) {
+                    accumulatedUp += -delta
+                    accumulatedDown = 0f
+                }
+                if (accumulatedDown >= threshold) {
+                    scrollCallback?.invoke(1)
+                    accumulatedDown = 0f
+                }
+                if (accumulatedUp >= threshold) {
+                    scrollCallback?.invoke(-1)
+                    accumulatedUp = 0f
+                }
+            }
+            last = value
+        }
+    }
+    BoxWithConstraints(modifier = modifier) {
         val density = LocalDensity.current
         val availableWidthPx = with(density) { maxWidth.toPx() }.toInt().coerceAtLeast(1)
         val pageState by produceState<PdfPageBitmap?>(
@@ -1191,6 +1541,7 @@ private fun PdfPage(renderer: PdfRenderer, index: Int) {
             renderer,
             index,
             availableWidthPx,
+            renderScale,
         ) {
             value = withContext(Dispatchers.IO) {
                 synchronized(renderer) {
@@ -1199,13 +1550,23 @@ private fun PdfPage(renderer: PdfRenderer, index: Int) {
                         try {
                             val pageWidth = page.width.coerceAtLeast(1)
                             val pageHeight = page.height.coerceAtLeast(1)
-                            var scale = (availableWidthPx.toFloat() / pageWidth).coerceIn(0.5f, 3f)
-                            val maxPixels = 4096
-                            if (pageWidth * scale > maxPixels) {
-                                scale = maxPixels.toFloat() / pageWidth
+                            var scale = (availableWidthPx.toFloat() / pageWidth) * renderScale
+                            val maxDimension = 4096f
+                            if (pageWidth * scale > maxDimension || pageHeight * scale > maxDimension) {
+                                scale = minOf(
+                                    maxDimension / pageWidth,
+                                    maxDimension / pageHeight,
+                                )
                             }
-                            val width = (pageWidth * scale).toInt().coerceAtLeast(1)
-                            val height = (pageHeight * scale).toInt().coerceAtLeast(1)
+                            var width = (pageWidth * scale).toInt().coerceAtLeast(1)
+                            var height = (pageHeight * scale).toInt().coerceAtLeast(1)
+                            val maxPixels = 8_000_000f
+                            val pixels = width.toFloat() * height
+                            if (pixels > maxPixels) {
+                                val shrink = sqrt(maxPixels / pixels)
+                                width = (width * shrink).toInt().coerceAtLeast(1)
+                                height = (height * shrink).toInt().coerceAtLeast(1)
+                            }
                             val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                             result.eraseColor(android.graphics.Color.WHITE)
                             page.render(result, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -1220,11 +1581,16 @@ private fun PdfPage(renderer: PdfRenderer, index: Int) {
             }
         }
         val page = pageState
+        if (page != null) {
+            LaunchedEffect(page.bitmap, active) {
+                if (active && page.bitmap != null) {
+                    onPageMetrics?.invoke(page.width, page.height)
+                }
+            }
+        }
         when {
             page == null -> Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator(color = Color.White)
@@ -1238,15 +1604,57 @@ private fun PdfPage(renderer: PdfRenderer, index: Int) {
                 DisposableEffect(page.bitmap) {
                     onDispose { page.bitmap.recycle() }
                 }
-                Image(
-                    bitmap = page.bitmap.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.FillWidth,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(page.width.toFloat() / page.height)
-                        .padding(horizontal = 2.dp),
-                )
+                if (fullWidth) {
+                    if (zoomScale == 1f) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(scrollState, enabled = scrollEnabled),
+                        ) {
+                            Image(
+                                bitmap = page.bitmap.asImageBitmap(),
+                                contentDescription = null,
+                                contentScale = ContentScale.FillWidth,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(page.width.toFloat() / page.height),
+                            )
+                        }
+                    } else {
+                        val image = page.bitmap.asImageBitmap()
+                        val pageAspect = page.width.toFloat() / page.height
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val baseWidth = size.width
+                            val baseHeight = baseWidth / pageAspect
+                            val dstWidth = baseWidth * zoomScale
+                            val dstHeight = baseHeight * zoomScale
+                            val left = (size.width - dstWidth) / 2f + zoomOffset.x
+                            val top = (size.height - dstHeight) / 2f + zoomOffset.y
+                            drawImage(
+                                image = image,
+                                srcOffset = IntOffset.Zero,
+                                srcSize = IntSize(image.width, image.height),
+                                dstOffset = IntOffset(
+                                    left.roundToInt(),
+                                    top.roundToInt(),
+                                ),
+                                dstSize = IntSize(
+                                    dstWidth.roundToInt().coerceAtLeast(1),
+                                    dstHeight.roundToInt().coerceAtLeast(1),
+                                ),
+                            )
+                        }
+                    }
+                } else {
+                    Image(
+                        bitmap = page.bitmap.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp),
+                    )
+                }
             }
         }
     }
@@ -1313,6 +1721,8 @@ private fun CodePreview(
 }
 
 private const val ORIGINAL_MAX_BYTES = 64L * 1024 * 1024
+private const val PDF_MIN_SCALE = 0.1f
+private const val PDF_MAX_SCALE = 4f
 
 @Composable
 private fun ZoomableImage(
@@ -1327,6 +1737,7 @@ private fun ZoomableImage(
     onDoubleTapZoomIn: () -> Unit,
     onError: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    useLightboxBackdrop: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1348,6 +1759,7 @@ private fun ZoomableImage(
             .apply { if (!fullSize) size(2048) }
             .build()
     }
+    val blurSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
     LaunchedEffect(resetSignal, url) {
         zoomJob?.cancel()
@@ -1377,9 +1789,26 @@ private fun ZoomableImage(
             modifier = Modifier
                 .fillMaxSize()
                 .clipToBounds()
-                .background(Color.Black),
+                .then(
+                    if (useLightboxBackdrop) {
+                        Modifier.drawBehind {
+                            drawRect(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        FileHubLightboxCenter,
+                                        FileHubLightboxEdge,
+                                    ),
+                                    center = center,
+                                    radius = size.maxDimension * 0.75f,
+                                ),
+                            )
+                        }
+                    } else {
+                        Modifier.background(Color.Black)
+                    },
+                ),
         ) {
-            if (thumbnailUrl != null) {
+            if (!useLightboxBackdrop && thumbnailUrl != null) {
                 AsyncImage(
                     model = thumbnailUrl,
                     imageLoader = imageLoader,
@@ -1387,20 +1816,26 @@ private fun ZoomableImage(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
-                        .blur(
-                            radius = 30.dp,
-                            edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                        .then(
+                            if (blurSupported) {
+                                Modifier.blur(
+                                    radius = 30.dp,
+                                    edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                                )
+                            } else {
+                                Modifier
+                            },
                         ),
                 )
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.28f)),
+                        .background(Color.Black.copy(alpha = if (blurSupported) 0.28f else 0.55f)),
                 )
             }
         }
 
-        if (thumbnailUrl == null && !loaded && !failed) {
+        if (!loaded && !failed && (useLightboxBackdrop || thumbnailUrl == null)) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Color.White)
             }
