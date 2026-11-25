@@ -3,6 +3,7 @@ package filehub.android.data.sync
 import filehub.android.R
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
@@ -49,6 +50,7 @@ class FolderSyncWorker(
     override suspend fun doWork(): Result {
         val profileId = inputData.getString("profileId") ?: return Result.success()
         val trigger = inputData.getString("trigger") ?: "periodic"
+        val forceFullScan = inputData.getBoolean("fullScan", false)
         val repo = (applicationContext as FileHubApplication).container.folderSyncRepository
 
         val own = SyncLocks.folder(profileId)
@@ -76,7 +78,7 @@ class FolderSyncWorker(
                 )
             }
             try {
-                shared.withLock { runSync(profileId, trigger) }
+                shared.withLock { runSync(profileId, trigger, forceFullScan) }
             } catch (error: CancellationException) {
                 withContext(NonCancellable) { finalizeCancelled(profileId) }
                 throw error
@@ -86,7 +88,11 @@ class FolderSyncWorker(
         }
     }
 
-    private suspend fun runSync(profileId: String, trigger: String): Result {
+    private suspend fun runSync(
+        profileId: String,
+        trigger: String,
+        forceFullScan: Boolean,
+    ): Result {
         val app = applicationContext as FileHubApplication
         val repo = app.container.folderSyncRepository
         val config = repo.config(profileId) ?: return Result.success()
@@ -162,7 +168,15 @@ class FolderSyncWorker(
                 retry = false,
                 disable = true,
             )
-        val api = FileHubApi(profile.baseUrl, token)
+        val baseUrl = app.container.sessionRepository.workingBaseUrl(profile, token)
+            ?: return finishFailed(
+                repo,
+                run,
+                config,
+                applicationContext.getString(R.string.error_network),
+                SyncBlockReason.NETWORK,
+            )
+        val api = FileHubApi(baseUrl, token)
         val roots = runCatching { api.roots() }
             .getOrElse { error ->
                 if (error is FileHubApiException && error.statusCode == 401) {
@@ -249,6 +263,21 @@ class FolderSyncWorker(
             SyncRunKind.FOLDER,
             applicationContext.getString(R.string.sync_log_scan_local, localFiles.size),
         )
+        val mediaExtensions = setOf(
+            "jpg", "jpeg", "png", "heic", "heif", "webp", "dng",
+            "mp4", "mov", "mkv", "3gp", "avi",
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            !MediaStreams.hasLocationPermission(applicationContext) &&
+            localFiles.keys.any { it.substringAfterLast('.', "").lowercase() in mediaExtensions }
+        ) {
+            repo.logs.log(
+                profileId,
+                SyncRunKind.FOLDER,
+                applicationContext.getString(R.string.folder_sync_location_log),
+                SyncLogStore.LEVEL_WARN,
+            )
+        }
 
         repo.runs.progress(run, phase = SyncPhase.SCANNING, direction = "remote")
         val remoteNodes = runCatching { scanRemote(api, config.rootId, config.remotePath) }
@@ -268,6 +297,8 @@ class FolderSyncWorker(
             maxOf(localFiles[path]?.size ?: 0, remoteFiles[path]?.size ?: 0)
         }
         val localHashes = mutableMapOf<String, String>()
+        val localVersions = mutableMapOf<String, Int>()
+        val verifiedPaths = mutableSetOf<String>()
         val sameContentPaths = if (!hashBatch) {
             emptySet()
         } else {
@@ -283,27 +314,45 @@ class FolderSyncWorker(
                         val local = localFiles[path]
                         val remote = remoteFiles[path]
                         local != null && remote != null && local.size == remote.size &&
-                            local.mtime != remote.mtime
+                            (forceFullScan || local.mtime != remote.mtime)
                     }
                     candidates.forEach { path ->
                         val local = localFiles[path] ?: return@forEach
-                        val cached = entries[path]
-                            ?.takeIf {
-                                it.sha256 != null && it.hashSize == local.size &&
-                                    it.hashMtime == local.mtime
-                            }
-                            ?.sha256
+                        val localVersion = MediaStreams.hashVersion(
+                            applicationContext,
+                            Uri.parse(local.uri),
+                        )
+                        localVersions[path] = localVersion
+                        val cached = if (forceFullScan) {
+                            null
+                        } else {
+                            entries[path]
+                                ?.takeIf {
+                                    it.hashVersion == localVersion &&
+                                        it.sha256 != null && it.hashSize == local.size &&
+                                        it.hashMtime == local.mtime
+                                }
+                                ?.sha256
+                        }
                         val hash = cached ?: runCatching {
                             SyncHasher.sha256Saf(applicationContext, local.uri)
                         }.getOrNull()
                         if (hash != null) {
                             localHashes[path] = hash
                             if (cached == null) {
-                                repo.saveHash(profileId, path, hash, local.size, local.mtime)
+                                repo.saveHash(
+                                    profileId,
+                                    path,
+                                    hash,
+                                    local.size,
+                                    local.mtime,
+                                    localVersion,
+                                )
                             }
                         }
                     }
                     val matched = mutableSetOf<String>()
+                    val verified = mutableSetOf<String>()
                     localHashes.keys
                         .filter { remoteFiles[it] != null }
                         .chunked(100)
@@ -313,13 +362,13 @@ class FolderSyncWorker(
                             }.getOrNull() ?: return@forEach
                             results.forEach { result ->
                                 val localHash = localHashes[result.path]
-                                if (result.status == "ready" && result.sha256 != null &&
-                                    localHash == result.sha256
-                                ) {
-                                    matched += result.path
+                                if (result.status == "ready" && result.sha256 != null) {
+                                    verified += result.path
+                                    if (localHash == result.sha256) matched += result.path
                                 }
                             }
                         }
+                    verifiedPaths += verified
                     matched
                 } finally {
                     heartbeat.cancel()
@@ -341,12 +390,29 @@ class FolderSyncWorker(
             SyncRunKind.FOLDER,
             applicationContext.getString(R.string.sync_log_scan_remote, remoteFiles.size),
         )
+        if (forceFullScan) {
+            repo.logs.log(
+                profileId,
+                SyncRunKind.FOLDER,
+                applicationContext.getString(R.string.folder_sync_full_scan_log),
+            )
+        }
         var plannedNew = 0
         var plannedUpdated = 0
         var plannedDeleted = 0
         var plannedConflicts = 0
         paths.forEach { path ->
-            when (decide(config, localFiles[path], remoteFiles[path], entries[path], contentEqual = path in sameContentPaths)) {
+            when (
+                decide(
+                    config,
+                    localFiles[path],
+                    remoteFiles[path],
+                    entries[path],
+                    contentEqual = path in sameContentPaths,
+                    contentVerified = path in verifiedPaths,
+                    verifyContent = forceFullScan,
+                )
+            ) {
                 Action.UPLOAD, Action.DOWNLOAD ->
                     if (entries[path] == null) plannedNew += 1 else plannedUpdated += 1
                 Action.DELETE_REMOTE, Action.DELETE_LOCAL -> plannedDeleted += 1
@@ -386,7 +452,13 @@ class FolderSyncWorker(
         var lastTickAt = System.currentTimeMillis()
         var speed = 0L
 
-        suspend fun publish(path: String, direction: String?, bytes: Long, force: Boolean) {
+        suspend fun publish(
+            path: String,
+            direction: String?,
+            bytes: Long,
+            force: Boolean,
+            action: String? = direction,
+        ) {
             val current = System.currentTimeMillis()
             if (!force && current - lastNotifyAt < NOTIFY_INTERVAL_MS) return
             val elapsed = current - lastTickAt
@@ -408,6 +480,7 @@ class FolderSyncWorker(
                 deleted = deleted,
                 bytesDone = bytes,
                 currentItem = path,
+                currentAction = action,
                 direction = direction,
             )
             val arrow = when (direction) {
@@ -478,7 +551,15 @@ class FolderSyncWorker(
             val remote = remoteFiles[path]
             val entry = entries[path]
             val contentEqual = path in sameContentPaths
-            val action = decide(config, local, remote, entry, contentEqual)
+            val action = decide(
+                config,
+                local,
+                remote,
+                entry,
+                contentEqual = contentEqual,
+                contentVerified = path in verifiedPaths,
+                verifyContent = forceFullScan,
+            )
             val baseBytes = bytesDone
             val actionBytes = maxOf(local?.size ?: 0, remote?.size ?: 0)
             try {
@@ -494,6 +575,7 @@ class FolderSyncWorker(
                                 syncedEntry(
                                     profileId, path, local, remote, entry,
                                     sha256 = localHashes[path],
+                                    hashVersion = localVersions[path] ?: 0,
                                 ),
                             )
                         } else if (entry != null) {
@@ -519,6 +601,7 @@ class FolderSyncWorker(
                             )
                         }
                         done += 1
+                        publish(path, null, bytesDone, true, action = "skip")
                     }
                     Action.CONFLICT -> {
                         conflicts += 1
@@ -534,17 +617,30 @@ class FolderSyncWorker(
                                 sha256 = localHashes[path],
                                 hashSize = local?.size ?: 0,
                                 hashMtime = local?.mtime ?: 0,
+                                hashVersion = localVersions[path] ?: 0,
                             ),
                         )
                     }
                     Action.UPLOAD -> {
                         if (local == null) continue
+                        val localVersion = localVersions[path] ?: MediaStreams.hashVersion(
+                            applicationContext,
+                            Uri.parse(local.uri),
+                        )
+                        localVersions[path] = localVersion
                         val localHash = if (hashSupported) {
                             localHashes[path] ?: runCatching {
                                 SyncHasher.sha256Saf(applicationContext, local.uri)
                             }.getOrNull()?.also { hash ->
                                 localHashes[path] = hash
-                                repo.saveHash(profileId, path, hash, local.size, local.mtime)
+                                repo.saveHash(
+                                    profileId,
+                                    path,
+                                    hash,
+                                    local.size,
+                                    local.mtime,
+                                    localVersion,
+                                )
                             }
                         } else {
                             null
@@ -559,11 +655,13 @@ class FolderSyncWorker(
                             remoteDirs = remoteDirs,
                             sha256 = localHash,
                             verifyUpload = uploadVerify,
+                            hashVersion = localVersion,
                             onBytes = { bytes -> publish(path, "upload", baseBytes + bytes, false) },
                         )
                         entries[path] = local.toEntry(
                             profileId, config, remote,
                             sha256 = localHash, hashSize = local.size, hashMtime = local.mtime,
+                            hashVersion = localVersion,
                         )
                         done += 1
                         if (entry == null) created += 1 else updated += 1
@@ -716,6 +814,7 @@ class FolderSyncWorker(
         remoteDirs: RemoteDirEnsurer,
         sha256: String?,
         verifyUpload: Boolean,
+        hashVersion: Int,
         onBytes: suspend (Long) -> Unit,
     ) {
         val uploadSha = if (verifyUpload) sha256 else null
@@ -755,6 +854,7 @@ class FolderSyncWorker(
             local.toEntry(
                 profileId, config, null,
                 sha256 = sha256, hashSize = local.size, hashMtime = local.mtime,
+                hashVersion = hashVersion,
             ).copy(status = "uploading", uploadId = sessionId),
         )
         val chunks = if (local.size == 0L) 0 else ((local.size + chunkSize - 1) / chunkSize).toInt()
@@ -796,6 +896,7 @@ class FolderSyncWorker(
             local.toEntry(
                 profileId, config, null,
                 sha256 = sha256, hashSize = local.size, hashMtime = local.mtime,
+                hashVersion = hashVersion,
             ).copy(
                 remotePath = complete.path,
                 remoteSize = local.size,
@@ -831,9 +932,12 @@ class FolderSyncWorker(
             path,
             remote.mimeType,
         ).getOrThrow()
-        val (profile, token) = (applicationContext as FileHubApplication).container
+        val container = (applicationContext as FileHubApplication).container
+        val (profile, token) = container
             .profileAndToken(config.profileId) ?: error(applicationContext.getString(R.string.error_unauthorized))
-        val base = profile.baseUrl.toHttpUrlOrNull() ?: error(applicationContext.getString(R.string.error_invalid_url))
+        val downloadBase = container.sessionRepository.workingBaseUrl(profile, token)
+            ?: profile.baseUrl
+        val base = downloadBase.toHttpUrlOrNull() ?: error(applicationContext.getString(R.string.error_invalid_url))
         val url = base.newBuilder()
             .addPathSegments("api/v1/download")
             .addQueryParameter("root", config.rootId.toString())
@@ -938,7 +1042,7 @@ class FolderSyncWorker(
 
     private suspend fun readLocalChunk(uri: String, offset: Long, length: Long): ByteArray =
         withContext(Dispatchers.IO) {
-            SafScanner.openInput(applicationContext, Uri.parse(uri)).use { input ->
+            MediaStreams.open(applicationContext, Uri.parse(uri)).use { input ->
                 skipFully(input, offset)
                 val buffer = ByteArray(length.toInt())
                 var read = 0
@@ -967,6 +1071,8 @@ class FolderSyncWorker(
         remote: RemoteNode?,
         entry: FolderSyncEntryEntity?,
         contentEqual: Boolean = false,
+        contentVerified: Boolean = false,
+        verifyContent: Boolean = false,
     ): Action {
         val base = entry
         val hasBase = base?.hasBase == true
@@ -982,6 +1088,11 @@ class FolderSyncWorker(
         if (local == null && remote == null) return Action.REMOVE
         if (local != null && remote != null) {
             if (contentEqual) return Action.IGNORE
+            if (verifyContent && contentVerified &&
+                local.size == remote.size && local.mtime == remote.mtime
+            ) {
+                return Action.CONFLICT
+            }
             if (local.size == remote.size && local.mtime == remote.mtime) return Action.IGNORE
             return when (config.mode) {
                 "upload" -> when {
@@ -1025,6 +1136,7 @@ class FolderSyncWorker(
         sha256: String? = null,
         hashSize: Long = 0,
         hashMtime: Long = 0,
+        hashVersion: Int = 0,
     ): FolderSyncEntryEntity = FolderSyncEntryEntity(
         profileId = profileId,
         relativePath = relativePath,
@@ -1044,6 +1156,7 @@ class FolderSyncWorker(
         sha256 = sha256,
         hashSize = hashSize,
         hashMtime = hashMtime,
+        hashVersion = hashVersion,
     )
 
     private fun syncedEntry(
@@ -1053,6 +1166,7 @@ class FolderSyncWorker(
         remote: RemoteNode,
         existing: FolderSyncEntryEntity?,
         sha256: String? = null,
+        hashVersion: Int = 0,
     ): FolderSyncEntryEntity = FolderSyncEntryEntity(
         profileId = profileId,
         relativePath = path,
@@ -1072,6 +1186,7 @@ class FolderSyncWorker(
         sha256 = sha256,
         hashSize = local.size,
         hashMtime = local.mtime,
+        hashVersion = hashVersion,
     )
 
     private fun conflictEntry(
@@ -1083,6 +1198,7 @@ class FolderSyncWorker(
         sha256: String? = null,
         hashSize: Long = 0,
         hashMtime: Long = 0,
+        hashVersion: Int = 0,
     ): FolderSyncEntryEntity = FolderSyncEntryEntity(
         profileId = profileId,
         relativePath = path,

@@ -197,6 +197,9 @@
     <string name="photo_sync_last_run">Last run</string>
     <string name="photo_sync_pending">Pending</string>
     <string name="photo_sync_permission_button">Allow photo access</string>
+    <string name="photo_sync_location_missing">Location permission is off: photo backups will not keep GPS metadata.</string>
+    <string name="photo_sync_location_button">Allow location metadata</string>
+    <string name="photo_sync_location_log">Location permission is not granted; this backup omits GPS metadata.</string>
     <string name="photo_sync_select_all">Select all</string>
     <string name="photo_sync_no_albums">No albums found</string>
     <string name="photo_sync_schedule_manual">Manual</string>
@@ -218,6 +221,11 @@
     <string name="folder_sync_enabled">Enabled</string>
     <string name="folder_sync_off">Turn off</string>
     <string name="folder_sync_now">Sync now</string>
+    <string name="folder_sync_full_scan_log">Full verification: rechecking all same-size files.</string>
+    <string name="folder_sync_full_confirm_title">Full sync?</string>
+    <string name="folder_sync_location_missing">Location permission is off: photos in this folder will lose GPS metadata when backed up.</string>
+    <string name="folder_sync_location_log">Location permission is not granted; photos in this folder will lose GPS metadata.</string>
+    <string name="folder_sync_full_confirm_body">This rescans the local and remote folders and rechecks every same-size file. It can take a while for large folders; Wi-Fi and charging are recommended.</string>
     <string name="folder_sync_last_run">Last run</string>
     <string name="folder_sync_conflicts">Conflicts</string>
     <string name="folder_sync_pending">Pending</string>
@@ -639,6 +647,14 @@
     <string name="sync_notif_bytes">%1$s / %2$s</string>
     <string name="sync_notif_bytes_speed">%1$s / %2$s · %3$s/s</string>
     <string name="sync_notif_current">Current: %1$s</string>
+    <string name="sync_action_skip">Skipped (already present)</string>
+    <string name="sync_action_upload">Uploading</string>
+    <string name="sync_action_download">Downloading</string>
+    <string name="sync_action_verify">Verifying</string>
+    <string name="sync_action_rename">Uploading with a new name</string>
+    <string name="sync_action_delete">Deleting</string>
+    <string name="sync_action_conflict">Conflict</string>
+    <string name="sync_action_scan">Scanning</string>
     <string name="sync_lock_screen_text">Sync is running in the background</string>
 
     <string name="sync_block_not_logged_in">not signed in</string>
@@ -673,6 +689,13 @@
     <string name="sync_action_continue">Continue</string>
     <string name="sync_action_retry">Retry failed</string>
     <string name="sync_action_sync_now">Sync now</string>
+    <string name="sync_action_daily">Daily sync</string>
+    <string name="sync_action_full">Full sync</string>
+    <string name="photo_sync_full_confirm_title">Full sync?</string>
+    <string name="photo_sync_full_confirm_body">This rescans every photo and checks each file against the server. It can take a while for a large library; Wi-Fi and charging are recommended.</string>
+    <string name="photo_sync_full_confirm_action">Start full sync</string>
+    <string name="sync_log_scan_incremental">Incremental scan: new, changed and failed photos only.</string>
+    <string name="sync_log_scan_full">Full scan: all photos are checked.</string>
     <string name="sync_action_view_conflicts">View conflicts</string>
     <string name="sync_action_details">Details</string>
     <string name="sync_save_changes">Save changes</string>
@@ -724,6 +747,7 @@
     <string name="sync_log_clear">Clear</string>
     <string name="sync_log_open">View log</string>
     <string name="sync_log_started">Sync started: %1$s → %2$s</string>
+    <string name="sync_log_no_changes">No new or changed photos found.</string>
     <string name="sync_log_scan_photos">Scanned %1$d items, %2$s</string>
     <string name="sync_log_scan_local">Scanned %1$d local items</string>
     <string name="sync_log_scan_remote">Scanned %1$d remote items</string>

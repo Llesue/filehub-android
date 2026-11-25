@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.1.6 - 2026-11-26
+
+### Added
+
+- Daily photo sync scans only new, modified or failed photos through MediaStore watermarks, and logs a no-change run without walking the whole library.
+- A fast skip reuses a completed entry when the local size/mtime and read mode are unchanged and the remote directory still lists the same name and size, avoiding per-photo hash requests.
+- A full sync action with confirmation re-checks every photo; folder sync re-verifies every same-size file.
+- Folder sync hashes and uploads SAF documents through `MediaStore.setRequireOriginal` when the document maps to a MediaStore item, so photos in folders keep GPS metadata.
+- Sync run state exposes the current action (skip/upload/verify/rename/download/delete/conflict), and both sync screens label the normal action "Daily sync" and the deep scan "Full sync".
+- The sync log follows the newest entry after the 200-entry cap and when the log dialog opens.
+
+### Fixed
+
+- Photo sync opens MediaStore items with `ACCESS_MEDIA_LOCATION` and `setRequireOriginal`, preserving GPS EXIF instead of uploading a location-redacted copy.
+- Photo sync reuses the previous remote name, or the canonical name when its hash matches, so a renamed file no longer grows into `(2)`, `(3)` on every run.
+- Legacy photo entries without an original-stream hash are adopted once instead of being renamed or re-uploaded.
+- Cached photo and folder hashes are versioned by read mode, so hashes computed from redacted streams are ignored after location access is granted.
+- A denied location permission is surfaced in both sync screens and logged, instead of silently dropping GPS metadata.
+- Manual uploads of MediaStore URIs also use the original stream when location access is granted.
+- Background sync probes the configured server addresses top to bottom and persists the first working one instead of failing on a stale base URL; a working LAN address is never skipped in favour of a public one.
+
+### Improved
+
+- Photo sync stops after a no-change incremental scan and reports it in the log.
+- The sync action row places Full sync on the left and the daily action on the right.
+- Folder sync skips unchanged files without hashing or transferring them and shows "Skipped (already present)" in the current action.
+
 ## v0.1.5 - 2026-11-26
 
 ### Added

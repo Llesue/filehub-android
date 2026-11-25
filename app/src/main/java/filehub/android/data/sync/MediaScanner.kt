@@ -68,11 +68,42 @@ object MediaScanner {
             .sortedWith(compareBy({ it.name.lowercase() }, { it.name }, { it.id }))
     }
 
+    fun photoFromEntry(context: Context, entry: PhotoSyncEntryEntity): MediaPhoto? {
+        val isVideo = entry.mimeType.startsWith("video/")
+        val collection = if (isVideo) {
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+        val uri = ContentUris.withAppendedId(collection, entry.localId)
+        val exists = context.contentResolver.query(
+            uri,
+            arrayOf(MediaStore.MediaColumns._ID),
+            null,
+            null,
+            null,
+        )?.use { it.moveToFirst() } == true
+        if (!exists) return null
+        return MediaPhoto(
+            localId = entry.localId,
+            uri = uri,
+            bucketId = entry.bucketId,
+            album = entry.album,
+            name = entry.name,
+            size = entry.size,
+            mtime = entry.mtime,
+            mimeType = entry.mimeType,
+            isVideo = isVideo,
+        )
+    }
+
     fun photos(
         context: Context,
         selectedAlbums: Set<Long>?,
         includeVideos: Boolean,
-    ): List<MediaPhoto> {
+        modifiedAfter: Long? = null,
+        idAfter: Long? = null,
+    ): Result<List<MediaPhoto>> = runCatching {
         val result = mutableListOf<MediaPhoto>()
         fun scan(collection: Uri, isVideo: Boolean) {
             val projection = arrayOf(
@@ -86,14 +117,25 @@ object MediaScanner {
                 MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME,
                 MediaStore.MediaColumns.MIME_TYPE,
             )
-            runCatching {
-                context.contentResolver.query(
-                    collection,
-                    projection,
-                    null,
-                    null,
-                    "${MediaStore.MediaColumns.DATE_MODIFIED} DESC",
-                )?.use { cursor ->
+            val selection = buildList {
+                if (modifiedAfter != null && modifiedAfter > 0) {
+                    add("${MediaStore.MediaColumns.DATE_MODIFIED} >= ?")
+                }
+                if (idAfter != null && idAfter > 0) {
+                    add("${MediaStore.MediaColumns._ID} > ?")
+                }
+            }.joinToString(" OR ").takeIf { it.isNotBlank() }
+            val selectionArgs = buildList {
+                if (modifiedAfter != null && modifiedAfter > 0) add(modifiedAfter.toString())
+                if (idAfter != null && idAfter > 0) add(idAfter.toString())
+            }.toTypedArray()
+            context.contentResolver.query(
+                collection,
+                projection,
+                selection,
+                selectionArgs,
+                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC",
+            )?.use { cursor ->
                     val idIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                     val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
                     val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
@@ -129,18 +171,18 @@ object MediaScanner {
                             isVideo = isVideo,
                         )
                     }
-                }
-            }
+            } ?: error("media query returned no cursor")
         }
         scan(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, isVideo = false)
         if (includeVideos) scan(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, isVideo = true)
         // One bucket id can report several case variants; use the same canonical name
         // as the album picker and filter only afterwards so both stay consistent.
         val canonical = AlbumNames.canonicalByBucket(result.map { it.bucketId to it.album })
-        return result
+        result
             .asSequence()
             .map { photo -> photo.copy(album = canonical[photo.bucketId] ?: photo.album) }
             .filter { selectedAlbums == null || it.bucketId in selectedAlbums }
+            .distinctBy { it.localId }
             .toList()
     }
 }

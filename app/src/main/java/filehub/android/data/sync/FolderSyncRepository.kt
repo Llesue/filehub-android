@@ -96,9 +96,9 @@ class FolderSyncRepository(
         }
     }
 
-    suspend fun syncNow(profileId: String) {
+    suspend fun syncNow(profileId: String, fullScan: Boolean = false) {
         val config = dao.config(profileId) ?: return
-        FolderSyncScheduler.enqueueNow(context, config)
+        FolderSyncScheduler.enqueueNow(context, config, fullScan)
     }
 
     suspend fun catchUp(profileId: String) {
@@ -129,7 +129,8 @@ class FolderSyncRepository(
         sha256: String,
         size: Long,
         mtime: Long,
-    ) = dao.updateHash(profileId, relativePath, sha256, size, mtime)
+        hashVersion: Int = PHOTO_HASH_VERSION,
+    ) = dao.updateHash(profileId, relativePath, sha256, size, mtime, hashVersion)
 
     suspend fun updateEntry(
         profileId: String,
@@ -250,10 +251,20 @@ object FolderSyncScheduler {
         )
     }
 
-    fun enqueueNow(context: Context, config: FolderSyncConfigEntity) {
+    fun enqueueNow(
+        context: Context,
+        config: FolderSyncConfigEntity,
+        fullScan: Boolean = false,
+    ) {
         val request = OneTimeWorkRequestBuilder<FolderSyncWorker>()
             .setConstraints(constraints(config))
-            .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "manual"))
+            .setInputData(
+                workDataOf(
+                    "profileId" to config.profileId,
+                    "trigger" to if (fullScan) "manual-full" else "manual",
+                    "fullScan" to fullScan,
+                ),
+            )
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             nowName(config.profileId),

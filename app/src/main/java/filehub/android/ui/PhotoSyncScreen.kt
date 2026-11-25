@@ -89,12 +89,17 @@ fun PhotoSyncScreen(
     var scheduleMenu by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var remoteHint by remember { mutableStateOf(false) }
+    var confirmFullSync by remember { mutableStateOf(false) }
 
-    val permissions = if (Build.VERSION.SDK_INT >= 33) {
-        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
-    } else {
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
+    val permissions = buildList {
+        if (Build.VERSION.SDK_INT >= 33) {
+            add(Manifest.permission.READ_MEDIA_IMAGES)
+            add(Manifest.permission.READ_MEDIA_VIDEO)
+        } else {
+            add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        if (Build.VERSION.SDK_INT >= 29) add(Manifest.permission.ACCESS_MEDIA_LOCATION)
+    }.toTypedArray()
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
@@ -113,6 +118,11 @@ fun PhotoSyncScreen(
         (!includeVideos || Build.VERSION.SDK_INT < 33 ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) ==
             PackageManager.PERMISSION_GRANTED)
+    val hasLocationPermission = Build.VERSION.SDK_INT < 29 ||
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_MEDIA_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
 
     LaunchedEffect(config, initialized) {
         val existing = config
@@ -263,6 +273,8 @@ fun PhotoSyncScreen(
                             onCancel = { viewModel.requestStop(cancel = true) },
                             onOpenLogs = { showLogs = true },
                             onClearLogs = viewModel::clearLogs,
+                            onFullSync = { confirmFullSync = true },
+                            syncNowLabel = stringResource(R.string.sync_action_daily),
                         )
                     },
                     settings = {
@@ -323,6 +335,31 @@ fun PhotoSyncScreen(
                                     Spacer(Modifier.height(8.dp))
                                     Button(onClick = { permissionLauncher.launch(permissions) }) {
                                         Text(stringResource(R.string.photo_sync_permission_button))
+                                    }
+                                }
+                            }
+                        } else if (!hasLocationPermission) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.photo_sync_location_missing),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            permissionLauncher.launch(
+                                                arrayOf(
+                                                    Manifest.permission.ACCESS_MEDIA_LOCATION,
+                                                ),
+                                            )
+                                        },
+                                    ) {
+                                        Text(stringResource(R.string.photo_sync_location_button))
                                     }
                                 }
                             }
@@ -532,6 +569,29 @@ fun PhotoSyncScreen(
                 )
             }
         }
+    }
+
+    if (confirmFullSync) {
+        AlertDialog(
+            onDismissRequest = { confirmFullSync = false },
+            title = { Text(stringResource(R.string.photo_sync_full_confirm_title)) },
+            text = { Text(stringResource(R.string.photo_sync_full_confirm_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmFullSync = false
+                        viewModel.fullSync()
+                    },
+                ) {
+                    Text(stringResource(R.string.photo_sync_full_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFullSync = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 
     if (remoteHint) {

@@ -1,7 +1,10 @@
 package filehub.android.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -30,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -44,6 +48,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import filehub.android.data.sync.MediaStreams
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import filehub.android.R
@@ -86,6 +92,18 @@ fun FolderSyncScreen(
     var confirmDeleteSync by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var remoteHint by remember { mutableStateOf(false) }
+    var confirmFullSync by remember { mutableStateOf(false) }
+    var permissionVersion by remember { mutableIntStateOf(0) }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { permissionVersion++ }
+    val hasLocationPermission = remember(permissionVersion, context) {
+        Build.VERSION.SDK_INT < 29 || MediaStreams.hasLocationPermission(context) ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_MEDIA_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED
+    }
 
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -235,6 +253,8 @@ fun FolderSyncScreen(
                             onCancel = { viewModel.requestStop(cancel = true) },
                             onOpenLogs = { showLogs = true },
                             onClearLogs = viewModel::clearLogs,
+                            onFullSync = { confirmFullSync = true },
+                            syncNowLabel = stringResource(R.string.sync_action_daily),
                             extra = {
                                 Text(
                                     text = stringResource(R.string.folder_sync_pending) +
@@ -258,6 +278,32 @@ fun FolderSyncScreen(
                         )
                     },
                     settings = {
+                        if (!hasLocationPermission) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.folder_sync_location_missing,
+                                        ),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            locationPermissionLauncher.launch(
+                                                Manifest.permission.ACCESS_MEDIA_LOCATION,
+                                            )
+                                        },
+                                    ) {
+                                        Text(stringResource(R.string.photo_sync_location_button))
+                                    }
+                                }
+                            }
+                        }
                         if (state.saved && !dirty) {
                             Text(
                                 text = stringResource(R.string.photo_sync_saved),
@@ -467,6 +513,29 @@ fun FolderSyncScreen(
                 )
             }
         }
+    }
+
+    if (confirmFullSync) {
+        AlertDialog(
+            onDismissRequest = { confirmFullSync = false },
+            title = { Text(stringResource(R.string.folder_sync_full_confirm_title)) },
+            text = { Text(stringResource(R.string.folder_sync_full_confirm_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmFullSync = false
+                        viewModel.fullSync()
+                    },
+                ) {
+                    Text(stringResource(R.string.photo_sync_full_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFullSync = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 
     if (remoteHint) {

@@ -33,7 +33,13 @@ data class PhotoSyncConfigEntity(
     val lastResult: String? = null,
     val lastError: String? = null,
     val pendingCount: Int = 0,
+    @ColumnInfo(defaultValue = "0") val lastScanAt: Long = 0,
+    @ColumnInfo(defaultValue = "0") val lastMaxId: Long = 0,
+    @ColumnInfo(defaultValue = "0") val lastFullScanAt: Long = 0,
+    val lastScanAlbums: String? = null,
 )
+
+const val PHOTO_HASH_VERSION = 1
 
 @Entity(tableName = "photo_sync_entries", primaryKeys = ["profileId", "signature"])
 data class PhotoSyncEntryEntity(
@@ -55,6 +61,7 @@ data class PhotoSyncEntryEntity(
     val sha256: String? = null,
     @ColumnInfo(defaultValue = "0") val hashSize: Long = 0,
     @ColumnInfo(defaultValue = "0") val hashMtime: Long = 0,
+    @ColumnInfo(defaultValue = "0") val hashVersion: Int = 0,
 )
 
 @Entity(tableName = "folder_sync_config")
@@ -102,6 +109,7 @@ data class FolderSyncEntryEntity(
     val sha256: String? = null,
     @ColumnInfo(defaultValue = "0") val hashSize: Long = 0,
     @ColumnInfo(defaultValue = "0") val hashMtime: Long = 0,
+    @ColumnInfo(defaultValue = "0") val hashVersion: Int = 0,
 )
 
 @Entity(tableName = "directory_cache", primaryKeys = ["profileId", "rootId", "path", "sort", "order"])
@@ -249,7 +257,8 @@ interface FolderSyncDao {
 
     @Query(
         "UPDATE folder_sync_entries SET sha256 = :sha256, hashSize = :hashSize, " +
-            "hashMtime = :hashMtime WHERE profileId = :profileId AND relativePath = :relativePath",
+            "hashMtime = :hashMtime, hashVersion = :hashVersion " +
+            "WHERE profileId = :profileId AND relativePath = :relativePath",
     )
     suspend fun updateHash(
         profileId: String,
@@ -257,6 +266,7 @@ interface FolderSyncDao {
         sha256: String,
         hashSize: Long,
         hashMtime: Long,
+        hashVersion: Int,
     )
 
     @Query("DELETE FROM folder_sync_entries WHERE profileId = :profileId AND relativePath = :relativePath")
@@ -328,7 +338,8 @@ interface PhotoSyncDao {
 
     @Query(
         "UPDATE photo_sync_entries SET sha256 = :sha256, hashSize = :hashSize, " +
-            "hashMtime = :hashMtime WHERE profileId = :profileId AND signature = :signature",
+            "hashMtime = :hashMtime, hashVersion = :hashVersion " +
+            "WHERE profileId = :profileId AND signature = :signature",
     )
     suspend fun updateHash(
         profileId: String,
@@ -336,6 +347,7 @@ interface PhotoSyncDao {
         sha256: String,
         hashSize: Long,
         hashMtime: Long,
+        hashVersion: Int,
     )
 
     @Query("DELETE FROM photo_sync_entries WHERE profileId = :profileId")
@@ -391,7 +403,7 @@ interface SyncLogDao {
         SyncRunEntity::class,
         SyncLogEntity::class,
     ],
-    version = 9,
+    version = 11,
     exportSchema = false,
 )
 abstract class SyncDatabase : RoomDatabase() {
@@ -403,6 +415,40 @@ abstract class SyncDatabase : RoomDatabase() {
     abstract fun syncLogDao(): SyncLogDao
 
     companion object {
+        /** Adds incremental-scan watermarks and the current sync action. */
+        val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE photo_sync_config ADD COLUMN lastScanAt " +
+                        "INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE photo_sync_config ADD COLUMN lastMaxId " +
+                        "INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE photo_sync_config ADD COLUMN lastFullScanAt " +
+                        "INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL("ALTER TABLE photo_sync_config ADD COLUMN lastScanAlbums TEXT")
+                db.execSQL("ALTER TABLE sync_runs ADD COLUMN currentAction TEXT")
+                db.execSQL(
+                    "ALTER TABLE folder_sync_entries ADD COLUMN hashVersion " +
+                        "INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
+        /** Distinguishes hashes read from the original media stream. */
+        val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE photo_sync_entries ADD COLUMN hashVersion " +
+                        "INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
         /** Adds cached SHA-256 values to photo and folder sync entries. */
         val MIGRATION_8_9: Migration = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {

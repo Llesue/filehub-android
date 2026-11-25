@@ -18,6 +18,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
+import filehub.android.data.sync.MediaStreams
 
 class TransferRepository(
     private val context: Context,
@@ -208,7 +209,7 @@ class TransferRepository(
         return if (parsed.scheme == "file") {
             FileInputStream(File(parsed.path ?: error("file uri without path")))
         } else {
-            context.contentResolver.openInputStream(parsed) ?: error("cannot open $uri")
+            MediaStreams.open(context, parsed)
         }
     }
 

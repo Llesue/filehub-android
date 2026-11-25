@@ -112,6 +112,7 @@ data class SyncRunEntity(    val profileId: String,
     val bytesTotal: Long = 0,
     val bytesDone: Long = 0,
     val currentItem: String? = null,
+    val currentAction: String? = null,
     val direction: String? = null,
     val created: Int = 0,
     val updated: Int = 0,
@@ -241,6 +242,7 @@ class SyncRunStore(private val dao: SyncRunDao) {
         bytesTotal: Long? = null,
         bytesDone: Long? = null,
         currentItem: String? = null,
+        currentAction: String? = null,
         direction: String? = null,
         created: Int? = null,
         updated: Int? = null,
@@ -269,6 +271,11 @@ class SyncRunStore(private val dao: SyncRunDao) {
                     clearCurrentItem -> null
                     currentItem != null -> currentItem
                     else -> current.currentItem
+                },
+                currentAction = when {
+                    clearCurrentItem -> null
+                    currentAction != null -> currentAction
+                    else -> current.currentAction
                 },
                 direction = direction ?: current.direction,
                 created = created ?: current.created,
@@ -312,6 +319,7 @@ class SyncRunStore(private val dao: SyncRunDao) {
                 deleted = deleted,
                 conflicts = conflicts,
                 currentItem = null,
+                currentAction = null,
                 stopRequested = false,
                 cancelRequested = false,
                 updatedAt = timestamp,

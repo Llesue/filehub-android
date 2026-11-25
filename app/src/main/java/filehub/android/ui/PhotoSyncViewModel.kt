@@ -185,6 +185,15 @@ class PhotoSyncViewModel(
         }
     }
 
+    fun fullSync() {
+        sessionRepository.state.value.active?.id?.let { id ->
+            viewModelScope.launch {
+                repository.syncNow(id, fullScan = true)
+                _state.update { it.copy(queued = true) }
+            }
+        }
+    }
+
     fun clearQueued() {
         _state.update { it.copy(queued = false) }
     }

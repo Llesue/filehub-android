@@ -32,6 +32,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import filehub.android.data.sync.MediaStreams
 
 class UploadWorker(
     appContext: Context,
@@ -474,6 +475,6 @@ private fun openInput(context: Context, uri: String): InputStream {
     return if (parsed.scheme == "file") {
         FileInputStream(File(parsed.path ?: error("file uri without path")))
     } else {
-        context.contentResolver.openInputStream(parsed) ?: error("cannot open $uri")
+        MediaStreams.open(context, parsed)
     }
 }

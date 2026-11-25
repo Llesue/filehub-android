@@ -13,12 +13,14 @@ import kotlinx.coroutines.withContext
 internal object SyncHasher {
 
     suspend fun sha256(context: Context, uri: String): String? = withContext(Dispatchers.IO) {
-        val input = context.contentResolver.openInputStream(Uri.parse(uri)) ?: return@withContext null
+        val input = runCatching {
+            MediaStreams.open(context, Uri.parse(uri))
+        }.getOrNull() ?: return@withContext null
         input.use { digest(it) }
     }
 
     suspend fun sha256Saf(context: Context, uri: String): String? = withContext(Dispatchers.IO) {
-        val input = SafScanner.openInput(context, Uri.parse(uri))
+        val input = MediaStreams.open(context, Uri.parse(uri))
         input.use { digest(it) }
     }
 

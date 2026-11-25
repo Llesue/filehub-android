@@ -140,6 +140,8 @@ internal fun SyncStatusPanel(
     onStop: () -> Unit,
     onCancel: () -> Unit,
     onOpenLogs: () -> Unit,
+    onFullSync: (() -> Unit)? = null,
+    syncNowLabel: String? = null,
     onClearLogs: () -> Unit,
     extra: @Composable ColumnScope.() -> Unit = {},
 ) {
@@ -159,6 +161,8 @@ internal fun SyncStatusPanel(
             onSyncNow = onSyncNow,
             onStop = onStop,
             onCancel = onCancel,
+            onFullSync = onFullSync,
+            syncNowLabel = syncNowLabel,
             extra = extra,
         )
         if (wide) {
@@ -186,6 +190,8 @@ internal fun SyncRunStatusCard(
     onSyncNow: () -> Unit,
     onStop: () -> Unit,
     onCancel: () -> Unit,
+    onFullSync: (() -> Unit)? = null,
+    syncNowLabel: String? = null,
     extra: @Composable ColumnScope.() -> Unit = {},
 ) {
     val phase = rememberEffectivePhase(run)
@@ -228,20 +234,38 @@ internal fun SyncRunStatusCard(
                         }
                     }
                     phase == SyncPhase.STOPPED || phase == SyncPhase.INTERRUPTED ||
-                        phase == SyncPhase.CANCELLED -> TextButton(
-                        onClick = onSyncNow,
-                        enabled = enabled,
-                    ) {
-                        Text(stringResource(R.string.sync_action_continue))
+                        phase == SyncPhase.CANCELLED -> {
+                        onFullSync?.let { full ->
+                            TextButton(onClick = full, enabled = enabled) {
+                                Text(stringResource(R.string.sync_action_full))
+                            }
+                        }
+                        TextButton(onClick = onSyncNow, enabled = enabled) {
+                            Text(stringResource(R.string.sync_action_continue))
+                        }
                     }
-                    phase == SyncPhase.PARTIAL || phase == SyncPhase.FAILED -> TextButton(
-                        onClick = onSyncNow,
-                        enabled = enabled,
-                    ) {
-                        Text(stringResource(R.string.sync_action_retry))
+                    phase == SyncPhase.PARTIAL || phase == SyncPhase.FAILED -> {
+                        onFullSync?.let { full ->
+                            TextButton(onClick = full, enabled = enabled) {
+                                Text(stringResource(R.string.sync_action_full))
+                            }
+                        }
+                        TextButton(onClick = onSyncNow, enabled = enabled) {
+                            Text(stringResource(R.string.sync_action_retry))
+                        }
                     }
-                    else -> TextButton(onClick = onSyncNow, enabled = enabled) {
-                        Text(stringResource(R.string.sync_action_sync_now))
+                    else -> {
+                        onFullSync?.let { full ->
+                            TextButton(onClick = full, enabled = enabled) {
+                                Text(stringResource(R.string.sync_action_full))
+                            }
+                        }
+                        TextButton(onClick = onSyncNow, enabled = enabled) {
+                            Text(
+                                syncNowLabel
+                                    ?: stringResource(R.string.sync_action_sync_now),
+                            )
+                        }
                     }
                 }
             }
@@ -287,8 +311,12 @@ internal fun SyncRunStatusCard(
                     )
                 }
                 run.currentItem?.takeIf { it.isNotBlank() }?.let { item ->
+                    val action = currentActionLabel(run.currentAction)
                     Text(
-                        text = stringResource(R.string.sync_notif_current, item),
+                        text = stringResource(
+                            R.string.sync_notif_current,
+                            listOfNotNull(action, item).joinToString(" "),
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -399,6 +427,19 @@ private fun SyncPhaseStepper(kind: SyncRunKind, phase: SyncPhase) {
 }
 
 @Composable
+private fun currentActionLabel(action: String?): String? = when (action) {
+    "skip" -> stringResource(R.string.sync_action_skip)
+    "upload" -> stringResource(R.string.sync_action_upload)
+    "download" -> stringResource(R.string.sync_action_download)
+    "verify" -> stringResource(R.string.sync_action_verify)
+    "rename" -> stringResource(R.string.sync_action_rename)
+    "delete" -> stringResource(R.string.sync_action_delete)
+    "conflict" -> stringResource(R.string.sync_action_conflict)
+    "scan" -> stringResource(R.string.sync_action_scan)
+    else -> null
+}
+
+@Composable
 internal fun SyncLogList(
     logs: List<SyncLogEntity>,
     onClear: () -> Unit,
@@ -406,9 +447,17 @@ internal fun SyncLogList(
 ) {
     val ordered = remember(logs) { logs.asReversed() }
     val listState = rememberLazyListState()
-    LaunchedEffect(ordered.size) {
-        if (ordered.isNotEmpty()) {
-            listState.animateScrollToItem(ordered.lastIndex)
+    val newestId = ordered.lastOrNull()?.id
+    var initialScrollDone by remember { mutableStateOf(false) }
+    LaunchedEffect(newestId) {
+        if (ordered.isEmpty()) return@LaunchedEffect
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        // The list is capped at 200, so `size` stops changing and `newestId`
+        // is the signal that a new line was appended. On first layout the
+        // visible range is not reliable yet, so always jump to the newest.
+        if (!initialScrollDone || lastVisible < 0 || lastVisible >= ordered.lastIndex - 2) {
+            listState.scrollToItem(ordered.lastIndex)
+            initialScrollDone = true
         }
     }
     Column(modifier = modifier) {

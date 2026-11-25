@@ -22,6 +22,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+internal fun PhotoSyncEntryEntity.cachedHash(
+    size: Long,
+    mtime: Long,
+    version: Int,
+): String? = sha256?.takeIf {
+    hashVersion == version && hashSize == size && hashMtime == mtime
+}
+
 class PhotoSyncWorker(
     appContext: Context,
     params: WorkerParameters,
@@ -44,6 +52,7 @@ class PhotoSyncWorker(
     override suspend fun doWork(): Result {
         val profileId = inputData.getString("profileId") ?: return Result.success()
         val trigger = inputData.getString("trigger") ?: "periodic"
+        val forceFullScan = inputData.getBoolean("fullScan", false)
         val repo = (applicationContext as FileHubApplication).container.photoSyncRepository
 
         val own = SyncLocks.photo(profileId)
@@ -70,7 +79,7 @@ class PhotoSyncWorker(
                 )
             }
             try {
-                shared.withLock { runSync(profileId, trigger) }
+                shared.withLock { runSync(profileId, trigger, forceFullScan) }
             } catch (error: CancellationException) {
                 withContext(NonCancellable) { finalizeCancelled(profileId) }
                 throw error
@@ -80,7 +89,11 @@ class PhotoSyncWorker(
         }
     }
 
-    private suspend fun runSync(profileId: String, trigger: String): Result {
+    private suspend fun runSync(
+        profileId: String,
+        trigger: String,
+        forceFullScan: Boolean,
+    ): Result {
         val app = applicationContext as FileHubApplication
         val repo = app.container.photoSyncRepository
         val config = repo.config(profileId) ?: return Result.success()
@@ -140,7 +153,15 @@ class PhotoSyncWorker(
                 retry = false,
                 disable = true,
             )
-        val api = FileHubApi(profile.baseUrl, token)
+        val baseUrl = app.container.sessionRepository.workingBaseUrl(profile, token)
+            ?: return finishFailed(
+                repo,
+                run,
+                config,
+                applicationContext.getString(R.string.error_network),
+                SyncBlockReason.NETWORK,
+            )
+        val api = FileHubApi(baseUrl, token)
         val roots = runCatching { api.roots() }
             .getOrElse { error ->
                 if (error is FileHubApiException && error.statusCode == 401) {
@@ -186,6 +207,16 @@ class PhotoSyncWorker(
             capabilities.hashAlgo == "sha256"
         val hashBatch = hashSupported && capabilities?.hashBatch == true
         val uploadVerify = hashSupported && capabilities?.hashUploadVerify == true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            !MediaStreams.hasLocationPermission(applicationContext)
+        ) {
+            repo.logs.log(
+                profileId,
+                SyncRunKind.PHOTO,
+                applicationContext.getString(R.string.photo_sync_location_log),
+                SyncLogStore.LEVEL_WARN,
+            )
+        }
         val remoteDirs = RemoteDirEnsurer(api, config.rootId)
         try {
             remoteDirs.ensure(config.remotePath)
@@ -195,20 +226,69 @@ class PhotoSyncWorker(
             return finishFailure(repo, run, config, error)
         }
 
-        repo.runs.progress(run, phase = SyncPhase.SCANNING, clearCurrentItem = true)
+        repo.runs.progress(
+            run,
+            phase = SyncPhase.SCANNING,
+            currentAction = "scan",
+            clearCurrentItem = true,
+        )
+        val entries = repo.entries(profileId).associateBy { it.signature }
         val albums = repo.selectedAlbums(config)
-        val allPhotos = withContext(Dispatchers.IO) {
-            MediaScanner.photos(applicationContext, albums, config.includeVideos)
+        val scanStartedAt = now()
+        val albumsChanged = config.lastFullScanAt > 0 &&
+            config.lastScanAlbums != config.albumsJson
+        val fullScan = forceFullScan ||
+            config.lastFullScanAt == 0L ||
+            config.lastScanAt == 0L ||
+            config.lastMaxId == 0L ||
+            albumsChanged ||
+            scanStartedAt - config.lastFullScanAt >= FULL_SCAN_INTERVAL_SECONDS
+        repo.logs.log(
+            profileId,
+            SyncRunKind.PHOTO,
+            applicationContext.getString(
+                if (fullScan) R.string.sync_log_scan_full else R.string.sync_log_scan_incremental,
+            ),
+        )
+        val scanned = withContext(Dispatchers.IO) {
+            MediaScanner.photos(
+                context = applicationContext,
+                selectedAlbums = albums,
+                includeVideos = config.includeVideos,
+                modifiedAfter = if (fullScan) null else config.lastScanAt,
+                idAfter = if (fullScan) null else config.lastMaxId,
+            )
+        }.getOrElse { error ->
+            return finishFailed(
+                repo,
+                run,
+                config,
+                error.toUserMessage(applicationContext),
+                SyncBlockReason.NETWORK,
+            )
         }
+        val pendingPhotos = entries.values
+            .filter { it.status != STATUS_DONE && (albums == null || it.bucketId in albums) }
+            .mapNotNull { MediaScanner.photoFromEntry(applicationContext, it) }
+        val merged = (scanned + pendingPhotos).distinctBy { it.localId }
         val metered = NetworkStatus.isMetered(applicationContext)
         val photosAllowed = !config.photosWifiOnly || !metered
         val videosAllowed = config.includeVideos && (!config.videosWifiOnly || !metered)
-        val photos = allPhotos.filter { photo ->
+        val photos = merged.filter { photo ->
             if (photo.isVideo) videosAllowed else photosAllowed
         }
-        val skipped = allPhotos.size - photos.size
+        val skipped = merged.size - photos.size
         if (skipped > 0 && metered) {
             PhotoSyncScheduler.enqueueWifiCatchUp(applicationContext, config)
+        }
+        if (skipped == 0) {
+            repo.updateScanState(
+                profileId = profileId,
+                lastScanAt = (scanStartedAt - 1).coerceAtLeast(0),
+                lastMaxId = merged.maxOfOrNull { it.localId } ?: config.lastMaxId,
+                lastFullScanAt = if (fullScan) scanStartedAt else config.lastFullScanAt,
+                lastScanAlbums = config.albumsJson,
+            )
         }
         val bytesTotal = photos.sumOf { it.size }
         repo.logs.log(
@@ -228,6 +308,14 @@ class PhotoSyncWorker(
                 SyncLogStore.LEVEL_WARN,
             )
         }
+        if (photos.isEmpty()) {
+            repo.logs.log(
+                profileId,
+                SyncRunKind.PHOTO,
+                applicationContext.getString(R.string.sync_log_no_changes),
+            )
+            return finishCompleted(repo, run, config, 0, 0, skipped, 0)
+        }
         repo.runs.progress(
             run,
             phase = SyncPhase.SYNCING,
@@ -237,7 +325,6 @@ class PhotoSyncWorker(
             clearCurrentItem = true,
         )
 
-        val entries = repo.entries(profileId).associateBy { it.signature }
         val remoteNames = mutableMapOf<String, MutableMap<String, Long>>()
         var done = 0
         var failed = 0
@@ -248,7 +335,7 @@ class PhotoSyncWorker(
         var lastTickAt = System.currentTimeMillis()
         var speed = 0L
 
-        suspend fun publish(bytes: Long, item: String?, force: Boolean) {
+        suspend fun publish(bytes: Long, item: String?, action: String?, force: Boolean) {
             val current = System.currentTimeMillis()
             if (!force && current - lastNotifyAt < NOTIFY_INTERVAL_MS) return
             val elapsed = current - lastTickAt
@@ -266,6 +353,7 @@ class PhotoSyncWorker(
                 succeeded = done,
                 failed = failed,
                 currentItem = item,
+                currentAction = action,
             )
             PhotoSyncNotifications.update(
                 applicationContext,
@@ -323,25 +411,42 @@ class PhotoSyncWorker(
             try {
                 val remoteDir = remoteDir(config, photo)
                 remoteDirs.ensure(remoteDir)
-                var target = selectRemoteTarget(
-                    api = api,
-                    rootId = config.rootId,
-                    remoteDir = remoteDir,
-                    cache = remoteNames,
-                    photo = photo,
-                )
-                val cachedHash = existing?.sha256?.takeIf {
-                    existing.hashSize == photo.size && existing.hashMtime == photo.mtime
+                val hashVersion = MediaStreams.hashVersion(applicationContext, photo.uri)
+                // Fast path: an unchanged entry whose remote file is still
+                // listed with the same size needs no hash request at all.
+                if (!forceFullScan &&
+                    existing != null &&
+                    existing.status == STATUS_DONE &&
+                    existing.sha256 != null &&
+                    existing.hashVersion == hashVersion &&
+                    existing.hashSize == photo.size &&
+                    existing.hashMtime == photo.mtime &&
+                    existing.remotePath.substringBeforeLast('/', "") == remoteDir
+                ) {
+                    val savedName = existing.remotePath.substringAfterLast('/')
+                    val names = runCatching {
+                        remoteNamesFor(api, config.rootId, remoteDir, remoteNames)
+                    }.getOrNull()
+                    if (savedName.isNotBlank() && names?.get(savedName) == photo.size) {
+                        done += 1
+                        alreadyOnServer += 1
+                        bytesDone = baseBytes + photo.size
+                        publish(bytesDone, currentItem, "skip", true)
+                        continue
+                    }
                 }
+                publish(baseBytes, currentItem, "verify", true)
+                val cachedHash = existing?.cachedHash(photo.size, photo.mtime, hashVersion)
                 val sha256 = if (hashSupported) {
                     cachedHash ?: SyncHasher.sha256(applicationContext, photo.uri.toString())
                         ?.also { hash ->
                             repo.saveHash(
-                                profileId,
-                                photo.signature,
-                                hash,
-                                photo.size,
-                                photo.mtime,
+                                profileId = profileId,
+                                signature = photo.signature,
+                                sha256 = hash,
+                                size = photo.size,
+                                mtime = photo.mtime,
+                                hashVersion = hashVersion,
                             )
                         }
                 } else {
@@ -350,39 +455,36 @@ class PhotoSyncWorker(
                 if (hashSupported && sha256 == null) {
                     error("cannot read photo for hashing")
                 }
-                if (target.alreadyExists && hashSupported && sha256 != null) {
-                    val existingHash = remoteHash(
-                        api,
-                        config.rootId,
-                        "$remoteDir/${photo.name}",
+                val target = selectRemoteTarget(
+                    api = api,
+                    rootId = config.rootId,
+                    remoteDir = remoteDir,
+                    cache = remoteNames,
+                    photo = photo,
+                    existing = existing,
+                    sha256 = sha256,
+                    hashSupported = hashSupported,
+                )
+                if (target.alreadyExists) {
+                    repo.saveEntry(
+                        entry(
+                            profileId, photo, remoteDir, target.name, STATUS_DONE,
+                            null, photo.size, sha256 = sha256,
+                            hashSize = photo.size, hashMtime = photo.mtime,
+                            hashVersion = if (target.hashMatched) {
+                                hashVersion
+                            } else {
+                                existing?.hashVersion ?: 0
+                            },
+                        ),
                     )
-                    when {
-                        existingHash == null -> Unit // fall back to name+size
-                        existingHash == sha256 -> {
-                            repo.saveEntry(
-                                entry(
-                                    profileId, photo, remoteDir, target.name, STATUS_DONE,
-                                    null, photo.size, sha256 = sha256,
-                                    hashSize = photo.size, hashMtime = photo.mtime,
-                                ),
-                            )
-                            done += 1
-                            alreadyOnServer += 1
-                            bytesDone = baseBytes + photo.size
-                            publish(bytesDone, currentItem, true)
-                            continue
-                        }
-                        else -> target = selectRemoteTarget(
-                            api = api,
-                            rootId = config.rootId,
-                            remoteDir = remoteDir,
-                            cache = remoteNames,
-                            photo = photo,
-                            forceRename = true,
-                        )
-                    }
+                    done += 1
+                    alreadyOnServer += 1
+                    bytesDone = baseBytes + photo.size
+                    publish(bytesDone, currentItem, "skip", true)
+                    continue
                 }
-                if (!target.alreadyExists && hashBatch && sha256 != null) {
+                if (hashBatch && sha256 != null) {
                     val sameContent = findSameContent(
                         api = api,
                         rootId = config.rootId,
@@ -398,6 +500,7 @@ class PhotoSyncWorker(
                                 profileId, photo, remoteDir, target.name, STATUS_DONE,
                                 null, photo.size, sha256 = sha256,
                                 hashSize = photo.size, hashMtime = photo.mtime,
+                                hashVersion = hashVersion,
                                 remotePath = sameContent,
                             ),
                         )
@@ -412,7 +515,7 @@ class PhotoSyncWorker(
                         done += 1
                         alreadyOnServer += 1
                         bytesDone = baseBytes + photo.size
-                        publish(bytesDone, currentItem, true)
+                        publish(bytesDone, currentItem, "skip", true)
                         continue
                     }
                 }
@@ -428,39 +531,36 @@ class PhotoSyncWorker(
                         SyncLogStore.LEVEL_WARN,
                     )
                 }
-                if (target.alreadyExists) {
-                    repo.saveEntry(
-                        entry(
-                            profileId, photo, remoteDir, target.name, STATUS_DONE,
-                            null, photo.size, sha256 = sha256,
-                            hashSize = photo.size, hashMtime = photo.mtime,
-                        ),
-                    )
-                    done += 1
-                    alreadyOnServer += 1
-                } else {
-                    repo.saveEntry(
-                        entry(
-                            profileId, photo, remoteDir, target.name, STATUS_PENDING,
-                            null, 0, sha256 = sha256,
-                            hashSize = photo.size, hashMtime = photo.mtime,
-                        ),
-                    )
-                    uploadPhotoWithRoot(
-                        api = api,
-                        profileId = profileId,
-                        rootId = config.rootId,
-                        photo = photo,
-                        remoteDir = remoteDir,
-                        remoteName = target.name,
-                        existing = existing,
-                        repo = repo,
-                        sha256 = sha256,
-                        verifyUpload = uploadVerify,
-                        onBytes = { chunkBytes -> publish(baseBytes + chunkBytes, currentItem, false) },
-                    )
-                    done += 1
-                }
+                repo.saveEntry(
+                    entry(
+                        profileId, photo, remoteDir, target.name, STATUS_PENDING,
+                        null, 0, sha256 = sha256,
+                        hashSize = photo.size, hashMtime = photo.mtime,
+                        hashVersion = hashVersion,
+                    ),
+                )
+                uploadPhotoWithRoot(
+                    api = api,
+                    profileId = profileId,
+                    rootId = config.rootId,
+                    photo = photo,
+                    remoteDir = remoteDir,
+                    remoteName = target.name,
+                    existing = existing,
+                    repo = repo,
+                    sha256 = sha256,
+                    verifyUpload = uploadVerify,
+                    hashVersion = hashVersion,
+                    onBytes = { chunkBytes ->
+                        publish(
+                            baseBytes + chunkBytes,
+                            currentItem,
+                            if (target.name != photo.name) "rename" else "upload",
+                            false,
+                        )
+                    },
+                )
+                done += 1
             } catch (error: CancellationException) {
                 throw error
             } catch (error: FileHubApiException) {
@@ -554,7 +654,12 @@ class PhotoSyncWorker(
                     ),
                 )
             }
-            publish(bytesDone, currentItem, force = index == photos.lastIndex || bytesDone == bytesTotal)
+            publish(
+                bytesDone,
+                currentItem,
+                null,
+                force = index == photos.lastIndex || bytesDone == bytesTotal,
+            )
         }
 
         if (alreadyOnServer > 0) {
@@ -578,6 +683,7 @@ class PhotoSyncWorker(
         repo: PhotoSyncRepository,
         sha256: String?,
         verifyUpload: Boolean,
+        hashVersion: Int,
         onBytes: suspend (Long) -> Unit,
     ): String {
         val uploadSha = if (verifyUpload) sha256 else null
@@ -616,6 +722,7 @@ class PhotoSyncWorker(
             entry(
                 profileId, photo, remoteDir, remoteName, STATUS_RUNNING, null, 0, sessionId,
                 sha256 = sha256, hashSize = photo.size, hashMtime = photo.mtime,
+                hashVersion = hashVersion,
             ),
         )
         val chunks = if (photo.size == 0L) 0 else ((photo.size + chunkSize - 1) / chunkSize).toInt()
@@ -655,6 +762,7 @@ class PhotoSyncWorker(
                 sha256 = sha256,
                 hashSize = photo.size,
                 hashMtime = photo.mtime,
+                hashVersion = hashVersion,
             ),
         )
         onBytes(photo.size)
@@ -696,37 +804,78 @@ class PhotoSyncWorker(
         return hashes.firstOrNull { it.status == "ready" && it.sha256 == sha256 }?.path
     }
 
+    private suspend fun remoteNamesFor(
+        api: FileHubApi,
+        rootId: Long,
+        remoteDir: String,
+        cache: MutableMap<String, MutableMap<String, Long>>,
+    ): MutableMap<String, Long> = cache.getOrPut(remoteDir) {
+        val result = mutableMapOf<String, Long>()
+        var cursor: String? = null
+        var pages = 0
+        do {
+            val listing = api.list(
+                rootId = rootId,
+                path = remoteDir,
+                cursor = cursor,
+                limit = 1000,
+                includeSizes = true,
+            )
+            listing.entries.filterNot { it.isDir }.forEach { result[it.name] = it.size }
+            cursor = listing.nextCursor
+            pages += 1
+        } while (cursor != null && pages < 20)
+        result.toMutableMap()
+    }
+
     private suspend fun selectRemoteTarget(
         api: FileHubApi,
         rootId: Long,
         remoteDir: String,
         cache: MutableMap<String, MutableMap<String, Long>>,
         photo: MediaPhoto,
-        forceRename: Boolean = false,
+        existing: PhotoSyncEntryEntity?,
+        sha256: String?,
+        hashSupported: Boolean,
     ): RemoteTarget {
-        val names = cache.getOrPut(remoteDir) {
-            val result = mutableMapOf<String, Long>()
-            var cursor: String? = null
-            var pages = 0
-            do {
-                val listing = api.list(
-                    rootId = rootId,
-                    path = remoteDir,
-                    cursor = cursor,
-                    limit = 1000,
-                    includeSizes = true,
-                )
-                listing.entries.filterNot { it.isDir }.forEach { result[it.name] = it.size }
-                cursor = listing.nextCursor
-                pages += 1
-            } while (cursor != null && pages < 20)
-            result.toMutableMap()
+        val names = remoteNamesFor(api, rootId, remoteDir, cache)
+        // Prefer the canonical name, then the name this entry was synced to
+        // last time. Reusing that name is what stops (1) growing into (2).
+        val savedName = existing?.remotePath
+            ?.substringAfterLast('/')
+            ?.takeIf { it.isNotBlank() && it != photo.name }
+        val candidates = (listOf(photo.name) + listOfNotNull(savedName)).distinct()
+        val hashUnavailable = mutableSetOf<String>()
+
+        candidates.forEach { name ->
+            if (names[name] != photo.size) return@forEach
+            if (!hashSupported || sha256 == null) {
+                return RemoteTarget(name, alreadyExists = true)
+            }
+            val remote = remoteHash(api, rootId, "$remoteDir/$name")
+            if (remote == null) {
+                hashUnavailable += name
+            } else if (remote == sha256) {
+                return RemoteTarget(name, alreadyExists = true, hashMatched = true)
+            }
         }
-        if (!forceRename && names[photo.name] == photo.size) {
-            return RemoteTarget(photo.name, alreadyExists = true)
+
+        // Rows created before original-stream hashing have no usable baseline.
+        // Adopt an existing same-size copy once instead of re-uploading it.
+        if (existing != null && existing.hashVersion < PHOTO_HASH_VERSION) {
+            candidates.firstOrNull { names[it] == photo.size }?.let { name ->
+                return RemoteTarget(name, alreadyExists = true)
+            }
         }
+
+        // If the server could not prove a mismatch, keep the same-size file
+        // rather than creating a duplicate.
+        candidates.firstOrNull { it in hashUnavailable }?.let { name ->
+            return RemoteTarget(name, alreadyExists = true)
+        }
+
         var candidate = photo.name
-        if (forceRename || names.containsKey(candidate)) {
+        if (names.containsKey(candidate)) {
             val dot = photo.name.lastIndexOf('.')
             val base = if (dot > 0) photo.name.substring(0, dot) else photo.name
             val ext = if (dot > 0) photo.name.substring(dot) else ""
@@ -740,8 +889,7 @@ class PhotoSyncWorker(
 
     private suspend fun readChunk(uri: String, offset: Long, length: Long): ByteArray =
         withContext(Dispatchers.IO) {
-            val input = applicationContext.contentResolver.openInputStream(android.net.Uri.parse(uri))
-                ?: error("cannot open media uri")
+            val input = MediaStreams.open(applicationContext, android.net.Uri.parse(uri))
             input.use {
                 skipFully(it, offset)
                 val buffer = ByteArray(length.toInt())
@@ -787,6 +935,7 @@ class PhotoSyncWorker(
         sha256: String? = null,
         hashSize: Long = 0,
         hashMtime: Long = 0,
+        hashVersion: Int = 0,
     ): PhotoSyncEntryEntity = PhotoSyncEntryEntity(
         profileId = profileId,
         signature = photo.signature,
@@ -806,6 +955,7 @@ class PhotoSyncWorker(
         sha256 = sha256,
         hashSize = hashSize,
         hashMtime = hashMtime,
+        hashVersion = hashVersion,
     )
 
     private suspend fun targetChanged(
@@ -1073,7 +1223,11 @@ class PhotoSyncWorker(
 
     private fun now(): Long = System.currentTimeMillis() / 1000
 
-    private data class RemoteTarget(val name: String, val alreadyExists: Boolean)
+    private data class RemoteTarget(
+        val name: String,
+        val alreadyExists: Boolean,
+        val hashMatched: Boolean = false,
+    )
 
     companion object {
         private const val STATUS_PENDING = "pending"
@@ -1082,5 +1236,6 @@ class PhotoSyncWorker(
         private const val STATUS_ERROR = "error"
         private const val UPLOAD_CHUNK = 4L * 1024 * 1024
         private const val NOTIFY_INTERVAL_MS = 800L
+        private const val FULL_SCAN_INTERVAL_SECONDS = 7L * 24 * 60 * 60
     }
 }

@@ -47,6 +47,11 @@ internal fun List<FileRoot>.withRootOnline(rootId: Long, online: Boolean): List<
         map { root -> if (root.id == rootId) root.copy(online = online) else root }
     }
 
+internal fun orderedAddresses(addresses: List<String>, baseUrl: String): List<String> =
+    (addresses.ifEmpty { listOf(baseUrl) })
+        .mapNotNull { raw -> runCatching { FileHubApi.normalizeBaseUrl(raw) }.getOrNull() }
+        .distinct()
+
 class SessionRepository(
     private val context: Context,
     private val store: ProfileStore,
@@ -509,9 +514,7 @@ class SessionRepository(
     }
 
     private fun normalizedAddresses(profile: ServerProfile): List<String> =
-        (profile.addresses.ifEmpty { listOf(profile.baseUrl) })
-            .mapNotNull { raw -> runCatching { FileHubApi.normalizeBaseUrl(raw) }.getOrNull() }
-            .distinct()
+        orderedAddresses(profile.addresses, profile.baseUrl)
 
 
     private fun resolveIcon(baseUrl: String, raw: String?): String? {
@@ -567,6 +570,33 @@ class SessionRepository(
 
     fun clearError() {
         _state.update { it.copy(error = null) }
+    }
+
+    /**
+     * Returns the first configured address that answers, and updates the
+     * persisted profile so background workers stop using a dead address.
+     */
+    suspend fun workingBaseUrl(profile: ServerProfile, token: String): String? {
+        for (address in normalizedAddresses(profile)) {
+            val api = FileHubApi(address, token, probeClient)
+            val reachable = runCatching { api.roots() }.isSuccess
+            if (!reachable) continue
+            if (address != profile.baseUrl) {
+                val updated = profile.copy(baseUrl = address)
+                val profiles = _state.value.profiles.map {
+                    if (it.id == profile.id) updated else it
+                }
+                store.saveProfiles(profiles)
+                _state.update {
+                    it.copy(
+                        profiles = profiles,
+                        active = if (it.active?.id == profile.id) updated else it.active,
+                    )
+                }
+            }
+            return address
+        }
+        return null
     }
 
     suspend fun tokenFor(profile: ServerProfile): String? =

@@ -197,6 +197,9 @@
     <string name="photo_sync_last_run">上次同步</string>
     <string name="photo_sync_pending">待同步</string>
     <string name="photo_sync_permission_button">允许访问相册</string>
+    <string name="photo_sync_location_missing">未授予位置信息权限：相册备份不会保留照片的 GPS 定位。</string>
+    <string name="photo_sync_location_button">允许保留定位信息</string>
+    <string name="photo_sync_location_log">未授予位置信息权限，本次备份不包含 GPS 定位信息。</string>
     <string name="photo_sync_select_all">全选</string>
     <string name="photo_sync_no_albums">没有找到相册</string>
     <string name="photo_sync_schedule_manual">手动</string>
@@ -218,6 +221,11 @@
     <string name="folder_sync_enabled">已开启</string>
     <string name="folder_sync_off">关闭</string>
     <string name="folder_sync_now">立即同步</string>
+    <string name="folder_sync_full_scan_log">全量校验：重新比对所有同大小文件。</string>
+    <string name="folder_sync_full_confirm_title">全量同步？</string>
+    <string name="folder_sync_location_missing">未授予位置信息权限：目录里的照片备份后不会保留 GPS 定位。</string>
+    <string name="folder_sync_location_log">未授予位置信息权限，目录中的照片不会保留 GPS 定位。</string>
+    <string name="folder_sync_full_confirm_body">将重新扫描本地和服务器目录，并重新校验所有同大小文件。文件多时可能较慢，建议在充电和 Wi-Fi 下进行。</string>
     <string name="folder_sync_last_run">上次同步</string>
     <string name="folder_sync_conflicts">冲突</string>
     <string name="folder_sync_pending">待同步</string>
@@ -597,6 +605,14 @@
     <string name="sync_notif_bytes">%1$s / %2$s</string>
     <string name="sync_notif_bytes_speed">%1$s / %2$s · %3$s/s</string>
     <string name="sync_notif_current">当前：%1$s</string>
+    <string name="sync_action_skip">已存在跳过</string>
+    <string name="sync_action_upload">上传中</string>
+    <string name="sync_action_download">下载中</string>
+    <string name="sync_action_verify">校验中</string>
+    <string name="sync_action_rename">重名上传</string>
+    <string name="sync_action_delete">删除中</string>
+    <string name="sync_action_conflict">冲突</string>
+    <string name="sync_action_scan">扫描中</string>
     <string name="sync_lock_screen_text">同步正在后台运行</string>
 
     <string name="sync_block_not_logged_in">未登录</string>
@@ -631,6 +647,13 @@
     <string name="sync_action_continue">继续</string>
     <string name="sync_action_retry">重试失败项</string>
     <string name="sync_action_sync_now">立即同步</string>
+    <string name="sync_action_daily">日常同步</string>
+    <string name="sync_action_full">全量同步</string>
+    <string name="photo_sync_full_confirm_title">全量同步？</string>
+    <string name="photo_sync_full_confirm_body">将重新扫描所有照片，并逐张核对服务器文件。照片多时可能需要较长时间，建议在充电和 Wi-Fi 下进行。</string>
+    <string name="photo_sync_full_confirm_action">开始全量同步</string>
+    <string name="sync_log_scan_incremental">增量扫描：处理新增、修改和失败的照片。</string>
+    <string name="sync_log_scan_full">全量扫描：核对所有照片。</string>
     <string name="sync_action_view_conflicts">查看冲突</string>
     <string name="sync_action_details">查看详情</string>
     <string name="sync_save_changes">保存变更</string>
@@ -682,6 +705,7 @@
     <string name="sync_log_clear">清空</string>
     <string name="sync_log_open">查看日志</string>
     <string name="sync_log_started">开始同步：%1$s → %2$s</string>
+    <string name="sync_log_no_changes">没有发现新增或修改的照片。</string>
     <string name="sync_log_scan_photos">扫描完成：%1$d 项，%2$s</string>
     <string name="sync_log_scan_local">扫描本地：%1$d 项</string>
     <string name="sync_log_scan_remote">扫描远端：%1$d 项</string>

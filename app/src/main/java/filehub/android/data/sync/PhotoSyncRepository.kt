@@ -45,6 +45,17 @@ class PhotoSyncRepository(
                 previous.remotePath.trim('/') != config.remotePath.trim('/') ||
                 previous.albumSubfolders != config.albumSubfolders
             )
+        val albumsChanged = previous != null && previous.albumsJson != config.albumsJson
+        val stored = if (previous == null || targetChanged || albumsChanged) {
+            config.copy(
+                lastScanAt = 0,
+                lastMaxId = 0,
+                lastFullScanAt = 0,
+                lastScanAlbums = null,
+            )
+        } else {
+            config
+        }
         if (targetChanged) {
             PhotoSyncScheduler.cancelAll(context, config.profileId)
             runs.current(config.profileId, SyncRunKind.PHOTO)?.let { run ->
@@ -53,16 +64,34 @@ class PhotoSyncRepository(
                 }
             }
         }
-        dao.saveConfig(config)
+        dao.saveConfig(stored)
         if (resetEntries) dao.clearEntries(config.profileId)
-        if (config.enabled) {
-            PhotoSyncScheduler.schedulePeriodic(context, config)
+        if (stored.enabled) {
+            PhotoSyncScheduler.schedulePeriodic(context, stored)
         } else {
-            PhotoSyncScheduler.cancelPeriodic(context, config.profileId)
+            PhotoSyncScheduler.cancelPeriodic(context, stored.profileId)
         }
     }
 
     suspend fun updateConfig(config: PhotoSyncConfigEntity) = dao.saveConfig(config)
+
+    suspend fun updateScanState(
+        profileId: String,
+        lastScanAt: Long,
+        lastMaxId: Long,
+        lastFullScanAt: Long,
+        lastScanAlbums: String?,
+    ) {
+        val current = dao.config(profileId) ?: return
+        dao.saveConfig(
+            current.copy(
+                lastScanAt = lastScanAt,
+                lastMaxId = lastMaxId,
+                lastFullScanAt = lastFullScanAt,
+                lastScanAlbums = lastScanAlbums,
+            ),
+        )
+    }
 
     suspend fun setEnabled(profileId: String, enabled: Boolean) {
         val current = dao.config(profileId) ?: return
@@ -94,9 +123,9 @@ class PhotoSyncRepository(
         PhotoSyncScheduler.cancelAll(context, profileId)
     }
 
-    suspend fun syncNow(profileId: String) {
+    suspend fun syncNow(profileId: String, fullScan: Boolean = false) {
         val config = dao.config(profileId) ?: return
-        PhotoSyncScheduler.enqueueNow(context, config)
+        PhotoSyncScheduler.enqueueNow(context, config, fullScan)
     }
 
     suspend fun catchUp(profileId: String) {
@@ -133,7 +162,8 @@ class PhotoSyncRepository(
         sha256: String,
         size: Long,
         mtime: Long,
-    ) = dao.updateHash(profileId, signature, sha256, size, mtime)
+        hashVersion: Int,
+    ) = dao.updateHash(profileId, signature, sha256, size, mtime, hashVersion)
 
     suspend fun updateEntry(
         profileId: String,
@@ -189,10 +219,20 @@ object PhotoSyncScheduler {
         )
     }
 
-    fun enqueueNow(context: Context, config: PhotoSyncConfigEntity) {
+    fun enqueueNow(
+        context: Context,
+        config: PhotoSyncConfigEntity,
+        fullScan: Boolean = false,
+    ) {
         val request = OneTimeWorkRequestBuilder<PhotoSyncWorker>()
             .setConstraints(constraints(config))
-            .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "manual"))
+            .setInputData(
+                workDataOf(
+                    "profileId" to config.profileId,
+                    "trigger" to if (fullScan) "manual-full" else "manual",
+                    "fullScan" to fullScan,
+                ),
+            )
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             nowName(config.profileId),
