@@ -1,5 +1,6 @@
 package filehub.android.data.sync
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -51,6 +52,9 @@ data class PhotoSyncEntryEntity(
     val bytesDone: Long = 0,
     val error: String? = null,
     val updatedAt: Long = 0,
+    val sha256: String? = null,
+    @ColumnInfo(defaultValue = "0") val hashSize: Long = 0,
+    @ColumnInfo(defaultValue = "0") val hashMtime: Long = 0,
 )
 
 @Entity(tableName = "folder_sync_config")
@@ -95,6 +99,9 @@ data class FolderSyncEntryEntity(
     val error: String? = null,
     val conflict: String? = null,
     val updatedAt: Long = 0,
+    val sha256: String? = null,
+    @ColumnInfo(defaultValue = "0") val hashSize: Long = 0,
+    @ColumnInfo(defaultValue = "0") val hashMtime: Long = 0,
 )
 
 @Entity(tableName = "directory_cache", primaryKeys = ["profileId", "rootId", "path", "sort", "order"])
@@ -184,6 +191,21 @@ interface FolderSyncDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveConfig(config: FolderSyncConfigEntity)
 
+    @Query(
+        "UPDATE folder_sync_config SET lastRunAt = :lastRunAt, lastResult = :lastResult, " +
+            "lastError = :lastError, pendingCount = :pendingCount WHERE profileId = :profileId",
+    )
+    suspend fun updateOutcome(
+        profileId: String,
+        lastRunAt: Long?,
+        lastResult: String?,
+        lastError: String?,
+        pendingCount: Int,
+    )
+
+    @Query("UPDATE folder_sync_config SET enabled = :enabled WHERE profileId = :profileId")
+    suspend fun setEnabled(profileId: String, enabled: Boolean)
+
     @Query("DELETE FROM folder_sync_config WHERE profileId = :profileId")
     suspend fun clearConfig(profileId: String)
 
@@ -225,6 +247,18 @@ interface FolderSyncDao {
         updatedAt: Long,
     )
 
+    @Query(
+        "UPDATE folder_sync_entries SET sha256 = :sha256, hashSize = :hashSize, " +
+            "hashMtime = :hashMtime WHERE profileId = :profileId AND relativePath = :relativePath",
+    )
+    suspend fun updateHash(
+        profileId: String,
+        relativePath: String,
+        sha256: String,
+        hashSize: Long,
+        hashMtime: Long,
+    )
+
     @Query("DELETE FROM folder_sync_entries WHERE profileId = :profileId AND relativePath = :relativePath")
     suspend fun deleteEntry(profileId: String, relativePath: String)
 
@@ -248,6 +282,21 @@ interface PhotoSyncDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveConfig(config: PhotoSyncConfigEntity)
+
+    @Query(
+        "UPDATE photo_sync_config SET lastRunAt = :lastRunAt, lastResult = :lastResult, " +
+            "lastError = :lastError, pendingCount = :pendingCount WHERE profileId = :profileId",
+    )
+    suspend fun updateOutcome(
+        profileId: String,
+        lastRunAt: Long?,
+        lastResult: String?,
+        lastError: String?,
+        pendingCount: Int,
+    )
+
+    @Query("UPDATE photo_sync_config SET enabled = :enabled WHERE profileId = :profileId")
+    suspend fun setEnabled(profileId: String, enabled: Boolean)
 
     @Query("DELETE FROM photo_sync_config WHERE profileId = :profileId")
     suspend fun clearConfig(profileId: String)
@@ -277,11 +326,58 @@ interface PhotoSyncDao {
         updatedAt: Long,
     )
 
+    @Query(
+        "UPDATE photo_sync_entries SET sha256 = :sha256, hashSize = :hashSize, " +
+            "hashMtime = :hashMtime WHERE profileId = :profileId AND signature = :signature",
+    )
+    suspend fun updateHash(
+        profileId: String,
+        signature: String,
+        sha256: String,
+        hashSize: Long,
+        hashMtime: Long,
+    )
+
     @Query("DELETE FROM photo_sync_entries WHERE profileId = :profileId")
     suspend fun clearEntries(profileId: String)
 
     @Query("SELECT COUNT(*) FROM photo_sync_entries WHERE profileId = :profileId AND status != 'done'")
     suspend fun pendingCount(profileId: String): Int
+}
+
+@Entity(tableName = "sync_log")
+data class SyncLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val profileId: String,
+    val kind: String,
+    val timestamp: Long,
+    val level: String,
+    val message: String,
+)
+
+@Dao
+interface SyncLogDao {
+    @Query(
+        "SELECT * FROM sync_log WHERE profileId = :profileId AND kind = :kind " +
+            "ORDER BY id DESC LIMIT :limit",
+    )
+    fun flow(profileId: String, kind: String, limit: Int): Flow<List<SyncLogEntity>>
+
+    @Insert
+    suspend fun insert(entry: SyncLogEntity)
+
+    @Query(
+        "DELETE FROM sync_log WHERE profileId = :profileId AND kind = :kind AND id NOT IN " +
+            "(SELECT id FROM sync_log WHERE profileId = :profileId AND kind = :kind " +
+            "ORDER BY id DESC LIMIT :keep)",
+    )
+    suspend fun prune(profileId: String, kind: String, keep: Int)
+
+    @Query("DELETE FROM sync_log WHERE profileId = :profileId AND kind = :kind")
+    suspend fun clear(profileId: String, kind: String)
+
+    @Query("DELETE FROM sync_log WHERE profileId = :profileId")
+    suspend fun clearProfile(profileId: String)
 }
 
 @Database(
@@ -292,8 +388,10 @@ interface PhotoSyncDao {
         FolderSyncEntryEntity::class,
         DirectoryCacheEntity::class,
         BrowserStateEntity::class,
+        SyncRunEntity::class,
+        SyncLogEntity::class,
     ],
-    version = 6,
+    version = 9,
     exportSchema = false,
 )
 abstract class SyncDatabase : RoomDatabase() {
@@ -301,8 +399,84 @@ abstract class SyncDatabase : RoomDatabase() {
     abstract fun folderSyncDao(): FolderSyncDao
     abstract fun directoryCacheDao(): DirectoryCacheDao
     abstract fun browserStateDao(): BrowserStateDao
+    abstract fun syncRunDao(): SyncRunDao
+    abstract fun syncLogDao(): SyncLogDao
 
     companion object {
+        /** Adds cached SHA-256 values to photo and folder sync entries. */
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photo_sync_entries ADD COLUMN sha256 TEXT")
+                db.execSQL(
+                    "ALTER TABLE photo_sync_entries ADD COLUMN hashSize INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE photo_sync_entries ADD COLUMN hashMtime INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL("ALTER TABLE folder_sync_entries ADD COLUMN sha256 TEXT")
+                db.execSQL(
+                    "ALTER TABLE folder_sync_entries ADD COLUMN hashSize INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE folder_sync_entries ADD COLUMN hashMtime INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
+        /** Adds the bounded sync log shown in the right-hand pane. */
+        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `sync_log` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `profileId` TEXT NOT NULL,
+                        `kind` TEXT NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `level` TEXT NOT NULL,
+                        `message` TEXT NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+        /** Adds the shared photo/folder run state used for progress and notifications. */
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `sync_runs` (
+                        `profileId` TEXT NOT NULL,
+                        `kind` TEXT NOT NULL,
+                        `runId` TEXT NOT NULL,
+                        `phase` TEXT NOT NULL,
+                        `blockReason` TEXT,
+                        `cancelReason` TEXT,
+                        `total` INTEGER NOT NULL,
+                        `processed` INTEGER NOT NULL,
+                        `succeeded` INTEGER NOT NULL,
+                        `skipped` INTEGER NOT NULL,
+                        `failed` INTEGER NOT NULL,
+                        `bytesTotal` INTEGER NOT NULL,
+                        `bytesDone` INTEGER NOT NULL,
+                        `currentItem` TEXT,
+                        `direction` TEXT,
+                        `created` INTEGER NOT NULL,
+                        `updated` INTEGER NOT NULL,
+                        `deleted` INTEGER NOT NULL,
+                        `conflicts` INTEGER NOT NULL,
+                        `trigger` TEXT,
+                        `startedAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `heartbeatAt` INTEGER NOT NULL,
+                        `stopRequested` INTEGER NOT NULL,
+                        `cancelRequested` INTEGER NOT NULL,
+                        PRIMARY KEY(`profileId`, `kind`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
         /** Adds the per-directory browser state (sort, view, scroll). */
         val MIGRATION_5_6: Migration = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {

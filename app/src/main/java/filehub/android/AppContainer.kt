@@ -23,6 +23,7 @@ import filehub.android.data.playback.AudioPlayerController
 import filehub.android.data.sync.FolderSyncRepository
 import filehub.android.data.sync.PhotoSyncRepository
 import filehub.android.data.sync.SyncDatabase
+import filehub.android.data.sync.SyncTargetGuard
 import filehub.android.data.transfer.TransferRepository
 import filehub.android.data.transfer.TransferStore
 import kotlinx.coroutines.CoroutineScope
@@ -56,14 +57,33 @@ class AppContainer(context: Context) {
             SyncDatabase.MIGRATION_3_4,
             SyncDatabase.MIGRATION_4_5,
             SyncDatabase.MIGRATION_5_6,
+            SyncDatabase.MIGRATION_6_7,
+            SyncDatabase.MIGRATION_7_8,
+            SyncDatabase.MIGRATION_8_9,
         )
         .fallbackToDestructiveMigration()
         .build()
     val directoryCacheRepository: DirectoryCacheRepository = DirectoryCacheRepository(syncDatabase.directoryCacheDao())
     val clientUpdateChecker: ClientUpdateChecker = ClientUpdateChecker(appContext)
     val browserStateRepository: BrowserStateRepository = BrowserStateRepository(syncDatabase.browserStateDao())
-    val photoSyncRepository: PhotoSyncRepository = PhotoSyncRepository(appContext, syncDatabase.photoSyncDao())
-    val folderSyncRepository: FolderSyncRepository = FolderSyncRepository(appContext, syncDatabase.folderSyncDao())
+    private val syncTargetGuard: SyncTargetGuard = SyncTargetGuard(
+        syncDatabase.photoSyncDao(),
+        syncDatabase.folderSyncDao(),
+    )
+    val photoSyncRepository: PhotoSyncRepository = PhotoSyncRepository(
+        appContext,
+        syncDatabase.photoSyncDao(),
+        syncDatabase.syncRunDao(),
+        syncDatabase.syncLogDao(),
+        syncTargetGuard,
+    )
+    val folderSyncRepository: FolderSyncRepository = FolderSyncRepository(
+        appContext,
+        syncDatabase.folderSyncDao(),
+        syncDatabase.syncRunDao(),
+        syncDatabase.syncLogDao(),
+        syncTargetGuard,
+    )
 
     init {
         appScope.launch {

@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.1.5 - 2026-11-26
+
+### Added
+
+- Shared sync run state for photo and folder sync with phase, block reason, cancel reason, run id, heartbeat, item/byte progress and stop/cancel flags.
+- A bounded sync log (200 entries per sync kind) recording start, scan, plan, progress, failures and completion, shown in the right-hand pane.
+- SHA-256 content hashing for photo and folder sync: local streaming hash with a per-entry cache, server capability detection, upload verification, same-name content comparison and same-size cross-name dedupe.
+- A four-step state machine strip in the sync status card, with photo steps (prepare/scan/apply/done) and folder steps (scan/compare/apply/done).
+- Notification progress for both sync kinds: overall bytes and counts, current file, transfer speed, stop/cancel/continue/retry actions, a completion summary and a privacy-safe lock-screen version.
+- Conflicts page for folder sync with per-file keep-phone / keep-server resolution, followed by an automatic re-sync.
+- Two-column share cards on wide screens, keeping the copy/QR/open actions on each card.
+
+### Fixed
+
+- MediaStore buckets that report the same `BUCKET_ID` under several case variants (`Camera` / `camera`) now resolve to one canonical album name for both the picker and the uploader.
+- Changing a sync target now cancels the old worker and marks the run as target-changed instead of letting it keep writing into the old folder.
+- A finishing worker can no longer overwrite a newer sync configuration; only the result fields are updated.
+- Folder sync clears its three-way baseline when the target or direction changes, so the next run compares against the right target.
+- Delete sync refuses to run when its target overlaps the photo sync target.
+- Photo and folder sync can no longer run at the same time for one profile; the later run reports that another sync is running.
+- Saving an overlapping folder/photo target now requires explicit confirmation.
+- Stale active runs are shown as interrupted instead of a frozen progress bar.
+- Servers without hash support, or hash endpoints returning 404/501, fall back to size+mtime without blocking sync.
+- A `HASH_MISMATCH` response clears the upload session so the next run starts a fresh upload instead of reusing it.
+
+### Improved
+
+- Sync settings lock while a run is active, and the save button reflects dirty, saving, saved, running and target-changed states.
+- Sync notifications are throttled and keep working when notification permission is denied.
+- Sync log entries are one line each with long text ellipsized; start lines are blue, successful completions green, failures red, warnings amber, and timestamps use a lighter outline colour.
+- The shares top bar no longer offers a paste-a-share-link entry; copy link and the QR card remain.
+- All four utility pages use a 48dp compact toolbar, and the sync save action moved into the toolbar instead of occupying a bottom row.
+- Photo and folder sync place options on the left and the live state machine plus log on the right; below 720dp they collapse to one column and the log opens as a dialog.
+- The shares page no longer has a search field or filter chips; the card grid uses the full page width.
+- Sync storage targets use a full-width picker with yellow folder icons, hidden offline/read-only roots, local/remote labels, and a top-right close button.
+- Selecting a remote root shows a small circled warning next to "Storage"; tapping it explains that remote targets work without content hashing and fall back to name, size and modified time.
+- Remote roots in the browser show the sharer's avatar, with a colored initial fallback; their "Remote" and "Online" badges sit on the name row and long names ellipsize instead of pushing badges away.
+- Root cards use a bare yellow folder icon instead of a grey icon tile; folder contents are unchanged.
+- The sync root field shows "Remote" as a blue inline badge on the same line as the directory name.
+- First sign-in and admin password resets are handled inside the app: the login dialog collects a new password and calls the forced-change endpoint before creating the device token.
+- An expired server token opens a prefilled "Sign in again" screen with only the password field; the server profile id is preserved so photo/folder sync configuration stays attached.
+- Server cards show the last known server version as a `vX.Y.Z` badge next to the name, fetched for the active server and cached for the others when the list opens.
+- An expired server card shows a "Sign in again" badge instead of a long error sentence; the whole card opens the re-authentication screen.
+- Server order can be changed by long-pressing and dragging a card, in both the phone server list and the landscape/tablet server picker; the dragged card follows the finger, the other cards animate into their new slots, and the order is saved immediately.
+- Phone, landscape and tablet server cards share one layout with the server icon, account name, version badge and re-authentication badge.
+- Add-server, re-authentication and edit-server forms use a centred, width-limited column on landscape phones and tablets instead of stretching edge to edge.
+- Share management calls the stop action "停止分享" and the rotate action "重置链接", matching the server and web UI.
+- Stopped and expired share cards are dimmed, their copy/QR/open actions are disabled, and their menu only offers enable and delete.
+- Re-enabling an expired share extends it by one day, the same behaviour as the web UI; the edit dialog no longer carries a redundant pause switch.
+- Active share cards show a relative expiry ("过期：3天后") instead of a generic "有效" label.
+
 ## v0.1.4 - 2026-11-25
 
 ### Added

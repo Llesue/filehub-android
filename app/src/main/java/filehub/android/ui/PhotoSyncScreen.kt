@@ -7,34 +7,26 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,13 +46,14 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import filehub.android.R
 import filehub.android.data.SessionState
 import filehub.android.data.sync.PhotoSyncConfigEntity
+import filehub.android.data.sync.SyncRunKind
+import kotlinx.serialization.json.Json
 
 @Composable
 fun PhotoSyncScreen(
@@ -72,13 +65,15 @@ fun PhotoSyncScreen(
     val folderPickerState by folderPicker.state.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val run by viewModel.run.collectAsStateWithLifecycle()
+    val logs by viewModel.logs.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val active = session.active
 
     var selectedRootId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var remotePath by rememberSaveable { mutableStateOf("Phone/Photos") }
+    var remotePath by rememberSaveable { mutableStateOf("") }
     var includeVideos by rememberSaveable { mutableStateOf(true) }
     var photosWifiOnly by rememberSaveable { mutableStateOf(true) }
     var videosWifiOnly by rememberSaveable { mutableStateOf(true) }
@@ -90,8 +85,10 @@ fun PhotoSyncScreen(
     var masterEnabled by rememberSaveable { mutableStateOf(false) }
     var confirmTargetChange by remember { mutableStateOf(false) }
     var selectedAlbums by remember { mutableStateOf<Set<Long>>(emptySet()) }
-    var rootMenu by remember { mutableStateOf(false) }
+    var rootPicker by remember { mutableStateOf(false) }
     var scheduleMenu by remember { mutableStateOf(false) }
+    var showLogs by remember { mutableStateOf(false) }
+    var remoteHint by remember { mutableStateOf(false) }
 
     val permissions = if (Build.VERSION.SDK_INT >= 33) {
         arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
@@ -148,9 +145,7 @@ fun PhotoSyncScreen(
     LaunchedEffect(state.buckets, config, albumsInitialized) {
         if (!albumsInitialized && state.buckets.isNotEmpty()) {
             val saved = config?.albumsJson?.let { raw ->
-                runCatching {
-                    kotlinx.serialization.json.Json.decodeFromString<List<Long>>(raw).toSet()
-                }.getOrNull()
+                runCatching { Json.decodeFromString<List<Long>>(raw).toSet() }.getOrNull()
             }
             selectedAlbums = saved ?: state.buckets.map { it.id }.toSet()
             albumsInitialized = true
@@ -158,9 +153,38 @@ fun PhotoSyncScreen(
     }
 
     val roots = session.roots
-    val root = roots.firstOrNull { it.id == selectedRootId } ?: roots.firstOrNull()
+    val usableRoots = roots.filter { it.online != false && !it.readOnly }
+    val root = roots.firstOrNull { it.id == selectedRootId }
+        ?: usableRoots.firstOrNull()
+        ?: roots.firstOrNull()
+    val phase = rememberEffectivePhase(run)
+    val running = phase.isActive
+    val formEnabled = masterEnabled && !running
+    val savedAlbums = remember(config?.albumsJson, state.buckets) {
+        config?.albumsJson?.let { raw ->
+            runCatching { Json.decodeFromString<List<Long>>(raw).toSet() }.getOrNull()
+        } ?: state.buckets.map { it.id }.toSet()
+    }
+    val targetChanged = config?.let { cfg ->
+        cfg.rootId != root?.id ||
+            cfg.remotePath != remotePath.trim('/') ||
+            cfg.albumSubfolders != albumSubfolders
+    } == true
+    val dirty = config?.let { cfg ->
+        targetChanged ||
+            cfg.includeVideos != includeVideos ||
+            cfg.photosWifiOnly != photosWifiOnly ||
+            cfg.videosWifiOnly != videosWifiOnly ||
+            cfg.chargingOnly != chargingOnly ||
+            cfg.schedule != schedule ||
+            savedAlbums != selectedAlbums
+    } ?: true
 
-    fun persist(resetEntries: Boolean) {
+    LaunchedEffect(dirty) {
+        if (dirty) viewModel.resetSaved()
+    }
+
+    fun persist(resetEntries: Boolean, allowOverlap: Boolean = false) {
         if (root == null) return
         viewModel.save(
             profile = active ?: return,
@@ -174,312 +198,372 @@ fun PhotoSyncScreen(
             albumSubfolders = albumSubfolders,
             schedule = schedule,
             resetEntries = resetEntries,
+            allowOverlap = allowOverlap,
         )
     }
 
     DetailScaffold(
         title = stringResource(R.string.photo_sync_screen),
         onBack = onBack,
-    ) { padding ->
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding)
-            .verticalScroll(rememberScrollState()),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (active == null) {
-                Text(stringResource(R.string.login_error_generic))
-                return@Column
-            }
-
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.photo_sync_enable),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = stringResource(R.string.photo_sync_enable_body),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    AppSwitch(
-                        checked = masterEnabled,
-                        onCheckedChange = { value ->
-                            masterEnabled = value
-                            if (config != null) viewModel.setEnabled(value)
-                        },
-                    )
-                }
-            }
-
-            config?.let { existing ->
-                SyncStatusCard(
-                    config = existing,
-                    onSyncNow = viewModel::syncNow,
-                    syncEnabled = masterEnabled,
-                    queued = state.queued,
-                )
-            }
-
-            if (!hasPermission) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = stringResource(R.string.photo_sync_permission),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = { permissionLauncher.launch(permissions) }) {
-                            Text(stringResource(R.string.photo_sync_permission_button))
-                        }
-                    }
-                }
-            }
-
-            Column(
-                modifier = Modifier.alpha(if (masterEnabled) 1f else 0.45f),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-            Text(
-                text = stringResource(R.string.photo_sync_target_root),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Box {
-                OutlinedButton(
-                    onClick = { rootMenu = true },
-                    enabled = masterEnabled,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(root?.alias ?: "—")
-                }
-                DropdownMenu(expanded = rootMenu, onDismissRequest = { rootMenu = false }) {
-                    roots.forEach { item ->
-                        CompactDropdownMenuItem(
-                            text = { Text(item.alias) },
-                            onClick = {
-                                selectedRootId = item.id
-                                rootMenu = false
-                            },
-                        )
-                    }
-                }
-            }
-
-            if (root != null && config?.rootId?.let { it != root.id } == true) {
-                Text(
-                    text = stringResource(R.string.sync_root_changed_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            DirectoryField(
-                label = stringResource(R.string.photo_sync_target_path),
-                rootAlias = root?.alias.orEmpty(),
-                path = remotePath,
-                enabled = masterEnabled && root != null,
-                onClick = {
-                    focusManager.clearFocus()
-                    keyboard?.hide()
-                    folderPicker.open(
-                        roots = roots,
-                        initialRootId = selectedRootId,
-                        initialPath = remotePath,
-                        mode = DirectoryPickerMode.Sync,
-                    )
-                },
-            )
-
-            SwitchRow(stringResource(R.string.photo_sync_include_videos), includeVideos, masterEnabled) {
-                includeVideos = it
-            }
-            SwitchRow(stringResource(R.string.photo_sync_photos_wifi), photosWifiOnly, masterEnabled) {
-                photosWifiOnly = it
-            }
-            SwitchRow(
-                stringResource(R.string.photo_sync_videos_wifi),
-                videosWifiOnly,
-                masterEnabled && includeVideos,
-            ) { videosWifiOnly = it }
-            SwitchRow(stringResource(R.string.photo_sync_charging_only), chargingOnly, masterEnabled) { chargingOnly = it }
-            SwitchRow(stringResource(R.string.photo_sync_album_folders), albumSubfolders, masterEnabled) { albumSubfolders = it }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.photo_sync_schedule),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Box {
-                    OutlinedButton(onClick = { scheduleMenu = true }, enabled = masterEnabled) {
-                        Text(scheduleLabel(schedule))
-                    }
-                    DropdownMenu(expanded = scheduleMenu, onDismissRequest = { scheduleMenu = false }) {
-                        listOf("manual", "15m", "hourly", "daily", "weekly").forEach { value ->
-                            CompactDropdownMenuItem(
-                                text = { Text(scheduleLabel(value)) },
-                                onClick = {
-                                    schedule = value
-                                    scheduleMenu = false
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.photo_sync_albums),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    enabled = masterEnabled,
-                    onClick = {
-                        selectedAlbums = if (selectedAlbums.size == state.buckets.size) {
-                            emptySet()
-                        } else {
-                            state.buckets.map { it.id }.toSet()
-                        }
-                    },
-                ) {
-                    Text(stringResource(R.string.photo_sync_select_all))
-                }
-            }
-
-            if (state.loadingBuckets) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-            } else if (state.buckets.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.photo_sync_no_albums),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        compact = true,
+        actions = {
+            if (state.saving) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .size(18.dp),
+                    strokeWidth = 2.dp,
                 )
             } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 320.dp)
-                        .verticalScroll(rememberScrollState()),
+                val label = when {
+                    running -> stringResource(R.string.sync_running)
+                    targetChanged -> stringResource(R.string.sync_apply_and_resync)
+                    config == null -> stringResource(R.string.sync_save_and_enable)
+                    state.saved && !dirty -> stringResource(R.string.sync_saved_check)
+                    !dirty -> stringResource(R.string.sync_no_changes)
+                    else -> stringResource(R.string.sync_save_changes)
+                }
+                TextButton(
+                    onClick = {
+                        if (root == null) return@TextButton
+                        if (targetChanged) {
+                            confirmTargetChange = true
+                        } else {
+                            persist(resetEntries = false)
+                        }
+                    },
+                    enabled = masterEnabled && !running &&
+                        root != null && hasPermission &&
+                        selectedAlbums.isNotEmpty() && dirty,
                 ) {
-                    state.buckets.forEach { bucket ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = masterEnabled) {
-                                    selectedAlbums = if (bucket.id in selectedAlbums) {
-                                        selectedAlbums - bucket.id
-                                    } else {
-                                        selectedAlbums + bucket.id
-                                    }
-                                }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(
-                                checked = bucket.id in selectedAlbums,
-                                enabled = masterEnabled,
-                                onCheckedChange = {
-                                    selectedAlbums = if (it) {
-                                        selectedAlbums + bucket.id
-                                    } else {
-                                        selectedAlbums - bucket.id
-                                    }
-                                },
-                            )
+                    Text(text = label, maxLines = 1)
+                }
+            }
+        },
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxWidth().padding(padding)) {
+            if (active == null) {
+                Text(
+                    text = stringResource(R.string.login_error_generic),
+                    modifier = Modifier.padding(16.dp),
+                )
+            } else {
+                ResponsiveDetailLayout(
+                    status = { wide ->
+                        SyncStatusPanel(
+                            kind = SyncRunKind.PHOTO,
+                            enabled = masterEnabled,
+                            run = run,
+                            lastError = state.error ?: config?.lastError,
+                            queued = state.queued,
+                            logs = logs,
+                            wide = wide,
+                            onSyncNow = viewModel::syncNow,
+                            onStop = { viewModel.requestStop(cancel = false) },
+                            onCancel = { viewModel.requestStop(cancel = true) },
+                            onOpenLogs = { showLogs = true },
+                            onClearLogs = viewModel::clearLogs,
+                        )
+                    },
+                    settings = {
+                        if (state.saved && !dirty) {
                             Text(
-                                text = bucket.name,
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                text = bucket.count.toString(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = stringResource(R.string.photo_sync_saved),
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodySmall,
                             )
                         }
-                    }
-                }
-            }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 12.dp),
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.photo_sync_enable),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.photo_sync_enable_body),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                AppSwitch(
+                                    checked = masterEnabled,
+                                    onCheckedChange = { value ->
+                                        masterEnabled = value
+                                        if (config != null) viewModel.setEnabled(value)
+                                    },
+                                )
+                            }
+                        }
 
-            }
-            state.error?.let { error ->
-                Text(
-                    text = error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
+                        if (!hasPermission) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.photo_sync_permission),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(onClick = { permissionLauncher.launch(permissions) }) {
+                                        Text(stringResource(R.string.photo_sync_permission_button))
+                                    }
+                                }
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier.alpha(if (masterEnabled) 1f else 0.45f),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (root?.isRemote == true) {
+                                            Modifier.clickable { remoteHint = true }
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.photo_sync_target_root),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (root?.isRemote == true) {
+                                    Spacer(Modifier.width(4.dp))
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_alert_circle),
+                                        contentDescription = stringResource(
+                                            R.string.sync_remote_root_warning_cd,
+                                        ),
+                                        tint = MaterialTheme.colorScheme.tertiary,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                            RootField(
+                                label = stringResource(R.string.photo_sync_target_root),
+                                root = root,
+                                enabled = formEnabled,
+                                onClick = { rootPicker = true },
+                            )
+
+                            if (root != null && config?.rootId?.let { it != root.id } == true) {
+                                Text(
+                                    text = stringResource(R.string.sync_root_changed_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            DirectoryField(
+                                label = stringResource(R.string.photo_sync_target_path),
+                                rootAlias = root?.alias.orEmpty(),
+                                path = remotePath,
+                                enabled = formEnabled && root != null,
+                                onClick = {
+                                    focusManager.clearFocus()
+                                    keyboard?.hide()
+                                    folderPicker.open(
+                                        roots = roots,
+                                        initialRootId = selectedRootId,
+                                        initialPath = remotePath,
+                                        mode = DirectoryPickerMode.Sync,
+                                    )
+                                },
+                            )
+
+                            SwitchRow(
+                                stringResource(R.string.photo_sync_include_videos),
+                                includeVideos,
+                                formEnabled,
+                            ) { includeVideos = it }
+                            SwitchRow(
+                                stringResource(R.string.photo_sync_photos_wifi),
+                                photosWifiOnly,
+                                formEnabled,
+                            ) { photosWifiOnly = it }
+                            SwitchRow(
+                                stringResource(R.string.photo_sync_videos_wifi),
+                                videosWifiOnly,
+                                formEnabled && includeVideos,
+                            ) { videosWifiOnly = it }
+                            SwitchRow(
+                                stringResource(R.string.photo_sync_charging_only),
+                                chargingOnly,
+                                formEnabled,
+                            ) { chargingOnly = it }
+                            SwitchRow(
+                                stringResource(R.string.photo_sync_album_folders),
+                                albumSubfolders,
+                                formEnabled,
+                            ) { albumSubfolders = it }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.photo_sync_schedule),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Box {
+                                    OutlinedButton(
+                                        onClick = { scheduleMenu = true },
+                                        enabled = formEnabled,
+                                    ) {
+                                        Text(scheduleLabel(schedule))
+                                    }
+                                    DropdownMenu(
+                                        expanded = scheduleMenu,
+                                        onDismissRequest = { scheduleMenu = false },
+                                    ) {
+                                        listOf("manual", "15m", "hourly", "daily", "weekly")
+                                            .forEach { value ->
+                                                CompactDropdownMenuItem(
+                                                    text = { Text(scheduleLabel(value)) },
+                                                    onClick = {
+                                                        schedule = value
+                                                        scheduleMenu = false
+                                                    },
+                                                )
+                                            }
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.photo_sync_albums),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(
+                                    enabled = formEnabled,
+                                    onClick = {
+                                        selectedAlbums =
+                                            if (selectedAlbums.size == state.buckets.size) {
+                                                emptySet()
+                                            } else {
+                                                state.buckets.map { it.id }.toSet()
+                                            }
+                                    },
+                                ) {
+                                    Text(stringResource(R.string.photo_sync_select_all))
+                                }
+                            }
+
+                            if (state.loadingBuckets) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            } else if (state.buckets.isEmpty()) {
+                                Text(
+                                    text = stringResource(R.string.photo_sync_no_albums),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    state.buckets.forEach { bucket ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable(enabled = formEnabled) {
+                                                    selectedAlbums =
+                                                        if (bucket.id in selectedAlbums) {
+                                                            selectedAlbums - bucket.id
+                                                        } else {
+                                                            selectedAlbums + bucket.id
+                                                        }
+                                                }
+                                                .padding(vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Checkbox(
+                                                checked = bucket.id in selectedAlbums,
+                                                enabled = formEnabled,
+                                                onCheckedChange = {
+                                                    selectedAlbums = if (it) {
+                                                        selectedAlbums + bucket.id
+                                                    } else {
+                                                        selectedAlbums - bucket.id
+                                                    }
+                                                },
+                                            )
+                                            Text(
+                                                text = bucket.name,
+                                                modifier = Modifier.weight(1f),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                            )
+                                            Text(
+                                                text = bucket.count.toString(),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
                 )
             }
-
-            Button(
-                onClick = {
-                    if (root == null) return@Button
-                    val path = remotePath.trim('/')
-                    val targetChanged = config?.let {
-                        it.rootId != root.id || it.remotePath != path
-                    } == true
-                    if (targetChanged) {
-                        confirmTargetChange = true
-                    } else {
-                        persist(resetEntries = false)
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                enabled = masterEnabled && !state.saving && root != null && hasPermission && selectedAlbums.isNotEmpty(),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                if (state.saving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Text(stringResource(R.string.photo_sync_save))
-                }
-            }
-            if (state.saved) {
-                Text(
-                    text = stringResource(R.string.photo_sync_saved),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Spacer(Modifier.height(24.dp))
         }
     }
-    }
 
+    if (remoteHint) {
+        AlertDialog(
+            onDismissRequest = { remoteHint = false },
+            title = { Text(stringResource(R.string.sync_remote_root_warning_title)) },
+            text = { Text(stringResource(R.string.sync_remote_root_warning_body)) },
+            confirmButton = {
+                TextButton(onClick = { remoteHint = false }) {
+                    Text(stringResource(R.string.file_close))
+                }
+            },
+        )
+    }
+    if (rootPicker) {
+        RootPickerDialog(
+            roots = roots,
+            selectedId = root?.id,
+            onDismiss = { rootPicker = false },
+            onPick = { picked ->
+                selectedRootId = picked.id
+                rootPicker = false
+            },
+        )
+    }
+    if (showLogs) {
+        SyncLogDialog(
+            logs = logs,
+            onDismiss = { showLogs = false },
+            onClear = viewModel::clearLogs,
+        )
+    }
     if (folderPickerState.visible) {
         DirectoryPickerDialog(
             state = folderPickerState,
@@ -515,61 +599,27 @@ fun PhotoSyncScreen(
             },
         )
     }
-}
-
-@Composable
-private fun SyncStatusCard(
-    config: PhotoSyncConfigEntity,
-    onSyncNow: () -> Unit,
-    syncEnabled: Boolean,
-    queued: Boolean,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = if (config.enabled) {
-                        stringResource(R.string.photo_sync_enabled)
-                    } else {
-                        stringResource(R.string.photo_sync_disable)
+    if (state.overlap) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissOverlap,
+            title = { Text(stringResource(R.string.sync_overlap_title)) },
+            text = { Text(stringResource(R.string.sync_overlap_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.dismissOverlap()
+                        persist(resetEntries = false, allowOverlap = true)
                     },
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Text(
-                text = stringResource(R.string.photo_sync_last_run) + ": " +
-                    (config.lastRunAt?.let { relativeTimeText(it) } ?: "—"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            config.lastResult?.let {
-                Text(text = it, style = MaterialTheme.typography.bodySmall)
-            }
-            config.lastError?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            TextButton(onClick = onSyncNow, enabled = syncEnabled && config.enabled) {
-                Text(stringResource(R.string.photo_sync_now))
-            }
-            if (queued) {
-                Text(
-                    text = stringResource(R.string.sync_queued_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+                ) {
+                    Text(stringResource(R.string.sync_overlap_save_anyway))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissOverlap) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 }
 

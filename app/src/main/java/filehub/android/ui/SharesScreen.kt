@@ -6,15 +6,18 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,10 +25,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
@@ -45,18 +46,20 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
@@ -65,105 +68,99 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import filehub.android.R
 import filehub.android.core.model.ShareInfo
-import filehub.android.data.api.PublicLink
-import filehub.android.data.api.PublicShareApi
-import java.text.DateFormat
-import java.util.Date
+import kotlinx.coroutines.delay
 
 @Composable
 fun SharesScreen(
     viewModel: ShareViewModel,
     faviconUrl: String?,
     onBack: () -> Unit,
-    onOpenPublic: (PublicLink) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var openDialog by remember { mutableStateOf(false) }
-    var notice by remember { mutableStateOf<String?>(null) }
-    val expiredNotice = stringResource(R.string.share_card_expired)
-    val revokedNotice = stringResource(R.string.share_card_revoked)
+    var nowSeconds by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            nowSeconds = System.currentTimeMillis() / 1000
+        }
+    }
 
     LaunchedEffect(Unit) { viewModel.load() }
 
     DetailScaffold(
         title = stringResource(R.string.shares_title),
         onBack = onBack,
-        actions = {
-            TextButton(onClick = { openDialog = true }) {
-                Text(stringResource(R.string.shares_open))
-            }
-        },
+        compact = true,
     ) { padding ->
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding),
-    ) {
-        if (state.loading && state.shares.isEmpty()) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
-
-        when {
-            state.error != null -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.error)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            if (state.loading && state.shares.isEmpty()) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
-            state.shares.isEmpty() && !state.loading -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.shares_empty),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 8.dp,
-                    bottom = 24.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(state.shares, key = { it.id }) { share ->
-                    ShareCard(
-                        share = share,
-                        onCopy = { viewModel.copyLink(share) },
-                        onEdit = { viewModel.beginEdit(share) },
-                        onRotate = { viewModel.rotate(share) },
-                        onRevoke = { viewModel.revoke(share) },
-                        onOpen = { viewModel.open(share) },
-                        onShowCard = {
-                            when {
-                                share.expired -> notice = expiredNotice
-                                share.revoked -> notice = revokedNotice
-                                else -> viewModel.showCard(share)
-                            }
-                        },
-                        onDelete = { viewModel.requestDelete(share) },
+            when {
+                state.error != null -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                }
+                state.shares.isEmpty() && !state.loading -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.shares_empty),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                state.nextCursor?.let { cursor ->
-                    item(key = "footer-$cursor") {
-                        LaunchedEffect(cursor) { viewModel.loadMore() }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                else -> BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val columns = if (maxWidth >= 780.dp) 2 else 1
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(columns),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(state.shares, key = { it.id }) { share ->
+                            ShareCard(
+                                share = share,
+                                nowSeconds = nowSeconds,
+                                onCopy = { viewModel.copyLink(share) },
+                                onEdit = { viewModel.beginEdit(share) },
+                                onRotate = { viewModel.rotate(share) },
+                                onStop = { viewModel.stop(share) },
+                                onEnable = { viewModel.enable(share) },
+                                onOpen = { viewModel.open(share) },
+                                onShowCard = { viewModel.showCard(share) },
+                                onDelete = { viewModel.requestDelete(share) },
+                            )
+                        }
+                        state.nextCursor?.let { cursor ->
+                            item(key = "footer-$cursor", span = { GridItemSpan(maxLineSpan) }) {
+                                LaunchedEffect(cursor) { viewModel.loadMore() }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-    }
     }
 
     LaunchedEffect(state.openLink) {
@@ -194,28 +191,6 @@ fun SharesScreen(
             confirmButton = {
                 TextButton(onClick = viewModel::dismissAction) {
                     Text(stringResource(R.string.share_close))
-                }
-            },
-        )
-    }
-
-    if (openDialog) {
-        OpenShareDialog(
-            onDismiss = { openDialog = false },
-            onOpen = {
-                openDialog = false
-                onOpenPublic(it)
-            },
-        )
-    }
-
-    notice?.let { message ->
-        AlertDialog(
-            onDismissRequest = { notice = null },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { notice = null }) {
-                    Text(stringResource(R.string.file_close))
                 }
             },
         )
@@ -289,11 +264,10 @@ fun SharesScreen(
             loading = state.editLoading,
             error = state.editError,
             onDismiss = viewModel::dismissEdit,
-            onSave = { readOnly, revoked, expiresAt, clearExpires, password, clearPassword ->
+            onSave = { readOnly, expiresAt, clearExpires, password, clearPassword ->
                 viewModel.update(
                     share = share,
                     readOnly = readOnly,
-                    revoked = revoked,
                     expiresAt = expiresAt,
                     clearExpires = clearExpires,
                     password = password,
@@ -307,15 +281,18 @@ fun SharesScreen(
 @Composable
 private fun ShareCard(
     share: ShareInfo,
+    nowSeconds: Long,
     onCopy: () -> Unit,
     onEdit: () -> Unit,
     onRotate: () -> Unit,
-    onRevoke: () -> Unit,
+    onStop: () -> Unit,
+    onEnable: () -> Unit,
     onOpen: () -> Unit,
     onShowCard: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val stopped = share.isStopped(nowSeconds)
     val collection = share.kind == "collection"
     val name = if (collection) {
         stringResource(R.string.share_collection_count, share.itemCount)
@@ -325,7 +302,8 @@ private fun ShareCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onShowCard),
+            .alpha(if (stopped) 0.55f else 1f)
+            .clickable(enabled = !stopped, onClick = onShowCard),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -358,7 +336,7 @@ private fun ShareCard(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = statusText(share) + " · " + stringResource(
+                        text = statusText(share, nowSeconds) + " · " + stringResource(
                             R.string.share_visits,
                             share.visitCount,
                         ),
@@ -380,37 +358,45 @@ private fun ShareCard(
                         Icon(Icons.Filled.MoreVert, contentDescription = null)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.share_edit)) },
-                            onClick = {
-                                menuOpen = false
-                                onEdit()
-                            },
-                        )
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.share_rotate)) },
-                            onClick = {
-                                menuOpen = false
-                                onRotate()
-                            },
-                        )
-                        CompactDropdownMenuItem(
-                            text = { Text(stringResource(R.string.share_card_qr_action)) },
-                            onClick = {
-                                menuOpen = false
-                                onShowCard()
-                            },
-                        )
+                        if (!stopped) {
+                            CompactDropdownMenuItem(
+                                text = { Text(stringResource(R.string.share_edit)) },
+                                onClick = {
+                                    menuOpen = false
+                                    onEdit()
+                                },
+                            )
+                            CompactDropdownMenuItem(
+                                text = { Text(stringResource(R.string.share_rotate)) },
+                                onClick = {
+                                    menuOpen = false
+                                    onRotate()
+                                },
+                            )
+                            CompactDropdownMenuItem(
+                                text = { Text(stringResource(R.string.share_card_qr_action)) },
+                                onClick = {
+                                    menuOpen = false
+                                    onShowCard()
+                                },
+                            )
+                        }
                         CompactDropdownMenuItem(
                             text = {
                                 Text(
-                                    stringResource(R.string.share_revoke),
-                                    color = MaterialTheme.colorScheme.error,
+                                    stringResource(
+                                        if (stopped) R.string.share_enable else R.string.share_revoke,
+                                    ),
+                                    color = if (stopped) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.error
+                                    },
                                 )
                             },
                             onClick = {
                                 menuOpen = false
-                                onRevoke()
+                                if (stopped) onEnable() else onStop()
                             },
                         )
                         CompactDropdownMenuItem(
@@ -430,71 +416,18 @@ private fun ShareCard(
             }
             Spacer(Modifier.size(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onCopy) {
+                TextButton(onClick = onCopy, enabled = !stopped) {
                     Text(stringResource(R.string.share_copy))
                 }
-                TextButton(onClick = onShowCard) {
+                TextButton(onClick = onShowCard, enabled = !stopped) {
                     Text(stringResource(R.string.share_card_qr_action))
                 }
-                TextButton(onClick = onOpen) {
+                TextButton(onClick = onOpen, enabled = !stopped) {
                     Text(stringResource(R.string.shares_open))
                 }
             }
         }
     }
-}
-
-@Composable
-private fun OpenShareDialog(
-    onDismiss: () -> Unit,
-    onOpen: (PublicLink) -> Unit,
-) {
-    var value by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-    val invalidLink = stringResource(R.string.share_link_invalid)
-    val submit = {
-        val link = PublicShareApi.parseLink(value)
-        if (link == null) {
-            error = invalidLink
-        } else {
-            onOpen(link)
-        }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.share_open_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = {
-                        value = it
-                        error = null
-                    },
-                    placeholder = { Text(stringResource(R.string.share_open_hint)) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = clearFocusOnDone { submit() },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { submit() },
-            ) {
-                Text(stringResource(R.string.share_open_button))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.common_cancel))
-            }
-        },
-    )
 }
 
 @Composable
@@ -550,7 +483,6 @@ private fun ShareEditDialog(
     onDismiss: () -> Unit,
     onSave: (
         readOnly: Boolean,
-        revoked: Boolean,
         expiresAt: Long?,
         clearExpires: Boolean,
         password: String?,
@@ -558,7 +490,6 @@ private fun ShareEditDialog(
     ) -> Unit,
 ) {
     var readOnly by remember(share.id) { mutableStateOf(share.readOnly) }
-    var revoked by remember(share.id) { mutableStateOf(share.revoked) }
     var expiryChoice by remember(share.id) { mutableStateOf<Int?>(null) }
     var password by remember(share.id) { mutableStateOf("") }
     var clearPassword by remember(share.id) { mutableStateOf(false) }
@@ -575,13 +506,6 @@ private fun ShareEditDialog(
                         )
                         AppSwitch(checked = readOnly, onCheckedChange = { readOnly = it })
                     }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.share_edit_paused),
-                        modifier = Modifier.weight(1f),
-                    )
-                    AppSwitch(checked = revoked, onCheckedChange = { revoked = it })
                 }
                 Text(
                     text = stringResource(R.string.share_edit_expiry),
@@ -661,7 +585,6 @@ private fun ShareEditDialog(
                     }
                     onSave(
                         readOnly,
-                        revoked,
                         expiresAt,
                         expiryChoice == -1,
                         password.takeIf { it.isNotBlank() },
@@ -689,11 +612,41 @@ private fun ShareEditDialog(
 }
 
 @Composable
-private fun statusText(share: ShareInfo): String = when {
-    share.revoked -> stringResource(R.string.share_revoked)
-    share.expired -> stringResource(R.string.share_expired)
-    else -> stringResource(R.string.share_valid)
+private fun statusText(share: ShareInfo, nowSeconds: Long): String {
+    if (share.isExpired(nowSeconds)) return stringResource(R.string.share_expired)
+    if (share.revoked) return stringResource(R.string.share_revoked)
+    val expiresAt = share.expiresAt ?: return stringResource(R.string.share_never_expires)
+    val remaining = (expiresAt - nowSeconds).coerceAtLeast(0)
+    if (remaining < 60) return stringResource(R.string.share_expiring_soon)
+    val relative = when {
+        remaining < 3_600 -> {
+            val minutes = roundDiv(remaining, 60)
+            pluralStringResource(R.plurals.share_expires_minutes, minutes, minutes)
+        }
+        // Prefer whole days once the remaining time is close to a day, so a
+        // one-day share reads "1 day" instead of "23 hours".
+        remaining < 12 * 3_600L -> {
+            val hours = roundDiv(remaining, 3_600)
+            pluralStringResource(R.plurals.share_expires_hours, hours, hours)
+        }
+        remaining < 30 * 86_400L -> {
+            val days = roundDiv(remaining, 86_400)
+            pluralStringResource(R.plurals.share_expires_days, days, days)
+        }
+        remaining < 365 * 86_400L -> {
+            val months = roundDiv(remaining, 30 * 86_400L)
+            pluralStringResource(R.plurals.share_expires_months, months, months)
+        }
+        else -> {
+            val years = roundDiv(remaining, 365 * 86_400L)
+            pluralStringResource(R.plurals.share_expires_years, years, years)
+        }
+    }
+    return stringResource(R.string.share_expires_in, relative)
 }
+
+private fun roundDiv(value: Long, unit: Long): Int =
+    ((value + unit / 2) / unit).toInt().coerceAtLeast(1)
 
 private fun copyToClipboard(context: Context, text: String) {
     val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

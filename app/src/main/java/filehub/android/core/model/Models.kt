@@ -17,6 +17,7 @@ data class ServerProfile(
     val avatarVersion: Long? = null,
     val lastRootId: Long? = null,
     val lastPath: String = "",
+    val serverVersion: String? = null,
 )
 
 data class FileRoot(
@@ -26,6 +27,8 @@ data class FileRoot(
     val kind: String?,
     val mountId: Long?,
     val online: Boolean? = null,
+    val remoteOwnerName: String? = null,
+    val remoteAvatarVersion: Long = 0,
 ) {
     val isRemote: Boolean get() = kind == "remote"
 }
@@ -39,6 +42,7 @@ data class LoginResult(
     val profile: ServerProfile,
     val token: String,
     val roots: List<FileRoot>,
+    val serverVersion: String? = null,
 )
 
 enum class FileSort(val apiValue: String) {

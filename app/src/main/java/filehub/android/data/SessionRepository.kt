@@ -7,6 +7,7 @@ import filehub.android.core.model.FileRoot
 import filehub.android.core.model.ServerProfile
 import filehub.android.data.api.FileHubApi
 import filehub.android.data.api.FileHubApiException
+import filehub.android.data.api.PasswordChangeRequiredException
 import filehub.android.data.local.ProfileStore
 import filehub.android.data.local.TokenVault
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -33,9 +34,11 @@ data class SessionState(
     val active: ServerProfile? = null,
     val roots: List<FileRoot> = emptyList(),
     val rootsLoading: Boolean = false,
-    val needsLogin: Boolean = false,
+    val authExpiredProfiles: Set<String> = emptySet(),
     val error: String? = null,
-)
+) {
+    val needsLogin: Boolean get() = active?.id in authExpiredProfiles
+}
 
 internal fun List<FileRoot>.withRootOnline(rootId: Long, online: Boolean): List<FileRoot> =
     if (none { it.id == rootId }) {
@@ -75,7 +78,12 @@ class SessionRepository(
         // per-address connection progress without probing twice.
     }
 
-    suspend fun login(addresses: List<String>, username: String, password: String): Result<ServerProfile> =
+    suspend fun login(
+        addresses: List<String>,
+        username: String,
+        password: String,
+        newPassword: String? = null,
+    ): Result<ServerProfile> =
         runCatching {
             val normalized = addresses
                 .map { FileHubApi.normalizeBaseUrl(it) }
@@ -90,24 +98,43 @@ class SessionRepository(
                         baseUrl = address,
                         username = username,
                         password = password,
+                        newPassword = newPassword,
                     )
                     workingAddress = address
                     break
+                } catch (error: PasswordChangeRequiredException) {
+                    throw error
                 } catch (error: Throwable) {
                     lastError = error
                 }
             }
             val login = result ?: throw lastError ?: error(context.getString(R.string.login_error_generic))
-            val profile = login.profile.copy(
+            val fresh = login.profile.copy(
                 baseUrl = workingAddress ?: normalized.first(),
                 addresses = normalized,
+                serverVersion = login.serverVersion ?: login.profile.serverVersion,
             )
+            // Re-authenticating an existing server must keep its profile id so
+            // photo/folder sync configs and cached state stay attached.
+            val existing = _state.value.profiles.firstOrNull {
+                it.username == fresh.username &&
+                    (
+                        it.baseUrl == fresh.baseUrl ||
+                            it.addresses.any { address -> address in fresh.addresses }
+                        )
+            }
+            val profile = if (existing != null) {
+                fresh.copy(id = existing.id, createdAt = existing.createdAt)
+            } else {
+                fresh
+            }
             val encrypted = vault.encrypt(login.token)
             store.saveToken(profile.id, encrypted)
 
             val profiles = _state.value.profiles
                 .filterNot {
-                    it.baseUrl == profile.baseUrl && it.username == profile.username
+                    it.id == profile.id ||
+                        (it.baseUrl == profile.baseUrl && it.username == profile.username)
                 } + profile
             store.saveProfiles(profiles)
             store.setActive(profile.id)
@@ -119,7 +146,7 @@ class SessionRepository(
                     active = profile,
                     roots = login.roots,
                     rootsLoading = false,
-                    needsLogin = false,
+                    authExpiredProfiles = it.authExpiredProfiles - profile.id,
                     error = null,
                 )
             }
@@ -154,7 +181,12 @@ class SessionRepository(
             _connection.value = ServerConnection(
                 profileId, 0, 0, ServerConnectionStatus.Failed, message,
             )
-            _state.update { it.copy(needsLogin = true, error = message) }
+            _state.update {
+                it.copy(
+                    authExpiredProfiles = it.authExpiredProfiles + profile.id,
+                    error = message,
+                )
+            }
             error(message)
         }
 
@@ -169,7 +201,7 @@ class SessionRepository(
             )
             val api = FileHubApi(address, token, probeClient)
             val roots = try {
-                api.roots()
+                api.rootsWithRemoteInfo()
             } catch (error: FileHubApiException) {
                 if (error.statusCode == 401) {
                     val message = context.getString(R.string.error_unauthorized)
@@ -177,7 +209,12 @@ class SessionRepository(
                         profile.id, index + 1, addresses.size,
                         ServerConnectionStatus.Failed, message,
                     )
-                    _state.update { it.copy(needsLogin = true, error = message) }
+                    _state.update {
+                        it.copy(
+                            authExpiredProfiles = it.authExpiredProfiles + profile.id,
+                            error = message,
+                        )
+                    }
                     throw error
                 }
                 lastError = error
@@ -187,7 +224,12 @@ class SessionRepository(
                 null
             }
             if (roots != null) {
-                val updated = profile.copy(baseUrl = address, addresses = addresses)
+                val serverVersion = runCatching { api.version().version }.getOrNull()
+                val updated = profile.copy(
+                    baseUrl = address,
+                    addresses = addresses,
+                    serverVersion = serverVersion ?: profile.serverVersion,
+                )
                 val profiles = _state.value.profiles.map {
                     if (it.id == profile.id) updated else it
                 }
@@ -199,7 +241,7 @@ class SessionRepository(
                         active = updated,
                         roots = roots,
                         rootsLoading = false,
-                        needsLogin = false,
+                        authExpiredProfiles = it.authExpiredProfiles - profile.id,
                         error = null,
                     )
                 }
@@ -245,7 +287,12 @@ class SessionRepository(
     /** The event stream hit 401; stop using the current token until login. */
     fun reportUnauthorized() {
         _state.update {
-            it.copy(needsLogin = true, rootsLoading = false, error = null)
+            val id = it.active?.id ?: return@update it
+            it.copy(
+                authExpiredProfiles = it.authExpiredProfiles + id,
+                rootsLoading = false,
+                error = null,
+            )
         }
     }
 
@@ -254,6 +301,81 @@ class SessionRepository(
         _state.update { current ->
             current.copy(roots = current.roots.withRootOnline(rootId, online))
         }
+    }
+
+
+    /** Keeps the last known server version on the profile for the server list. */
+    suspend fun updateServerVersion(profileId: String, version: String) {
+        if (version.isBlank()) return
+        val current = _state.value.profiles
+        val updated = current.map {
+            if (it.id == profileId && it.serverVersion != version) {
+                it.copy(serverVersion = version)
+            } else {
+                it
+            }
+        }
+        if (updated == current) return
+        store.saveProfiles(updated)
+        _state.update {
+            it.copy(
+                profiles = updated,
+                active = it.active?.let { active ->
+                    updated.firstOrNull { profile -> profile.id == active.id } ?: active
+                },
+            )
+        }
+    }
+
+    /** Fills version badges for servers that were never opened on this device. */
+    suspend fun refreshServerVersions() {
+        _state.value.profiles.forEach { profile ->
+            val token = store.readToken(profile.id)?.let(vault::decrypt)
+            if (token == null) {
+                markAuthExpired(profile.id)
+                return@forEach
+            }
+            try {
+                val version = FileHubApi(profile.baseUrl, token, probeClient).version().version
+                if (version.isNotBlank()) updateServerVersion(profile.id, version)
+                clearAuthExpired(profile.id)
+            } catch (error: FileHubApiException) {
+                if (error.statusCode == 401) markAuthExpired(profile.id)
+            } catch (_: Throwable) {
+                // Offline or unreachable: keep the last known state.
+            }
+        }
+    }
+
+    private fun markAuthExpired(profileId: String) {
+        _state.update {
+            it.copy(authExpiredProfiles = it.authExpiredProfiles + profileId)
+        }
+    }
+
+    private fun clearAuthExpired(profileId: String) {
+        _state.update {
+            it.copy(authExpiredProfiles = it.authExpiredProfiles - profileId)
+        }
+    }
+
+    suspend fun moveProfile(from: Int, to: Int) {
+        val current = _state.value.profiles
+        if (from !in current.indices || to !in current.indices || from == to) return
+        val profiles = current.toMutableList().apply {
+            add(to, removeAt(from))
+        }
+        // Publish the new order before touching DataStore so the grid can
+        // settle immediately instead of a beat after the drop.
+        _state.update {
+            it.copy(
+                profiles = profiles,
+                active = it.active?.let { active ->
+                    profiles.firstOrNull { profile -> profile.id == active.id } ?: active
+                },
+            )
+        }
+        store.saveProfiles(profiles)
     }
 
     suspend fun updateProfile(
@@ -293,7 +415,12 @@ class SessionRepository(
     suspend fun refreshRoots(profile: ServerProfile) {
         val token = store.readToken(profile.id)?.let(vault::decrypt)
         if (token == null) {
-            _state.update { it.copy(rootsLoading = false, needsLogin = true) }
+            _state.update {
+                it.copy(
+                    rootsLoading = false,
+                    authExpiredProfiles = it.authExpiredProfiles + profile.id,
+                )
+            }
             return
         }
         _state.update { it.copy(rootsLoading = true, error = null) }
@@ -305,7 +432,13 @@ class SessionRepository(
             return
         }
         if (reachable.unauthorized) {
-            _state.update { it.copy(rootsLoading = false, needsLogin = true, error = null) }
+            _state.update {
+                it.copy(
+                    rootsLoading = false,
+                    authExpiredProfiles = it.authExpiredProfiles + profile.id,
+                    error = null,
+                )
+            }
             return
         }
         val working = reachable.working ?: run {
@@ -321,6 +454,7 @@ class SessionRepository(
             addresses = addresses,
             iconUrl = iconUrl ?: profile.iconUrl,
             avatarVersion = reachable.avatarVersion ?: profile.avatarVersion,
+            serverVersion = working.serverVersion ?: profile.serverVersion,
         )
         val profiles = _state.value.profiles.map { if (it.id == profile.id) updated else it }
         store.saveProfiles(profiles)
@@ -330,7 +464,7 @@ class SessionRepository(
                 active = if (it.active?.id == profile.id) updated else it.active,
                 roots = working.roots,
                 rootsLoading = false,
-                needsLogin = false,
+                authExpiredProfiles = it.authExpiredProfiles - profile.id,
                 error = null,
             )
         }
@@ -339,6 +473,7 @@ class SessionRepository(
     private data class WorkingAddress(
         val address: String,
         val roots: List<FileRoot>,
+        val serverVersion: String? = null,
     )
 
     private data class ProbeResult(
@@ -354,15 +489,16 @@ class SessionRepository(
         var unauthorized = false
         for (address in normalizedAddresses(profile)) {
             val api = FileHubApi(address, token, probeClient)
-            val roots = runCatching { api.roots() }.getOrElse { error ->
+            val roots = runCatching { api.rootsWithRemoteInfo() }.getOrElse { error ->
                 lastError = error
                 if (error is FileHubApiException && error.statusCode == 401) unauthorized = true
                 null
             } ?: continue
             val branding = runCatching { api.branding() }.getOrNull()?.let { Branding(it.name, it.iconUrl) }
             val avatarVersion = runCatching { api.avatarVersion() }.getOrNull()
+            val serverVersion = runCatching { api.version().version }.getOrNull()
             return ProbeResult(
-                working = WorkingAddress(address, roots),
+                working = WorkingAddress(address, roots, serverVersion),
                 branding = branding,
                 avatarVersion = avatarVersion,
                 unauthorized = false,
@@ -406,7 +542,7 @@ class SessionRepository(
                 profiles = profiles,
                 active = null,
                 roots = emptyList(),
-                needsLogin = false,
+                authExpiredProfiles = it.authExpiredProfiles - active.id,
                 error = null,
             )
         }
@@ -421,7 +557,12 @@ class SessionRepository(
         store.removeToken(profileId)
         val profiles = _state.value.profiles.filterNot { it.id == profileId }
         store.saveProfiles(profiles)
-        _state.update { it.copy(profiles = profiles) }
+        _state.update {
+            it.copy(
+                profiles = profiles,
+                authExpiredProfiles = it.authExpiredProfiles - profileId,
+            )
+        }
     }
 
     fun clearError() {

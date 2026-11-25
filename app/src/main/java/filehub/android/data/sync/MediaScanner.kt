@@ -28,7 +28,7 @@ data class MediaPhoto(
 object MediaScanner {
 
     fun buckets(context: Context, includeVideos: Boolean): List<MediaBucket> {
-        val map = linkedMapOf<Long, MediaBucket>()
+        val counts = linkedMapOf<Long, MutableMap<String, Int>>()
         fun scan(collection: Uri) {
             val projection = arrayOf(
                 MediaStore.Images.ImageColumns.BUCKET_ID,
@@ -47,20 +47,25 @@ object MediaScanner {
                     val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME)
                     while (cursor.moveToNext()) {
                         val id = if (cursor.isNull(idIndex)) 0L else cursor.getLong(idIndex)
-                        val name = cursor.getString(nameIndex)?.takeIf { it.isNotBlank() } ?: "Camera"
-                        val current = map[id]
-                        map[id] = if (current == null) {
-                            MediaBucket(id, name, 1)
-                        } else {
-                            current.copy(count = current.count + 1)
-                        }
+                        val name = cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }
+                            ?: AlbumNames.DEFAULT_ALBUM
+                        val names = counts.getOrPut(id) { mutableMapOf() }
+                        names[name] = (names[name] ?: 0) + 1
                     }
                 }
             }
         }
         scan(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
         if (includeVideos) scan(MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-        return map.values.toList()
+        return counts
+            .map { (id, names) ->
+                MediaBucket(
+                    id = id,
+                    name = AlbumNames.canonical(names) ?: AlbumNames.DEFAULT_ALBUM,
+                    count = names.values.sum(),
+                )
+            }
+            .sortedWith(compareBy({ it.name.lowercase() }, { it.name }, { it.id }))
     }
 
     fun photos(
@@ -100,7 +105,6 @@ object MediaScanner {
                     val mimeIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
                     while (cursor.moveToNext()) {
                         val bucket = if (cursor.isNull(bucketIndex)) 0L else cursor.getLong(bucketIndex)
-                        if (selectedAlbums != null && bucket !in selectedAlbums) continue
                         val id = cursor.getLong(idIndex)
                         val name = cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }
                             ?: if (isVideo) "video-$id" else "photo-$id"
@@ -109,7 +113,8 @@ object MediaScanner {
                         val added = if (cursor.isNull(addedIndex)) 0L else cursor.getLong(addedIndex)
                         val modified = if (cursor.isNull(modifiedIndex)) 0L else cursor.getLong(modifiedIndex)
                         val mtime = taken.takeIf { it > 0 } ?: added.takeIf { it > 0 } ?: modified
-                        val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Camera"
+                        val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() }
+                            ?: AlbumNames.DEFAULT_ALBUM
                         val mime = cursor.getString(mimeIndex)
                             ?: if (isVideo) "video/*" else "image/*"
                         result += MediaPhoto(
@@ -129,6 +134,13 @@ object MediaScanner {
         }
         scan(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, isVideo = false)
         if (includeVideos) scan(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, isVideo = true)
+        // One bucket id can report several case variants; use the same canonical name
+        // as the album picker and filter only afterwards so both stay consistent.
+        val canonical = AlbumNames.canonicalByBucket(result.map { it.bucketId to it.album })
         return result
+            .asSequence()
+            .map { photo -> photo.copy(album = canonical[photo.bucketId] ?: photo.album) }
+            .filter { selectedAlbums == null || it.bucketId in selectedAlbums }
+            .toList()
     }
 }

@@ -17,6 +17,9 @@ import java.io.InputStream
 import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class PhotoSyncWorker(
@@ -30,51 +33,94 @@ class PhotoSyncWorker(
             .container.photoSyncRepository.config(profileId)
         return PhotoSyncNotifications.foregroundInfo(
             applicationContext,
-            0,
-            0,
-            "",
-            PhotoSyncNotifications.idFor(profileId),
-            config?.serverName.orEmpty(),
+            SyncNotificationState(
+                phase = SyncPhase.PREPARING,
+                serverName = config?.serverName.orEmpty(),
+            ),
             profileId,
         )
     }
 
     override suspend fun doWork(): Result {
         val profileId = inputData.getString("profileId") ?: return Result.success()
-        val lock = SyncLocks.photo(profileId)
-        if (!lock.tryLock()) return Result.success()
+        val trigger = inputData.getString("trigger") ?: "periodic"
+        val repo = (applicationContext as FileHubApplication).container.photoSyncRepository
+
+        val own = SyncLocks.photo(profileId)
+        if (!own.tryLock()) return Result.success()
         return try {
-            runSync(profileId)
+            val shared = SyncLocks.shared(profileId)
+            if (shared.isLocked) {
+                val queued = repo.runs.begin(
+                    profileId,
+                    SyncRunKind.PHOTO,
+                    trigger,
+                    phase = SyncPhase.QUEUED,
+                )
+                repo.runs.progress(queued, blockReason = SyncBlockReason.ANOTHER_RUN)
+                val config = repo.config(profileId)
+                PhotoSyncNotifications.update(
+                    applicationContext,
+                    SyncNotificationState(
+                        phase = SyncPhase.QUEUED,
+                        serverName = config?.serverName.orEmpty(),
+                        blockReason = SyncBlockReason.ANOTHER_RUN,
+                    ),
+                    profileId,
+                )
+            }
+            try {
+                shared.withLock { runSync(profileId, trigger) }
+            } catch (error: CancellationException) {
+                withContext(NonCancellable) { finalizeCancelled(profileId) }
+                throw error
+            }
         } finally {
-            lock.unlock()
+            own.unlock()
         }
     }
 
-    private suspend fun runSync(profileId: String): Result {
+    private suspend fun runSync(profileId: String, trigger: String): Result {
         val app = applicationContext as FileHubApplication
         val repo = app.container.photoSyncRepository
         val config = repo.config(profileId) ?: return Result.success()
-        if (!config.enabled) return Result.success()
+        if (!config.enabled) {
+            repo.runs.current(profileId, SyncRunKind.PHOTO)?.let { run ->
+                if (run.syncPhase.isActive) {
+                    repo.runs.finish(run, SyncPhase.CANCELLED, SyncCancelReason.CONFIG_CHANGED)
+                }
+            }
+            PhotoSyncNotifications.cancel(applicationContext, profileId)
+            return Result.success()
+        }
+
+        val run = repo.runs.begin(profileId, SyncRunKind.PHOTO, trigger)
+        repo.logs.log(
+            profileId,
+            SyncRunKind.PHOTO,
+            applicationContext.getString(
+                R.string.sync_log_started,
+                SyncText.trigger(applicationContext, trigger),
+                "${config.rootAlias}:${config.remotePath}",
+            ),
+            SyncLogStore.LEVEL_START,
+        )
 
         if (!hasPhotoPermission(config)) {
-            repo.updateConfig(
-                config.copy(
-                    lastError = applicationContext.getString(R.string.photo_sync_permission),
-                    lastRunAt = now(),
-                ),
-            )
-            return Result.success()
+            val message = applicationContext.getString(R.string.photo_sync_permission)
+            repo.logs.log(profileId, SyncRunKind.PHOTO, message, SyncLogStore.LEVEL_ERROR)
+            repo.updateOutcome(profileId, now(), null, message)
+            return finishFailed(repo, run, config, message, SyncBlockReason.NO_PERMISSION, retry = false)
         }
 
         try {
             setForeground(
                 PhotoSyncNotifications.foregroundInfo(
                     applicationContext,
-                    0,
-                    0,
-                    "",
-                    PhotoSyncNotifications.idFor(profileId),
-                    config.serverName,
+                    SyncNotificationState(
+                        phase = SyncPhase.PREPARING,
+                        serverName = config.serverName,
+                    ),
                     profileId,
                 ),
             )
@@ -85,38 +131,71 @@ class PhotoSyncWorker(
         }
 
         val (profile, token) = app.container.profileAndToken(config.profileId)
-            ?: return failPermanently(repo, config, applicationContext.getString(R.string.error_unauthorized))
+            ?: return finishFailed(
+                repo,
+                run,
+                config,
+                applicationContext.getString(R.string.error_unauthorized),
+                SyncBlockReason.AUTH_FAILED,
+                retry = false,
+                disable = true,
+            )
         val api = FileHubApi(profile.baseUrl, token)
         val roots = runCatching { api.roots() }
             .getOrElse { error ->
                 if (error is FileHubApiException && error.statusCode == 401) {
-                    return failPermanently(
+                    return finishFailed(
                         repo,
+                        run,
                         config,
                         applicationContext.getString(R.string.error_unauthorized),
+                        SyncBlockReason.AUTH_FAILED,
+                        retry = false,
+                        disable = true,
                     )
                 }
-                return fail(repo, config, error.toUserMessage(applicationContext))
+                return finishFailed(
+                    repo,
+                    run,
+                    config,
+                    error.toUserMessage(applicationContext),
+                    SyncBlockReason.NETWORK,
+                )
             }
         val root = roots.firstOrNull { it.id == config.rootId }
-        if (root == null) {
-            return failPermanently(
+            ?: return finishFailed(
                 repo,
+                run,
                 config,
                 applicationContext.getString(R.string.sync_root_missing),
+                SyncBlockReason.TARGET_MISSING,
+                retry = false,
+                disable = true,
+            )
+        if (root.isRemote && root.online == false) {
+            return finishFailed(
+                repo,
+                run,
+                config,
+                applicationContext.getString(R.string.sync_remote_offline),
+                SyncBlockReason.REMOTE_OFFLINE,
             )
         }
-        if (root.isRemote && root.online == false) {
-            return fail(repo, config, applicationContext.getString(R.string.sync_remote_offline))
-        }
+        val capabilities = runCatching { api.me().capabilities }.getOrNull()
+        val hashSupported = !root.isRemote && capabilities?.hash == true &&
+            capabilities.hashAlgo == "sha256"
+        val hashBatch = hashSupported && capabilities?.hashBatch == true
+        val uploadVerify = hashSupported && capabilities?.hashUploadVerify == true
         val remoteDirs = RemoteDirEnsurer(api, config.rootId)
         try {
             remoteDirs.ensure(config.remotePath)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            return syncFailure(repo, config, error)
+            return finishFailure(repo, run, config, error)
         }
+
+        repo.runs.progress(run, phase = SyncPhase.SCANNING, clearCurrentItem = true)
         val albums = repo.selectedAlbums(config)
         val allPhotos = withContext(Dispatchers.IO) {
             MediaScanner.photos(applicationContext, albums, config.includeVideos)
@@ -131,33 +210,242 @@ class PhotoSyncWorker(
         if (skipped > 0 && metered) {
             PhotoSyncScheduler.enqueueWifiCatchUp(applicationContext, config)
         }
+        val bytesTotal = photos.sumOf { it.size }
+        repo.logs.log(
+            profileId,
+            SyncRunKind.PHOTO,
+            applicationContext.getString(
+                R.string.sync_log_scan_photos,
+                photos.size,
+                android.text.format.Formatter.formatShortFileSize(applicationContext, bytesTotal),
+            ),
+        )
+        if (skipped > 0) {
+            repo.logs.log(
+                profileId,
+                SyncRunKind.PHOTO,
+                applicationContext.getString(R.string.sync_log_skipped_wifi, skipped),
+                SyncLogStore.LEVEL_WARN,
+            )
+        }
+        repo.runs.progress(
+            run,
+            phase = SyncPhase.SYNCING,
+            total = photos.size,
+            bytesTotal = bytesTotal,
+            skipped = skipped,
+            clearCurrentItem = true,
+        )
+
         val entries = repo.entries(profileId).associateBy { it.signature }
         val remoteNames = mutableMapOf<String, MutableMap<String, Long>>()
         var done = 0
         var failed = 0
+        var alreadyOnServer = 0
+        var bytesDone = 0L
+        var lastNotifyAt = 0L
+        var lastNotifyBytes = 0L
+        var lastTickAt = System.currentTimeMillis()
+        var speed = 0L
+
+        suspend fun publish(bytes: Long, item: String?, force: Boolean) {
+            val current = System.currentTimeMillis()
+            if (!force && current - lastNotifyAt < NOTIFY_INTERVAL_MS) return
+            val elapsed = current - lastTickAt
+            if (elapsed > 0 && bytes >= lastNotifyBytes) {
+                val instant = (bytes - lastNotifyBytes) * 1000 / elapsed
+                speed = if (speed == 0L) instant else (speed * 3 + instant) / 4
+            }
+            lastTickAt = current
+            lastNotifyBytes = bytes
+            lastNotifyAt = current
+            repo.runs.progress(
+                run,
+                bytesDone = bytes,
+                processed = done + failed,
+                succeeded = done,
+                failed = failed,
+                currentItem = item,
+            )
+            PhotoSyncNotifications.update(
+                applicationContext,
+                SyncNotificationState(
+                    phase = SyncPhase.SYNCING,
+                    total = photos.size,
+                    processed = done + failed,
+                    failed = failed,
+                    bytesTotal = bytesTotal,
+                    bytesDone = bytes,
+                    currentItem = item,
+                    speedBytesPerSecond = speed,
+                    serverName = config.serverName,
+                ),
+                profileId,
+            )
+        }
 
         for ((index, photo) in photos.withIndex()) {
-            if (isStopped) {
-                finish(repo, config, done, photos.size, skipped = skipped)
+            val state = repo.runs.current(profileId, SyncRunKind.PHOTO)
+            if (state == null || state.runId != run.runId || !state.syncPhase.isActive) {
                 return Result.success()
             }
+            if (state.cancelRequested || state.stopRequested) {
+                val stop = state.stopRequested && !state.cancelRequested
+                return finishInterrupted(
+                    repo,
+                    run,
+                    config,
+                    if (stop) SyncPhase.STOPPED else SyncPhase.CANCELLED,
+                    if (stop) SyncCancelReason.USER_STOP else SyncCancelReason.USER_CANCEL,
+                    done,
+                    failed,
+                    skipped,
+                    bytesDone,
+                )
+            }
+            if (targetChanged(repo, config)) {
+                return finishInterrupted(
+                    repo,
+                    run,
+                    config,
+                    SyncPhase.CANCELLED,
+                    SyncCancelReason.TARGET_CHANGED,
+                    done,
+                    failed,
+                    skipped,
+                    bytesDone,
+                )
+            }
+
+            val currentItem = "${photo.album}/${photo.name}"
             val existing = entries[photo.signature]
+            val baseBytes = bytesDone
             try {
                 val remoteDir = remoteDir(config, photo)
                 remoteDirs.ensure(remoteDir)
-                val target = selectRemoteTarget(
+                var target = selectRemoteTarget(
                     api = api,
                     rootId = config.rootId,
                     remoteDir = remoteDir,
                     cache = remoteNames,
                     photo = photo,
                 )
+                val cachedHash = existing?.sha256?.takeIf {
+                    existing.hashSize == photo.size && existing.hashMtime == photo.mtime
+                }
+                val sha256 = if (hashSupported) {
+                    cachedHash ?: SyncHasher.sha256(applicationContext, photo.uri.toString())
+                        ?.also { hash ->
+                            repo.saveHash(
+                                profileId,
+                                photo.signature,
+                                hash,
+                                photo.size,
+                                photo.mtime,
+                            )
+                        }
+                } else {
+                    null
+                }
+                if (hashSupported && sha256 == null) {
+                    error("cannot read photo for hashing")
+                }
+                if (target.alreadyExists && hashSupported && sha256 != null) {
+                    val existingHash = remoteHash(
+                        api,
+                        config.rootId,
+                        "$remoteDir/${photo.name}",
+                    )
+                    when {
+                        existingHash == null -> Unit // fall back to name+size
+                        existingHash == sha256 -> {
+                            repo.saveEntry(
+                                entry(
+                                    profileId, photo, remoteDir, target.name, STATUS_DONE,
+                                    null, photo.size, sha256 = sha256,
+                                    hashSize = photo.size, hashMtime = photo.mtime,
+                                ),
+                            )
+                            done += 1
+                            alreadyOnServer += 1
+                            bytesDone = baseBytes + photo.size
+                            publish(bytesDone, currentItem, true)
+                            continue
+                        }
+                        else -> target = selectRemoteTarget(
+                            api = api,
+                            rootId = config.rootId,
+                            remoteDir = remoteDir,
+                            cache = remoteNames,
+                            photo = photo,
+                            forceRename = true,
+                        )
+                    }
+                }
+                if (!target.alreadyExists && hashBatch && sha256 != null) {
+                    val sameContent = findSameContent(
+                        api = api,
+                        rootId = config.rootId,
+                        remoteDir = remoteDir,
+                        names = remoteNames[remoteDir].orEmpty(),
+                        size = photo.size,
+                        sha256 = sha256,
+                        excludeName = target.name,
+                    )
+                    if (sameContent != null) {
+                        repo.saveEntry(
+                            entry(
+                                profileId, photo, remoteDir, target.name, STATUS_DONE,
+                                null, photo.size, sha256 = sha256,
+                                hashSize = photo.size, hashMtime = photo.mtime,
+                                remotePath = sameContent,
+                            ),
+                        )
+                        repo.logs.log(
+                            profileId,
+                            SyncRunKind.PHOTO,
+                            applicationContext.getString(
+                                R.string.sync_log_same_content,
+                                sameContent,
+                            ),
+                        )
+                        done += 1
+                        alreadyOnServer += 1
+                        bytesDone = baseBytes + photo.size
+                        publish(bytesDone, currentItem, true)
+                        continue
+                    }
+                }
+                if (target.name != photo.name) {
+                    repo.logs.log(
+                        profileId,
+                        SyncRunKind.PHOTO,
+                        applicationContext.getString(
+                            R.string.sync_log_renamed,
+                            photo.name,
+                            target.name,
+                        ),
+                        SyncLogStore.LEVEL_WARN,
+                    )
+                }
                 if (target.alreadyExists) {
                     repo.saveEntry(
-                        entry(profileId, photo, remoteDir, target.name, STATUS_DONE, null, photo.size),
+                        entry(
+                            profileId, photo, remoteDir, target.name, STATUS_DONE,
+                            null, photo.size, sha256 = sha256,
+                            hashSize = photo.size, hashMtime = photo.mtime,
+                        ),
                     )
                     done += 1
+                    alreadyOnServer += 1
                 } else {
+                    repo.saveEntry(
+                        entry(
+                            profileId, photo, remoteDir, target.name, STATUS_PENDING,
+                            null, 0, sha256 = sha256,
+                            hashSize = photo.size, hashMtime = photo.mtime,
+                        ),
+                    )
                     uploadPhotoWithRoot(
                         api = api,
                         profileId = profileId,
@@ -167,6 +455,9 @@ class PhotoSyncWorker(
                         remoteName = target.name,
                         existing = existing,
                         repo = repo,
+                        sha256 = sha256,
+                        verifyUpload = uploadVerify,
+                        onBytes = { chunkBytes -> publish(baseBytes + chunkBytes, currentItem, false) },
                     )
                     done += 1
                 }
@@ -174,9 +465,26 @@ class PhotoSyncWorker(
                 throw error
             } catch (error: FileHubApiException) {
                 if (error.code == "REMOTE_OFFLINE") {
-                    return fail(repo, config, applicationContext.getString(R.string.sync_remote_offline))
+                    return finishFailed(
+                        repo,
+                        run,
+                        config,
+                        applicationContext.getString(R.string.sync_remote_offline),
+                        SyncBlockReason.REMOTE_OFFLINE,
+                    )
                 }
                 failed += 1
+                val failure = error.toUserMessage(applicationContext)
+                repo.logs.log(
+                    profileId,
+                    SyncRunKind.PHOTO,
+                    applicationContext.getString(
+                        R.string.sync_log_failed,
+                        "${photo.album}/${photo.name}",
+                        failure,
+                    ),
+                    SyncLogStore.LEVEL_ERROR,
+                )
                 repo.saveEntry(
                     entry(
                         profileId = profileId,
@@ -184,20 +492,43 @@ class PhotoSyncWorker(
                         remoteDir = remoteDir(config, photo),
                         remoteName = existing?.remotePath?.substringAfterLast('/') ?: photo.name,
                         status = STATUS_ERROR,
-                        error = error.toUserMessage(applicationContext),
+                        error = failure,
                         bytesDone = existing?.bytesDone ?: 0,
                     ),
                 )
                 if (error.statusCode == 401 || error.statusCode == 403 || error.code == "QUOTA_EXCEEDED") {
-                    finish(repo, config, done, photos.size, failed, skipped)
-                    if (error.statusCode == 401) {
-                        repo.setEnabled(config.profileId, false)
-                        return Result.failure()
+                    val reason = if (error.statusCode == 401) {
+                        SyncBlockReason.AUTH_FAILED
+                    } else {
+                        SyncBlockReason.QUOTA_EXCEEDED
                     }
-                    return Result.success()
+                    return finishFailed(
+                        repo,
+                        run,
+                        config,
+                        error.toUserMessage(applicationContext),
+                        reason,
+                        retry = false,
+                        disable = error.statusCode == 401,
+                        done = done,
+                        failed = failed,
+                        skipped = skipped,
+                        bytesDone = baseBytes,
+                    )
                 }
             } catch (error: Exception) {
                 failed += 1
+                val failure = error.toUserMessage(applicationContext)
+                repo.logs.log(
+                    profileId,
+                    SyncRunKind.PHOTO,
+                    applicationContext.getString(
+                        R.string.sync_log_failed,
+                        "${photo.album}/${photo.name}",
+                        failure,
+                    ),
+                    SyncLogStore.LEVEL_ERROR,
+                )
                 repo.saveEntry(
                     entry(
                         profileId = profileId,
@@ -205,24 +536,35 @@ class PhotoSyncWorker(
                         remoteDir = remoteDir(config, photo),
                         remoteName = existing?.remotePath?.substringAfterLast('/') ?: photo.name,
                         status = STATUS_ERROR,
-                        error = error.toUserMessage(applicationContext),
+                        error = failure,
                         bytesDone = existing?.bytesDone ?: 0,
                     ),
                 )
             }
-            PhotoSyncNotifications.update(
-                applicationContext,
-                done + failed,
-                photos.size,
-                photos.getOrNull(index)?.name.orEmpty(),
-                PhotoSyncNotifications.idFor(profileId),
-                config.serverName,
-                profileId,
-            )
+            bytesDone = baseBytes + photo.size
+            if ((done + failed) % 25 == 0) {
+                repo.logs.log(
+                    profileId,
+                    SyncRunKind.PHOTO,
+                    applicationContext.getString(
+                        R.string.sync_log_progress,
+                        done + failed,
+                        photos.size,
+                        currentItem,
+                    ),
+                )
+            }
+            publish(bytesDone, currentItem, force = index == photos.lastIndex || bytesDone == bytesTotal)
         }
 
-        finish(repo, config, done, photos.size, failed, skipped)
-        return Result.success()
+        if (alreadyOnServer > 0) {
+            repo.logs.log(
+                profileId,
+                SyncRunKind.PHOTO,
+                applicationContext.getString(R.string.sync_log_existing, alreadyOnServer),
+            )
+        }
+        return finishCompleted(repo, run, config, done, failed, skipped, bytesDone)
     }
 
     private suspend fun uploadPhotoWithRoot(
@@ -234,7 +576,11 @@ class PhotoSyncWorker(
         remoteName: String,
         existing: PhotoSyncEntryEntity?,
         repo: PhotoSyncRepository,
+        sha256: String?,
+        verifyUpload: Boolean,
+        onBytes: suspend (Long) -> Unit,
     ): String {
+        val uploadSha = if (verifyUpload) sha256 else null
         var uploadId = existing?.uploadId
         var chunkSize = existing?.let { 4L * 1024 * 1024 } ?: UPLOAD_CHUNK
         if (uploadId != null) {
@@ -243,6 +589,12 @@ class PhotoSyncWorker(
                 uploadId = null
             } else {
                 chunkSize = status.chunkSize.takeIf { it > 0 } ?: chunkSize
+                if (uploadSha != null && status.sha256Expected != null &&
+                    status.sha256Expected != uploadSha
+                ) {
+                    // The file changed since this upload session was created.
+                    uploadId = null
+                }
             }
         }
         if (uploadId == null) {
@@ -253,36 +605,43 @@ class PhotoSyncWorker(
                 totalSize = photo.size,
                 chunkSize = chunkSize,
                 mtime = photo.mtime.takeIf { it > 0 },
+                sha256 = uploadSha,
+                verify = if (uploadSha != null) "auto" else null,
             )
             uploadId = created.uploadId
             chunkSize = created.chunkSize
         }
+        val sessionId = uploadId ?: error("upload session missing")
         repo.saveEntry(
-            entry(profileId, photo, remoteDir, remoteName, STATUS_RUNNING, null, 0, uploadId),
+            entry(
+                profileId, photo, remoteDir, remoteName, STATUS_RUNNING, null, 0, sessionId,
+                sha256 = sha256, hashSize = photo.size, hashMtime = photo.mtime,
+            ),
         )
         val chunks = if (photo.size == 0L) 0 else ((photo.size + chunkSize - 1) / chunkSize).toInt()
-        var received = runCatching { api.uploadStatus(uploadId!!).receivedChunks }
+        var received = runCatching { api.uploadStatus(sessionId).receivedChunks }
             .getOrDefault(emptyList())
             .toSet()
         for (index in 0 until chunks) {
-            if (isStopped) break
+            if (isStopped) throw CancellationException("sync stopped")
             if (index in received) continue
             val offset = index * chunkSize
             val length = min(chunkSize, photo.size - offset)
             val data = readChunk(photo.uri.toString(), offset, length)
-            api.uploadChunk(uploadId!!, index, data)
+            api.uploadChunk(sessionId, index, data)
             received = received + index
             repo.updateEntry(
                 profileId = profileId,
                 signature = photo.signature,
                 status = STATUS_RUNNING,
-                uploadId = uploadId,
+                uploadId = sessionId,
                 bytesDone = min(photo.size, received.size.toLong() * chunkSize),
                 remotePath = "$remoteDir/$remoteName",
                 error = null,
             )
+            onBytes(min(photo.size, received.size.toLong() * chunkSize))
         }
-        val complete = api.completeUpload(uploadId!!)
+        val complete = api.completeUpload(sessionId)
         repo.saveEntry(
             entry(
                 profileId = profileId,
@@ -293,11 +652,49 @@ class PhotoSyncWorker(
                 error = null,
                 bytesDone = photo.size,
                 remotePath = complete.path,
+                sha256 = sha256,
+                hashSize = photo.size,
+                hashMtime = photo.mtime,
             ),
         )
+        onBytes(photo.size)
         return complete.path
     }
 
+    /** Returns the ready SHA-256 for a remote path, or null when unavailable. */
+    private suspend fun remoteHash(api: FileHubApi, rootId: Long, path: String): String? {
+        val first = runCatching { api.getHash(rootId, path, wait = true) }.getOrNull()
+        if (first?.status == "ready") return first.sha256
+        if (first?.status == "pending") {
+            delay(first.retryAfterMs.takeIf { it in 1..3000 } ?: 1000)
+            val second = runCatching { api.getHash(rootId, path, wait = true) }.getOrNull()
+            if (second?.status == "ready") return second.sha256
+        }
+        return null
+    }
+
+    /** Finds a different remote file with the same content in this directory. */
+    private suspend fun findSameContent(
+        api: FileHubApi,
+        rootId: Long,
+        remoteDir: String,
+        names: Map<String, Long>,
+        size: Long,
+        sha256: String,
+        excludeName: String,
+    ): String? {
+        val candidates = names.entries
+            .asSequence()
+            .filter { it.value == size && it.key != excludeName }
+            .take(100)
+            .map { it.key }
+            .toList()
+        if (candidates.isEmpty()) return null
+        val hashes = runCatching {
+            api.hashes(rootId, candidates.map { "$remoteDir/$it" })
+        }.getOrNull() ?: return null
+        return hashes.firstOrNull { it.status == "ready" && it.sha256 == sha256 }?.path
+    }
 
     private suspend fun selectRemoteTarget(
         api: FileHubApi,
@@ -305,6 +702,7 @@ class PhotoSyncWorker(
         remoteDir: String,
         cache: MutableMap<String, MutableMap<String, Long>>,
         photo: MediaPhoto,
+        forceRename: Boolean = false,
     ): RemoteTarget {
         val names = cache.getOrPut(remoteDir) {
             val result = mutableMapOf<String, Long>()
@@ -316,7 +714,7 @@ class PhotoSyncWorker(
                     path = remoteDir,
                     cursor = cursor,
                     limit = 1000,
-                    includeSizes = false,
+                    includeSizes = true,
                 )
                 listing.entries.filterNot { it.isDir }.forEach { result[it.name] = it.size }
                 cursor = listing.nextCursor
@@ -324,11 +722,11 @@ class PhotoSyncWorker(
             } while (cursor != null && pages < 20)
             result.toMutableMap()
         }
-        if (names[photo.name] == photo.size) {
+        if (!forceRename && names[photo.name] == photo.size) {
             return RemoteTarget(photo.name, alreadyExists = true)
         }
         var candidate = photo.name
-        if (names.containsKey(candidate)) {
+        if (forceRename || names.containsKey(candidate)) {
             val dot = photo.name.lastIndexOf('.')
             val base = if (dot > 0) photo.name.substring(0, dot) else photo.name
             val ext = if (dot > 0) photo.name.substring(dot) else ""
@@ -374,7 +772,7 @@ class PhotoSyncWorker(
     }
 
     private fun sanitize(value: String): String =
-        value.replace(Regex("[/\\\\\\p{Cntrl}]"), "_").trim().ifEmpty { "Camera" }
+        value.replace(Regex("[/\\\\\\p{Cntrl}]"), "_").trim().ifEmpty { AlbumNames.DEFAULT_ALBUM }
 
     private fun entry(
         profileId: String,
@@ -386,6 +784,9 @@ class PhotoSyncWorker(
         bytesDone: Long,
         uploadId: String? = null,
         remotePath: String? = null,
+        sha256: String? = null,
+        hashSize: Long = 0,
+        hashMtime: Long = 0,
     ): PhotoSyncEntryEntity = PhotoSyncEntryEntity(
         profileId = profileId,
         signature = photo.signature,
@@ -402,92 +803,250 @@ class PhotoSyncWorker(
         bytesDone = bytesDone,
         error = error,
         updatedAt = now(),
+        sha256 = sha256,
+        hashSize = hashSize,
+        hashMtime = hashMtime,
     )
 
-    private suspend fun finish(
+    private suspend fun targetChanged(
         repo: PhotoSyncRepository,
         config: PhotoSyncConfigEntity,
+    ): Boolean {
+        val current = repo.config(config.profileId) ?: return true
+        return !current.enabled ||
+            current.rootId != config.rootId ||
+            current.remotePath.trim('/') != config.remotePath.trim('/') ||
+            current.albumSubfolders != config.albumSubfolders
+    }
+
+    private suspend fun finishCompleted(
+        repo: PhotoSyncRepository,
+        run: SyncRunEntity,
+        config: PhotoSyncConfigEntity,
         done: Int,
-        total: Int,
-        failed: Int = 0,
-        skipped: Int = 0,
-    ) {
+        failed: Int,
+        skipped: Int,
+        bytesDone: Long,
+    ): Result {
         val result = buildString {
-            append(applicationContext.getString(R.string.photo_sync_result, done, total))
+            append(applicationContext.getString(R.string.photo_sync_result, done, done + failed))
             if (skipped > 0) {
                 append(" · ")
                 append(applicationContext.getString(R.string.sync_waiting_wifi, skipped))
             }
         }
-        repo.updateConfig(
-            config.copy(
-                lastRunAt = now(),
-                lastResult = result,
-                lastError = if (failed > 0) applicationContext.resources.getQuantityString(R.plurals.sync_failed_count, failed, failed) else null,
-                pendingCount = repo.pendingCount(config.profileId),
+        val error = if (failed > 0) {
+            applicationContext.resources.getQuantityString(R.plurals.sync_failed_count, failed, failed)
+        } else {
+            null
+        }
+        repo.updateOutcome(config.profileId, now(), result, error)
+        repo.logs.log(
+            config.profileId,
+            SyncRunKind.PHOTO,
+            applicationContext.getString(
+                R.string.sync_log_finished,
+                done,
+                failed,
+                skipped,
             ),
+            if (failed > 0) SyncLogStore.LEVEL_ERROR else SyncLogStore.LEVEL_SUCCESS,
+        )
+        repo.runs.finish(
+            run,
+            if (failed > 0) SyncPhase.PARTIAL else SyncPhase.COMPLETED,
+            processed = done + failed,
+            succeeded = done,
+            skipped = skipped,
+            failed = failed,
+            bytesDone = bytesDone,
         )
         PhotoSyncNotifications.finished(
             applicationContext,
-            result,
-            PhotoSyncNotifications.idFor(config.profileId),
-            config.serverName,
+            SyncNotificationState(
+                phase = if (failed > 0) SyncPhase.PARTIAL else SyncPhase.COMPLETED,
+                total = done + failed,
+                processed = done + failed,
+                failed = failed,
+                bytesTotal = bytesDone,
+                bytesDone = bytesDone,
+                serverName = config.serverName,
+                summary = result,
+            ),
             config.profileId,
         )
+        return Result.success()
     }
 
-    private suspend fun syncFailure(
+    private suspend fun finishInterrupted(
         repo: PhotoSyncRepository,
+        run: SyncRunEntity,
+        config: PhotoSyncConfigEntity,
+        phase: SyncPhase,
+        reason: SyncCancelReason,
+        done: Int,
+        failed: Int,
+        skipped: Int,
+        bytesDone: Long,
+    ): Result {
+        repo.logs.log(
+            config.profileId,
+            SyncRunKind.PHOTO,
+            applicationContext.getString(
+                if (phase == SyncPhase.STOPPED) {
+                    R.string.sync_log_stopped
+                } else {
+                    R.string.sync_log_cancelled
+                },
+                SyncText.cancelReason(applicationContext, reason),
+            ),
+            SyncLogStore.LEVEL_WARN,
+        )
+        repo.runs.finish(
+            run,
+            phase,
+            reason = reason,
+            processed = done + failed,
+            succeeded = done,
+            skipped = skipped,
+            failed = failed,
+            bytesDone = bytesDone,
+        )
+        PhotoSyncNotifications.finished(
+            applicationContext,
+            SyncNotificationState(
+                phase = phase,
+                total = done + failed,
+                processed = done + failed,
+                failed = failed,
+                bytesTotal = bytesDone,
+                bytesDone = bytesDone,
+                serverName = config.serverName,
+                summary = applicationContext.getString(
+                    when (phase) {
+                        SyncPhase.STOPPED -> R.string.sync_phase_stopped
+                        SyncPhase.CANCELLED -> R.string.sync_phase_cancelled
+                        else -> R.string.sync_phase_interrupted
+                    },
+                ),
+            ),
+            config.profileId,
+        )
+        return Result.success()
+    }
+
+    private suspend fun finishFailure(
+        repo: PhotoSyncRepository,
+        run: SyncRunEntity,
         config: PhotoSyncConfigEntity,
         error: Throwable,
     ): Result {
         val code = (error as? FileHubApiException)?.code
         val message = error.toUserMessage(applicationContext)
-        return if (code == "REMOTE_TOKEN_INVALID" ||
+        val permanent = code == "REMOTE_TOKEN_INVALID" ||
             code == "REMOTE_GRANT_REVOKED" ||
             code == "UNAUTHORIZED" ||
             code == "TOKEN_REVOKED" ||
             code == "TOKEN_EXPIRED"
-        ) {
-            failPermanently(repo, config, message)
-        } else {
-            fail(repo, config, message)
+        return finishFailed(
+            repo,
+            run,
+            config,
+            message,
+            if (permanent) SyncBlockReason.AUTH_FAILED else SyncBlockReason.NETWORK,
+            retry = !permanent,
+            disable = permanent,
+        )
+    }
+
+    private suspend fun finishFailed(
+        repo: PhotoSyncRepository,
+        run: SyncRunEntity,
+        config: PhotoSyncConfigEntity,
+        message: String,
+        reason: SyncBlockReason,
+        retry: Boolean = true,
+        disable: Boolean = false,
+        done: Int = 0,
+        failed: Int = 0,
+        skipped: Int = 0,
+        bytesDone: Long = 0,
+    ): Result {
+        repo.updateOutcome(config.profileId, now(), null, message)
+        repo.logs.log(
+            config.profileId,
+            SyncRunKind.PHOTO,
+            applicationContext.getString(R.string.sync_log_error, message),
+            SyncLogStore.LEVEL_ERROR,
+        )
+        if (disable) {
+            repo.setEnabledColumn(config.profileId, false)
+            PhotoSyncScheduler.cancelAll(applicationContext, config.profileId)
         }
-    }
-
-    private suspend fun fail(
-        repo: PhotoSyncRepository,
-        config: PhotoSyncConfigEntity,
-        message: String,
-    ): Result {
-        repo.updateConfig(config.copy(lastError = message, lastRunAt = now()))
+        repo.runs.finish(
+            run,
+            SyncPhase.FAILED,
+            blockReason = reason,
+            processed = done + failed,
+            succeeded = done,
+            failed = failed,
+            skipped = skipped,
+            bytesDone = bytesDone,
+        )
         PhotoSyncNotifications.finished(
             applicationContext,
-            message,
-            PhotoSyncNotifications.idFor(config.profileId),
-            config.serverName,
+            SyncNotificationState(
+                phase = SyncPhase.FAILED,
+                failed = failed,
+                serverName = config.serverName,
+                blockReason = reason,
+                summary = message,
+            ),
             config.profileId,
         )
-        return Result.retry()
+        return if (retry) Result.retry() else Result.failure()
     }
 
-    private suspend fun failPermanently(
-        repo: PhotoSyncRepository,
-        config: PhotoSyncConfigEntity,
-        message: String,
-    ): Result {
-        repo.updateConfig(
-            config.copy(enabled = false, lastError = message, lastRunAt = now()),
+    private suspend fun finalizeCancelled(profileId: String) {
+        val repo = (applicationContext as FileHubApplication).container.photoSyncRepository
+        val run = repo.runs.current(profileId, SyncRunKind.PHOTO) ?: return
+        if (!run.syncPhase.isActive) return
+        val reason = when {
+            run.cancelRequested -> SyncCancelReason.USER_CANCEL
+            run.stopRequested -> SyncCancelReason.USER_STOP
+            else -> SyncCancelReason.SYSTEM_STOPPED
+        }
+        val phase = if (reason == SyncCancelReason.USER_STOP) {
+            SyncPhase.STOPPED
+        } else {
+            SyncPhase.CANCELLED
+        }
+        repo.runs.finish(run, phase, reason = reason)
+        repo.logs.log(
+            profileId,
+            SyncRunKind.PHOTO,
+            applicationContext.getString(
+                if (phase == SyncPhase.STOPPED) {
+                    R.string.sync_log_stopped
+                } else {
+                    R.string.sync_log_cancelled
+                },
+                SyncText.cancelReason(applicationContext, reason),
+            ),
+            SyncLogStore.LEVEL_WARN,
         )
-        PhotoSyncScheduler.cancelAll(applicationContext, config.profileId)
+        PhotoSyncNotifications.cancel(applicationContext, profileId)
         PhotoSyncNotifications.finished(
             applicationContext,
-            message,
-            PhotoSyncNotifications.idFor(config.profileId),
-            config.serverName,
-            config.profileId,
+            SyncNotificationState(
+                phase = phase,
+                serverName = "",
+                summary = applicationContext.getString(
+                    if (phase == SyncPhase.STOPPED) R.string.sync_phase_stopped else R.string.sync_phase_cancelled,
+                ),
+            ),
+            profileId,
         )
-        return Result.failure()
     }
 
     private fun hasPhotoPermission(config: PhotoSyncConfigEntity): Boolean {
@@ -512,15 +1071,16 @@ class PhotoSyncWorker(
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-
     private fun now(): Long = System.currentTimeMillis() / 1000
 
     private data class RemoteTarget(val name: String, val alreadyExists: Boolean)
 
     companion object {
+        private const val STATUS_PENDING = "pending"
         private const val STATUS_RUNNING = "running"
         private const val STATUS_DONE = "done"
         private const val STATUS_ERROR = "error"
         private const val UPLOAD_CHUNK = 4L * 1024 * 1024
+        private const val NOTIFY_INTERVAL_MS = 800L
     }
 }

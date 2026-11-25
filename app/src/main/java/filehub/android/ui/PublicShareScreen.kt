@@ -15,10 +15,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -80,10 +82,17 @@ fun PublicShareScreen(
             if (state.path.isEmpty()) onBack() else viewModel.goUp()
         },
     ) { padding ->
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .widthIn(max = 760.dp)
+            .fillMaxWidth(),
     ) {
         when {
             state.loading && state.meta == null -> Box(
@@ -114,7 +123,9 @@ fun PublicShareScreen(
                     keyboardActions = clearFocusOnDone {
                         if (password.isNotBlank() && !state.loading) viewModel.unlock(password)
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 420.dp),
                 )
                 Spacer(Modifier.size(12.dp))
                 Button(
@@ -191,6 +202,7 @@ fun PublicShareScreen(
                 }
             }
         }
+    }
     }
     }
 }

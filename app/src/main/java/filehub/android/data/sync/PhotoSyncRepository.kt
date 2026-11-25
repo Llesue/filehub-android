@@ -18,12 +18,41 @@ import kotlinx.serialization.json.Json
 class PhotoSyncRepository(
     private val context: Context,
     private val dao: PhotoSyncDao,
+    runDao: SyncRunDao,
+    logDao: SyncLogDao,
+    private val targetGuard: SyncTargetGuard,
 ) {
+    val runs = SyncRunStore(runDao)
+    val logs = SyncLogStore(logDao)
+
     fun configFlow(profileId: String): Flow<PhotoSyncConfigEntity?> = dao.configFlow(profileId)
 
     suspend fun config(profileId: String): PhotoSyncConfigEntity? = dao.config(profileId)
 
-    suspend fun save(config: PhotoSyncConfigEntity, resetEntries: Boolean = false) {
+    suspend fun save(
+        config: PhotoSyncConfigEntity,
+        resetEntries: Boolean = false,
+        allowOverlap: Boolean = false,
+    ) {
+        if (config.enabled && !allowOverlap &&
+            targetGuard.photoConflicts(config.profileId, config.rootId, config.remotePath)
+        ) {
+            throw SyncTargetOverlapException()
+        }
+        val previous = dao.config(config.profileId)
+        val targetChanged = previous != null && (
+            previous.rootId != config.rootId ||
+                previous.remotePath.trim('/') != config.remotePath.trim('/') ||
+                previous.albumSubfolders != config.albumSubfolders
+            )
+        if (targetChanged) {
+            PhotoSyncScheduler.cancelAll(context, config.profileId)
+            runs.current(config.profileId, SyncRunKind.PHOTO)?.let { run ->
+                if (run.syncPhase.isActive) {
+                    runs.finish(run, SyncPhase.CANCELLED, SyncCancelReason.TARGET_CHANGED)
+                }
+            }
+        }
         dao.saveConfig(config)
         if (resetEntries) dao.clearEntries(config.profileId)
         if (config.enabled) {
@@ -38,7 +67,31 @@ class PhotoSyncRepository(
     suspend fun setEnabled(profileId: String, enabled: Boolean) {
         val current = dao.config(profileId) ?: return
         save(current.copy(enabled = enabled, wifiOnly = current.photosWifiOnly && current.videosWifiOnly))
-        if (!enabled) PhotoSyncScheduler.cancelAll(context, profileId)
+        if (!enabled) {
+            PhotoSyncScheduler.cancelAll(context, profileId)
+            runs.current(profileId, SyncRunKind.PHOTO)?.let { run ->
+                if (run.syncPhase.isActive) {
+                    runs.finish(run, SyncPhase.CANCELLED, SyncCancelReason.CONFIG_CHANGED)
+                }
+            }
+        }
+    }
+
+    suspend fun updateOutcome(
+        profileId: String,
+        lastRunAt: Long?,
+        lastResult: String?,
+        lastError: String?,
+    ) {
+        dao.updateOutcome(profileId, lastRunAt, lastResult, lastError, dao.pendingCount(profileId))
+    }
+
+    suspend fun setEnabledColumn(profileId: String, enabled: Boolean) = dao.setEnabled(profileId, enabled)
+
+    /** User asked to stop or cancel the current run; the worker writes the final phase. */
+    suspend fun requestStop(profileId: String, cancel: Boolean) {
+        runs.requestStop(profileId, SyncRunKind.PHOTO, stop = !cancel, cancel = cancel)
+        PhotoSyncScheduler.cancelAll(context, profileId)
     }
 
     suspend fun syncNow(profileId: String) {
@@ -57,6 +110,11 @@ class PhotoSyncRepository(
             save(current.copy(enabled = false))
         }
         PhotoSyncScheduler.cancelAll(context, profileId)
+        runs.current(profileId, SyncRunKind.PHOTO)?.let { run ->
+            if (run.syncPhase.isActive) {
+                runs.finish(run, SyncPhase.CANCELLED, SyncCancelReason.LOGOUT)
+            }
+        }
     }
 
     suspend fun cancel(profileId: String) = PhotoSyncScheduler.cancelAll(context, profileId)
@@ -68,6 +126,14 @@ class PhotoSyncRepository(
     suspend fun entries(profileId: String): List<PhotoSyncEntryEntity> = dao.entries(profileId)
 
     suspend fun saveEntry(entry: PhotoSyncEntryEntity) = dao.saveEntry(entry)
+
+    suspend fun saveHash(
+        profileId: String,
+        signature: String,
+        sha256: String,
+        size: Long,
+        mtime: Long,
+    ) = dao.updateHash(profileId, signature, sha256, size, mtime)
 
     suspend fun updateEntry(
         profileId: String,
@@ -114,7 +180,7 @@ object PhotoSyncScheduler {
         }
         val request = PeriodicWorkRequestBuilder<PhotoSyncWorker>(interval, TimeUnit.MINUTES)
             .setConstraints(constraints(config))
-            .setInputData(workDataOf("profileId" to config.profileId))
+            .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "periodic"))
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             periodicName(config.profileId),
@@ -126,7 +192,7 @@ object PhotoSyncScheduler {
     fun enqueueNow(context: Context, config: PhotoSyncConfigEntity) {
         val request = OneTimeWorkRequestBuilder<PhotoSyncWorker>()
             .setConstraints(constraints(config))
-            .setInputData(workDataOf("profileId" to config.profileId))
+            .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "manual"))
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             nowName(config.profileId),
@@ -139,7 +205,7 @@ object PhotoSyncScheduler {
     fun enqueueCatchUp(context: Context, config: PhotoSyncConfigEntity) {
         val request = OneTimeWorkRequestBuilder<PhotoSyncWorker>()
             .setConstraints(constraints(config))
-            .setInputData(workDataOf("profileId" to config.profileId))
+            .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "catchup"))
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             catchUpName(config.profileId),
@@ -157,7 +223,7 @@ object PhotoSyncScheduler {
                     .setRequiresCharging(config.chargingOnly)
                     .build(),
             )
-            .setInputData(workDataOf("profileId" to config.profileId))
+            .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "wifi"))
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             wifiCatchUpName(config.profileId),

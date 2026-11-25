@@ -54,7 +54,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import android.net.Uri
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
@@ -266,7 +265,10 @@ fun FileHubApp(viewModel: AppViewModel) {
                         connection = connection,
                         onAddServer = { navController.navigate("addServer") },
                         onSelect = viewModel::connectProfile,
+                        onReauth = { id -> navController.navigate("reauth/$id") },
                         onRemove = viewModel::removeProfile,
+                        onMoveProfile = viewModel::moveProfile,
+                        onLoadVersions = viewModel::refreshServerVersions,
                         onEdit = { id -> navController.navigate("editServer/$id") },
                         onOpenDrawer = drawerAction,
                     )
@@ -274,6 +276,7 @@ fun FileHubApp(viewModel: AppViewModel) {
                         state = session,
                         filesViewModel = filesViewModel,
                         onAddServer = { navController.navigate("addServer") },
+                        onReauth = { id -> navController.navigate("reauth/$id") },
                         onRetry = viewModel::refreshRoots,
                         onSearch = { rootId -> navController.navigate("search/${rootId ?: -1}") },
                         onPauseAudio = audioController::pauseForVideo,
@@ -450,6 +453,12 @@ fun FileHubApp(viewModel: AppViewModel) {
                         onAddServer = { navController.navigate("addServer") },
                         onEditServer = { id -> navController.navigate("editServer/$id") },
                         onRemoveServer = viewModel::removeProfile,
+                        onReauth = { id ->
+                            serverModal = false
+                            navController.navigate("reauth/$id")
+                        },
+                        onMoveProfile = viewModel::moveProfile,
+                        onLoadVersions = viewModel::refreshServerVersions,
                         onClose = { serverModal = false },
                     )
                 }
@@ -490,11 +499,6 @@ fun FileHubApp(viewModel: AppViewModel) {
                 viewModel = shareViewModel,
                 faviconUrl = session.active?.iconUrl,
                 onBack = { navController.popBackStack() },
-                onOpenPublic = { link ->
-                    navController.navigate(
-                        "publicShare/${Uri.encode(link.baseUrl)}/${Uri.encode(link.token)}",
-                    )
-                },
             )
         }
         composable("publicShare/{base}/{token}") { entry ->
@@ -518,6 +522,13 @@ fun FileHubApp(viewModel: AppViewModel) {
                 viewModel = folderSyncViewModel,
                 remoteFolderPicker = directoryPickerViewModel,
                 session = session,
+                onBack = { navController.popBackStack() },
+                onOpenConflicts = { navController.navigate("folderConflicts") },
+            )
+        }
+        composable("folderConflicts") {
+            FolderConflictsScreen(
+                viewModel = folderSyncViewModel,
                 onBack = { navController.popBackStack() },
             )
         }
@@ -562,6 +573,25 @@ fun FileHubApp(viewModel: AppViewModel) {
                     navController.popBackStack()
                 },
             )
+        }
+        composable("reauth/{id}") { entry ->
+            val id = entry.arguments?.getString("id")
+            val profile = session.profiles.firstOrNull { it.id == id }
+            if (profile != null) {
+                AddServerScreen(
+                    viewModel = viewModel,
+                    existing = profile,
+                    onBack = {
+                        viewModel.resetLogin()
+                        navController.popBackStack()
+                    },
+                    onDone = {
+                        viewModel.resetLogin()
+                        tab = MainTab.Browse
+                        navController.popBackStack()
+                    },
+                )
+            }
         }
     }
 }

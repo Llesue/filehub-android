@@ -67,19 +67,38 @@ data class UserDto(
     val username: String,
     val role: String = "user",
     @SerialName("quota_bytes") val quotaBytes: Long? = null,
+    @SerialName("must_change_password") val mustChangePassword: Boolean = false,
 )
+
+/** Raised when the server requires a web password change before tokens can be issued. */
+class PasswordChangeRequiredException(val serverUrl: String) : Exception("password change required")
 
 @Serializable
 data class AuthResponseDto(
     val user: UserDto,
     @SerialName("csrf_token") val csrfToken: String? = null,
     val auth: String? = null,
+    val capabilities: ServerCapabilitiesDto? = null,
+)
+
+@Serializable
+data class ServerCapabilitiesDto(
+    val hash: Boolean = false,
+    @SerialName("hash_batch") val hashBatch: Boolean = false,
+    @SerialName("hash_upload_verify") val hashUploadVerify: Boolean = false,
+    @SerialName("hash_verify_max_bytes") val hashVerifyMaxBytes: Long = 0,
+    @SerialName("hash_algo") val hashAlgo: String = "sha256",
 )
 
 @Serializable
 internal data class LoginRequest(
     val username: String,
     val password: String,
+)
+
+@Serializable
+internal data class ChangePasswordRequest(
+    @SerialName("new_password") val newPassword: String,
 )
 
 @Serializable
@@ -111,6 +130,17 @@ internal data class RootDto(
 
 @Serializable
 internal data class RootsResponseDto(val roots: List<RootDto>)
+
+@Serializable
+internal data class RemoteMountDto(
+    val id: Long = 0,
+    @SerialName("root_id") val rootId: Long = 0,
+    @SerialName("owner_name") val ownerName: String? = null,
+    @SerialName("avatar_version") val avatarVersion: Long = 0,
+)
+
+@Serializable
+internal data class RemoteMountsDto(val mounts: List<RemoteMountDto> = emptyList())
 
 @Serializable
 internal data class EntryDto(
@@ -365,6 +395,8 @@ internal data class CreateUploadRequest(
     @SerialName("total_size") val totalSize: Long,
     @SerialName("chunk_size") val chunkSize: Long? = null,
     val mtime: Long? = null,
+    val sha256: String? = null,
+    val verify: String? = null,
 )
 
 @Serializable
@@ -383,12 +415,45 @@ data class UploadStatusDto(
     val received: Long = 0,
     @SerialName("received_chunks") val receivedChunks: List<Int> = emptyList(),
     @SerialName("expires_at") val expiresAt: Long = 0,
+    @SerialName("sha256_expected") val sha256Expected: String? = null,
+    val verify: String? = null,
+    @SerialName("hash_status") val hashStatus: String? = null,
+    @SerialName("hash_error") val hashError: String? = null,
 )
 
 @Serializable
 data class UploadCompleteDto(
     val path: String = "",
     val size: Long = 0,
+    val verified: Boolean = false,
+    @SerialName("hash_status") val hashStatus: String? = null,
+    val sha256: String? = null,
+)
+
+@Serializable
+internal data class HashDto(
+    val path: String = "",
+    val algo: String = "sha256",
+    val status: String = "pending",
+    val sha256: String? = null,
+    val size: Long = 0,
+    val mtime: Long = 0,
+    val cached: Boolean = false,
+    @SerialName("computed_at") val computedAt: Long = 0,
+    @SerialName("retry_after_ms") val retryAfterMs: Long = 0,
+    val error: ErrorDto? = null,
+)
+
+@Serializable
+internal data class HashesRequest(
+    val root: Long,
+    val paths: List<String>,
+    val force: Boolean = false,
+)
+
+@Serializable
+internal data class HashesResponse(
+    val hashes: List<HashDto> = emptyList(),
 )
 
 @Serializable
@@ -544,6 +609,29 @@ class FileHubApi(
                 mountId = it.mountId,
                 online = it.online,
             )
+        }
+    }
+
+    internal suspend fun remoteMounts(): List<RemoteMountDto> =
+        getJson(path = "remote/mounts", deserializer = RemoteMountsDto.serializer()).mounts
+
+    /** Adds the sharer name/avatar version used by remote root cards. */
+    internal suspend fun rootsWithRemoteInfo(): List<FileRoot> {
+        val roots = roots()
+        if (roots.none { it.isRemote }) return roots
+        val mounts = runCatching { remoteMounts() }.getOrDefault(emptyList())
+        if (mounts.isEmpty()) return roots
+        val byRoot = mounts.associateBy { it.rootId }
+        return roots.map { root ->
+            val mount = byRoot[root.id]
+            if (root.isRemote && mount != null) {
+                root.copy(
+                    remoteOwnerName = mount.ownerName,
+                    remoteAvatarVersion = mount.avatarVersion,
+                )
+            } else {
+                root
+            }
         }
     }
 
@@ -739,12 +827,54 @@ class FileHubApi(
         totalSize: Long,
         chunkSize: Long? = null,
         mtime: Long? = null,
+        sha256: String? = null,
+        verify: String? = null,
     ): UploadCreatedDto = postJson(
         path = "uploads",
-        body = CreateUploadRequest(rootId, path, filename, totalSize, chunkSize, mtime),
+        body = CreateUploadRequest(
+            rootId,
+            path,
+            filename,
+            totalSize,
+            chunkSize,
+            mtime,
+            sha256,
+            verify,
+        ),
         serializer = CreateUploadRequest.serializer(),
         deserializer = UploadCreatedDto.serializer(),
     )
+
+    internal suspend fun getHash(
+        rootId: Long,
+        path: String,
+        wait: Boolean = true,
+        timeoutMs: Long = 5000,
+    ): HashDto = getJson(
+        path = "hash",
+        deserializer = HashDto.serializer(),
+        query = mapOf(
+            "root" to rootId.toString(),
+            "path" to path,
+            "wait" to wait.toString(),
+            "timeout_ms" to timeoutMs.coerceIn(1, 5000).toString(),
+        ),
+    )
+
+    internal suspend fun hashes(
+        rootId: Long,
+        paths: List<String>,
+        force: Boolean = false,
+    ): List<HashDto> {
+        if (paths.isEmpty()) return emptyList()
+        val response = postJson(
+            path = "hashes",
+            body = HashesRequest(rootId, paths, force),
+            serializer = HashesRequest.serializer(),
+            deserializer = HashesResponse.serializer(),
+        )
+        return response.hashes
+    }
 
     suspend fun uploadStatus(uploadId: String): UploadStatusDto = getJson(
         path = "uploads/$uploadId",
@@ -1051,6 +1181,19 @@ class FileHubApi(
         )
     }
 
+    private suspend fun changePasswordForced(csrfToken: String, newPassword: String) {
+        val body = JSON.encodeToString(
+            ChangePasswordRequest.serializer(),
+            ChangePasswordRequest(newPassword),
+        ).toByteArray(Charsets.UTF_8)
+        requestUnit(
+            path = "me/password/forced",
+            method = "POST",
+            body = body,
+            csrfToken = csrfToken,
+        )
+    }
+
     private suspend fun logout(csrfToken: String) {
         requestUnit(
             path = "logout",
@@ -1261,6 +1404,7 @@ class FileHubApi(
             baseUrl: String,
             username: String,
             password: String,
+            newPassword: String? = null,
             deviceName: String = deviceName(),
         ): LoginResult {
             val normalized = normalizeBaseUrl(baseUrl)
@@ -1280,14 +1424,35 @@ class FileHubApi(
             val auth = sessionApi.login(username, password)
             val csrf = auth.csrfToken?.takeIf { it.isNotBlank() }
                 ?: throw FileHubApiException(0, "INVALID_RESPONSE", "登录响应缺少 CSRF token")
+            if (auth.user.mustChangePassword) {
+                if (newPassword == null) {
+                    runCatching { sessionApi.logout(csrf) }
+                    throw PasswordChangeRequiredException(normalized)
+                }
+                sessionApi.changePasswordForced(csrf, newPassword)
+            }
 
-            val tokenResponse = sessionApi.createToken(csrf, deviceName)
+            val tokenResponse = try {
+                sessionApi.createToken(csrf, deviceName)
+            } catch (error: FileHubApiException) {
+                if (error.code == "PASSWORD_CHANGE_REQUIRED") {
+                    if (newPassword == null) {
+                        runCatching { sessionApi.logout(csrf) }
+                        throw PasswordChangeRequiredException(normalized)
+                    }
+                    sessionApi.changePasswordForced(csrf, newPassword)
+                    sessionApi.createToken(csrf, deviceName)
+                } else {
+                    throw error
+                }
+            }
             runCatching { sessionApi.logout(csrf) }
 
             val tokenApi = FileHubApi(normalized, tokenResponse.token)
             val me = tokenApi.me()
-            val roots = tokenApi.roots()
+            val roots = tokenApi.rootsWithRemoteInfo()
             val avatarVersion = runCatching { tokenApi.avatarVersion() }.getOrNull()
+            val serverVersion = runCatching { tokenApi.version() }.getOrNull()?.version
             val host = normalized.toHttpUrlOrNull()?.host ?: normalized
             val displayName = branding?.name?.takeIf { it.isNotBlank() } ?: host
             val iconUrl = branding?.iconUrl?.let { raw ->
@@ -1306,8 +1471,14 @@ class FileHubApi(
                 addresses = listOf(normalized),
                 iconUrl = iconUrl,
                 avatarVersion = avatarVersion,
+                serverVersion = serverVersion,
             )
-            return LoginResult(profile = profile, token = tokenResponse.token, roots = roots)
+            return LoginResult(
+                profile = profile,
+                token = tokenResponse.token,
+                roots = roots,
+                serverVersion = serverVersion,
+            )
         }
 
         private fun buildClient(

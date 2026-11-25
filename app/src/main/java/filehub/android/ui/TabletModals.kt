@@ -1,8 +1,6 @@
 package filehub.android.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,10 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -46,7 +40,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -162,9 +155,14 @@ fun TabletServerPickerModal(
     onAddServer: () -> Unit,
     onEditServer: (String) -> Unit,
     onRemoveServer: (String) -> Unit,
+    onReauth: (String) -> Unit,
+    onMoveProfile: (Int, Int) -> Unit,
+    onLoadVersions: () -> Unit,
     onClose: () -> Unit,
 ) {
     var pendingRemoval by remember { mutableStateOf<ServerProfile?>(null) }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) { onLoadVersions() }
     Dialog(
         onDismissRequest = onClose,
         properties = DialogProperties(
@@ -239,37 +237,33 @@ fun TabletServerPickerModal(
                             .padding(horizontal = 12.dp),
                     ) {
                         val columns = if (maxWidth >= 600.dp) 2 else 1
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(columns),
-                            modifier = Modifier.fillMaxSize(),
+                        ReorderableServerGrid(
+                            profiles = state.profiles,
+                            activeId = state.active?.id,
+                            authExpiredProfiles = state.authExpiredProfiles,
+                            connection = connection,
+                            columns = columns,
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                                 start = 4.dp,
                                 end = 4.dp,
                                 top = 4.dp,
                                 bottom = 16.dp,
                             ),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            items(state.profiles, key = { it.id }) { profile ->
-                                ServerPickerCard(
-                                    profile = profile,
-                                    active = state.active?.id == profile.id,
-                                    connection = connection?.takeIf {
-                                        it.profileId == profile.id
-                                    },
-                                    onClick = {
-                                        onClose()
-                                        onSelect(profile.id)
-                                    },
-                                    onEdit = {
-                                        onClose()
-                                        onEditServer(profile.id)
-                                    },
-                                    onRemove = { pendingRemoval = profile },
-                                )
-                            }
-                        }
+                            onMoveProfile = onMoveProfile,
+                            onSelect = { id ->
+                                onClose()
+                                onSelect(id)
+                            },
+                            onReauth = { id ->
+                                onClose()
+                                onReauth(id)
+                            },
+                            onEdit = { id ->
+                                onClose()
+                                onEditServer(id)
+                            },
+                            onRemove = { pendingRemoval = it },
+                        )
                     }
                 }
             }
@@ -300,125 +294,6 @@ fun TabletServerPickerModal(
                 }
             },
         )
-    }
-}
-
-@Composable
-private fun ServerPickerCard(
-    profile: ServerProfile,
-    active: Boolean,
-    connection: ServerConnection?,
-    onClick: () -> Unit,
-    onEdit: () -> Unit,
-    onRemove: () -> Unit,
-) {
-    var menu by remember { mutableStateOf(false) }
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        color = if (active) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
-        border = BorderStroke(
-            1.dp,
-            if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-        ),
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = profile.displayName.take(1).uppercase(),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = profile.displayName,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = profile.baseUrl,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val status = when {
-                    connection?.status == ServerConnectionStatus.Connecting ->
-                        stringResource(R.string.login_connecting)
-                    connection?.status == ServerConnectionStatus.Failed ->
-                        stringResource(R.string.browse_root_offline)
-                    active -> stringResource(R.string.servers_active)
-                    else -> null
-                }
-                if (status != null) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = status,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (connection?.status == ServerConnectionStatus.Failed) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        },
-                    )
-                }
-            }
-            if (connection?.status == ServerConnectionStatus.Connecting) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-            Box {
-                IconButton(onClick = { menu = true }) {
-                    Icon(
-                        Icons.Filled.MoreVert,
-                        contentDescription = stringResource(R.string.file_more),
-                    )
-                }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.server_edit)) },
-                        onClick = {
-                            menu = false
-                            onEdit()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = stringResource(R.string.common_remove),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        },
-                        onClick = {
-                            menu = false
-                            onRemove()
-                        },
-                    )
-                }
-            }
-        }
     }
 }
 

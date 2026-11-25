@@ -30,6 +30,7 @@ import filehub.android.data.media.ThumbnailLoaderFactory
 import filehub.android.data.sync.FolderSyncRepository
 import filehub.android.data.sync.PhotoSyncRepository
 import filehub.android.data.api.FileHubApiException
+import filehub.android.data.api.PasswordChangeRequiredException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -59,6 +60,8 @@ data class LoginUiState(
     val loading: Boolean = false,
     val error: String? = null,
     val success: Boolean = false,
+    val passwordChangeRequired: Boolean = false,
+    val passwordChangeError: String? = null,
 )
 
 data class ClientUpdateUiState(
@@ -190,7 +193,12 @@ class AppViewModel(
         }
     }
 
-    fun login(addresses: List<String>, username: String, password: String) {
+    fun login(
+        addresses: List<String>,
+        username: String,
+        password: String,
+        newPassword: String? = null,
+    ) {
         if (_login.value.loading) return
         if (addresses.none { it.isNotBlank() }) {
             _login.value = LoginUiState(error = application.getString(R.string.login_error_url))
@@ -204,10 +212,25 @@ class AppViewModel(
         }
         _login.value = LoginUiState(loading = true)
         viewModelScope.launch {
-            repository.login(addresses.filter { it.isNotBlank() }, username, password)
+            repository.login(
+                addresses.filter { it.isNotBlank() },
+                username,
+                password,
+                newPassword = newPassword,
+            )
                 .onSuccess { _login.value = LoginUiState(success = true) }
                 .onFailure { error ->
-                    _login.value = LoginUiState(error = loginErrorMessage(error))
+                    val changing = newPassword != null
+                    _login.value = when {
+                        error is PasswordChangeRequiredException -> LoginUiState(
+                            passwordChangeRequired = true,
+                        )
+                        changing -> LoginUiState(
+                            passwordChangeRequired = true,
+                            passwordChangeError = loginErrorMessage(error),
+                        )
+                        else -> LoginUiState(error = loginErrorMessage(error))
+                    }
                 }
         }
     }
@@ -220,6 +243,8 @@ class AppViewModel(
             "INVALID_URL" -> application.getString(R.string.error_invalid_url)
             "INVALID_RESPONSE" -> application.getString(R.string.error_invalid_response)
             "SETUP_REQUIRED" -> application.getString(R.string.error_server_setup_required)
+            "PASSWORD_CHANGE_REQUIRED" -> application.getString(R.string.password_change_required_body)
+            "WEAK_PASSWORD" -> application.getString(R.string.password_change_weak)
             else -> error.message.ifBlank { application.getString(R.string.login_error_generic) }
         }
         else -> error.message?.takeIf { it.isNotBlank() }
@@ -236,6 +261,10 @@ class AppViewModel(
             repository.activate(profileId)
             repository.refreshRoots()
         }
+    }
+
+    fun moveProfile(from: Int, to: Int) {
+        viewModelScope.launch { repository.moveProfile(from, to) }
     }
 
     fun connectProfile(profileId: String) {
@@ -271,6 +300,10 @@ class AppViewModel(
         }
     }
 
+    fun refreshServerVersions() {
+        viewModelScope.launch { repository.refreshServerVersions() }
+    }
+
     fun loadServerVersion() {
         val profile = session.value.active ?: return
         _serverVersionLoading.value = true
@@ -279,6 +312,9 @@ class AppViewModel(
                 .onSuccess {
                     _serverVersion.value = it
                     _versionError.value = null
+                    if (it.version.isNotBlank()) {
+                        repository.updateServerVersion(profile.id, it.version)
+                    }
                 }
                 .onFailure {
                     _versionError.value = application.getString(R.string.version_check_failed)

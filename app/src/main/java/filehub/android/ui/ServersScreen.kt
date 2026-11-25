@@ -1,9 +1,7 @@
 package filehub.android.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,9 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -25,15 +20,13 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,18 +34,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.draw.clip
-import coil3.compose.AsyncImage
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import filehub.android.R
 import filehub.android.core.model.ServerProfile
 import filehub.android.data.ServerConnection
-import filehub.android.data.ServerConnectionStatus
 import filehub.android.data.SessionState
 
 @Composable
@@ -61,11 +49,16 @@ fun ServersScreen(
     connection: ServerConnection?,
     onAddServer: () -> Unit,
     onSelect: (String) -> Unit,
+    onReauth: (String) -> Unit,
     onRemove: (String) -> Unit,
     onEdit: (String) -> Unit,
+    onMoveProfile: (Int, Int) -> Unit,
+    onLoadVersions: () -> Unit = {},
     onOpenDrawer: (() -> Unit)? = null,
 ) {
     var pendingRemoval by remember { mutableStateOf<ServerProfile?>(null) }
+
+    LaunchedEffect(Unit) { onLoadVersions() }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -125,30 +118,24 @@ fun ServersScreen(
         } else {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 val columns = if (maxWidth >= 600.dp) 2 else 1
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
-                    modifier = Modifier.fillMaxSize(),
+                ReorderableServerGrid(
+                    profiles = state.profiles,
+                    activeId = state.active?.id,
+                    authExpiredProfiles = state.authExpiredProfiles,
+                    connection = connection,
+                    columns = columns,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
                         start = 16.dp,
                         end = 16.dp,
                         top = 4.dp,
                         bottom = 24.dp,
                     ),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(state.profiles, key = { it.id }) { profile ->
-                        ServerCard(
-                            profile = profile,
-                            active = state.active?.id == profile.id,
-                            needsLogin = state.active?.id == profile.id && state.needsLogin,
-                            connection = connection?.takeIf { it.profileId == profile.id },
-                            onClick = { onSelect(profile.id) },
-                            onRemove = { pendingRemoval = profile },
-                            onEdit = { onEdit(profile.id) },
-                        )
-                    }
-                }
+                    onMoveProfile = onMoveProfile,
+                    onSelect = onSelect,
+                    onReauth = onReauth,
+                    onEdit = onEdit,
+                    onRemove = { pendingRemoval = it },
+                )
             }
         }
     }
@@ -179,163 +166,6 @@ fun ServersScreen(
                 }
             },
         )
-    }
-}
-
-@Composable
-private fun ServerCard(
-    profile: ServerProfile,
-    active: Boolean,
-    needsLogin: Boolean,
-    connection: ServerConnection?,
-    onClick: () -> Unit,
-    onRemove: () -> Unit,
-    onEdit: () -> Unit,
-) {
-    var menuOpen by remember { mutableStateOf(false) }
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(
-            1.dp,
-            if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-        ),
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = profile.displayName.take(1).uppercase().ifBlank { "F" },
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                profile.iconUrl?.let { icon ->
-                    AsyncImage(
-                        model = icon,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(10.dp)),
-                    )
-                }
-            }
-            Spacer(Modifier.size(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = profile.displayName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (active && connection == null) {
-                        Spacer(Modifier.size(8.dp))
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            shape = RoundedCornerShape(6.dp),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.servers_active),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            )
-                        }
-                    }
-                    connection?.let { status ->
-                        Spacer(Modifier.size(8.dp))
-                        val label = when (status.status) {
-                            ServerConnectionStatus.Connecting -> stringResource(
-                                R.string.server_connecting_progress,
-                                status.attempt,
-                                status.total,
-                            )
-                            ServerConnectionStatus.Success -> stringResource(R.string.server_connected)
-                            ServerConnectionStatus.Failed -> stringResource(R.string.browse_root_offline)
-                        }
-                        Surface(
-                            color = when (status.status) {
-                                ServerConnectionStatus.Connecting -> MaterialTheme.colorScheme.secondaryContainer
-                                ServerConnectionStatus.Success -> MaterialTheme.colorScheme.primaryContainer
-                                ServerConnectionStatus.Failed -> MaterialTheme.colorScheme.errorContainer
-                            },
-                            shape = RoundedCornerShape(6.dp),
-                        ) {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = when (status.status) {
-                                    ServerConnectionStatus.Connecting -> MaterialTheme.colorScheme.onSecondaryContainer
-                                    ServerConnectionStatus.Success -> MaterialTheme.colorScheme.primary
-                                    ServerConnectionStatus.Failed -> MaterialTheme.colorScheme.onErrorContainer
-                                },
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = profile.baseUrl,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = profile.username + if (needsLogin) {
-                        " · " + stringResource(R.string.servers_needs_login)
-                    } else {
-                        ""
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (needsLogin) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Box {
-                IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = null)
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.server_edit)) },
-                        onClick = {
-                            menuOpen = false
-                            onEdit()
-                        },
-                    )
-                    CompactDropdownMenuItem(
-                        text = { Text(stringResource(R.string.servers_remove)) },
-                        onClick = {
-                            menuOpen = false
-                            onRemove()
-                        },
-                    )
-                }
-            }
-        }
     }
 }
 

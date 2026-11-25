@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
@@ -46,7 +47,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,12 +61,15 @@ import filehub.android.core.model.FileKind
 import filehub.android.core.model.FileRoot
 import filehub.android.data.SessionState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.ImageLoader
+import coil3.compose.SubcomposeAsyncImage
 
 @Composable
 fun BrowseScreen(
     state: SessionState,
     filesViewModel: FilesViewModel,
     onAddServer: () -> Unit,
+    onReauth: (String) -> Unit = {},
     onRetry: () -> Unit,
     onSearch: (Long?) -> Unit,
     onPauseAudio: () -> Unit,
@@ -268,8 +274,13 @@ fun BrowseScreen(
             state.needsLogin -> CenteredMessage(
                 title = stringResource(R.string.servers_needs_login),
                 action = {
-                    Button(onClick = onAddServer) {
-                        Text(stringResource(R.string.login_connect))
+                    Button(
+                        onClick = {
+                            val id = state.active?.id
+                            if (id != null) onReauth(id) else onAddServer()
+                        },
+                    ) {
+                        Text(stringResource(R.string.servers_reauth_title))
                     }
                 },
             )
@@ -306,6 +317,8 @@ fun BrowseScreen(
                     roots = state.roots,
                     wide = wide,
                     columns = columns,
+                    baseUrl = active?.baseUrl,
+                    imageLoader = imageLoader,
                     onOpen = { item -> filesViewModel.open(profile = active, root = item) },
                 )
             }
@@ -319,6 +332,8 @@ internal fun RootGrid(
     roots: List<FileRoot>,
     wide: Boolean,
     columns: Int,
+    baseUrl: String? = null,
+    imageLoader: ImageLoader? = null,
     onOpen: (FileRoot) -> Unit,
 ) {
     val context = LocalContext.current
@@ -343,6 +358,8 @@ internal fun RootGrid(
             RootCard(
                 root = item,
                 borderless = wide,
+                avatarUrl = remoteAvatarUrl(baseUrl, item),
+                imageLoader = imageLoader,
                 onClick = { onOpen(item) },
             )
         }
@@ -360,6 +377,8 @@ internal fun RootGrid(
                         root = item,
                         borderless = wide,
                         dimmed = true,
+                        avatarUrl = remoteAvatarUrl(baseUrl, item),
+                        imageLoader = imageLoader,
                         onClick = { Toast.makeText(context, offlineHint, Toast.LENGTH_SHORT).show() },
                     )
                 }
@@ -403,6 +422,8 @@ private fun RootCard(
     onClick: () -> Unit,
     borderless: Boolean = false,
     dimmed: Boolean = false,
+    avatarUrl: String? = null,
+    imageLoader: ImageLoader? = null,
 ) {
     Surface(
         modifier = Modifier
@@ -419,48 +440,101 @@ private fun RootCard(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_file_folder),
-                    contentDescription = null,
-                    tint = fileIconColor(FileKind.Folder),
-                )
-            }
+            RootAvatar(root = root, avatarUrl = avatarUrl, imageLoader = imageLoader)
             Spacer(Modifier.size(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Text(
                     text = root.alias,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
-                if (root.readOnly || root.isRemote) {
-                    Spacer(Modifier.height(2.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (root.readOnly) Badge(stringResource(R.string.browse_root_read_only))
-                        if (root.isRemote) Badge(stringResource(R.string.browse_root_remote))
-                        if (root.isRemote) {
-                            when (root.online) {
-                                true -> Badge(stringResource(R.string.browse_root_online))
-                                false -> StatusBadge(
-                                    text = stringResource(R.string.browse_root_offline),
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                                null -> Badge(stringResource(R.string.browse_root_unknown))
-                            }
-                        }
+                if (root.readOnly) Badge(stringResource(R.string.browse_root_read_only))
+                if (root.isRemote) Badge(stringResource(R.string.browse_root_remote))
+                if (root.isRemote) {
+                    when (root.online) {
+                        // Online roots are the normal case and are not announced;
+                        // offline roots are grouped separately.
+                        true -> Unit
+                        false -> StatusBadge(
+                            text = stringResource(R.string.browse_root_offline),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        null -> Badge(stringResource(R.string.browse_root_unknown))
                     }
                 }
             }
             Text(text = "›", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+@Composable
+private fun RootAvatar(root: FileRoot, avatarUrl: String?, imageLoader: ImageLoader?) {
+    if (!root.isRemote) {
+        Icon(
+            painter = painterResource(R.drawable.ic_file_folder),
+            contentDescription = null,
+            tint = fileIconColor(FileKind.Folder),
+            modifier = Modifier.size(36.dp),
+        )
+        return
+    }
+    val name = root.remoteOwnerName?.takeIf { it.isNotBlank() } ?: root.alias
+    if (avatarUrl != null && imageLoader != null) {
+        SubcomposeAsyncImage(
+            model = avatarUrl,
+            imageLoader = imageLoader,
+            contentDescription = null,
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape),
+            contentScale = ContentScale.Crop,
+            loading = { InitialAvatar(name) },
+            error = { InitialAvatar(name) },
+        )
+    } else {
+        InitialAvatar(name)
+    }
+}
+
+@Composable
+private fun InitialAvatar(name: String) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(avatarColor(name)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.trim().take(1).uppercase().ifEmpty { "?" },
+            color = Color.White,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+private fun avatarColor(name: String): Color {
+    var hash = 0
+    for (char in name) {
+        hash = (hash * 31 + char.code) % 360
+    }
+    return Color.hsl(hash.toFloat(), 0.45f, 0.52f)
+}
+
+private fun remoteAvatarUrl(baseUrl: String?, root: FileRoot): String? {
+    if (!root.isRemote || baseUrl.isNullOrBlank()) return null
+    if (root.remoteAvatarVersion <= 0) return null
+    val mountId = root.mountId ?: return null
+    return "${baseUrl.trimEnd('/')}/api/v1/remote/mounts/$mountId/avatar?v=${root.remoteAvatarVersion}"
 }
 
 @Composable

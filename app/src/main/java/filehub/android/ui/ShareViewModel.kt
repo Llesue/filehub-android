@@ -18,6 +18,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+internal fun ShareInfo.isExpired(nowSeconds: Long = System.currentTimeMillis() / 1000): Boolean =
+    expired || (expiresAt != null && expiresAt <= nowSeconds)
+
+internal fun ShareInfo.isStopped(nowSeconds: Long = System.currentTimeMillis() / 1000): Boolean =
+    revoked || isExpired(nowSeconds)
+
+/** Expired shares need a future expiry before the server will re-enable them. */
+internal fun ShareInfo.enableExpiry(nowSeconds: Long = System.currentTimeMillis() / 1000): Long? =
+    if (isExpired(nowSeconds)) nowSeconds + 86_400 else null
+
 data class ShareUiState(
     val shares: List<ShareInfo> = emptyList(),
     val nextCursor: String? = null,
@@ -116,7 +126,6 @@ class ShareViewModel(
     fun update(
         share: ShareInfo,
         readOnly: Boolean,
-        revoked: Boolean,
         expiresAt: Long?,
         clearExpires: Boolean,
         password: String?,
@@ -124,9 +133,8 @@ class ShareViewModel(
     ) {
         val profile = sessionRepository.state.value.active ?: return
         val readOnlyChange = readOnly.takeIf { it != share.readOnly }
-        val revokedChange = revoked.takeIf { it != share.revoked }
         val expiresChange = expiresAt.takeIf { it != null && it != share.expiresAt }
-        val hasChange = readOnlyChange != null || revokedChange != null ||
+        val hasChange = readOnlyChange != null ||
             clearExpires || expiresChange != null || !password.isNullOrBlank() || clearPassword
         if (!hasChange) {
             dismissEdit()
@@ -143,7 +151,6 @@ class ShareViewModel(
                     clearExpires = clearExpires,
                     password = password?.takeIf { it.isNotBlank() },
                     clearPassword = clearPassword,
-                    revoked = revokedChange,
                 )
             }.onSuccess {
                 _state.value = _state.value.copy(editing = null, editLoading = false)
@@ -191,7 +198,7 @@ class ShareViewModel(
         }
     }
 
-    fun revoke(share: ShareInfo) {
+    fun stop(share: ShareInfo) {
         val profile = sessionRepository.state.value.active ?: return
         viewModelScope.launch {
             runCatching { shareRepository.revoke(profile, share.id) }
@@ -199,6 +206,28 @@ class ShareViewModel(
                 .onFailure { error ->
                     _state.value = _state.value.copy(actionError = error.toUserMessage(application))
                 }
+        }
+    }
+
+    fun enable(share: ShareInfo) {
+        val profile = sessionRepository.state.value.active ?: return
+        val now = System.currentTimeMillis() / 1000
+        // An expired share cannot be re-enabled without a future expiry; the
+        // web client gives it one more day, so match that behaviour here.
+        val expiresAt = share.enableExpiry(now)
+        viewModelScope.launch {
+            runCatching {
+                shareRepository.update(
+                    profile = profile,
+                    id = share.id,
+                    revoked = false,
+                    expiresAt = expiresAt,
+                )
+            }.onSuccess {
+                load()
+            }.onFailure { error ->
+                _state.value = _state.value.copy(actionError = error.toUserMessage(application))
+            }
         }
     }
 

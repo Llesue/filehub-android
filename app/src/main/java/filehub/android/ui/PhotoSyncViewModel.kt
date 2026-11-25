@@ -14,6 +14,10 @@ import filehub.android.data.sync.MediaScanner
 import filehub.android.data.sync.PhotoSyncConfigEntity
 import filehub.android.data.SessionRepository
 import filehub.android.data.sync.PhotoSyncRepository
+import filehub.android.data.sync.SyncLogEntity
+import filehub.android.data.sync.SyncRunEntity
+import filehub.android.data.sync.SyncRunKind
+import filehub.android.data.sync.SyncTargetOverlapException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -35,6 +39,7 @@ data class PhotoSyncUiState(
     val error: String? = null,
     val saved: Boolean = false,
     val queued: Boolean = false,
+    val overlap: Boolean = false,
 )
 
 class PhotoSyncViewModel(
@@ -55,6 +60,34 @@ class PhotoSyncViewModel(
 
     private val _state = MutableStateFlow(PhotoSyncUiState())
     val state: StateFlow<PhotoSyncUiState> = _state.asStateFlow()
+
+    val logs: StateFlow<List<SyncLogEntity>> = sessionRepository.state
+        .map { it.active?.id }
+        .distinctUntilChanged()
+        .flatMapLatest { id ->
+            if (id == null) {
+                flowOf(emptyList())
+            } else {
+                repository.logs.flow(id, SyncRunKind.PHOTO)
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
+    val run: StateFlow<SyncRunEntity?> = sessionRepository.state
+        .map { it.active?.id }
+        .distinctUntilChanged()
+        .flatMapLatest { id ->
+            if (id == null) flowOf(null) else repository.runs.flow(id, SyncRunKind.PHOTO)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
 
     fun refreshBuckets(includeVideos: Boolean) {
         if (_state.value.loadingBuckets) return
@@ -79,9 +112,16 @@ class PhotoSyncViewModel(
         albumSubfolders: Boolean,
         schedule: String,
         resetEntries: Boolean = false,
+        allowOverlap: Boolean = false,
     ) {
         if (_state.value.saving) return
-        _state.value = _state.value.copy(saving = true, error = null, saved = false, queued = false)
+        _state.value = _state.value.copy(
+            saving = true,
+            error = null,
+            saved = false,
+            queued = false,
+            overlap = false,
+        )
         viewModelScope.launch {
             runCatching {
                 repository.save(
@@ -102,15 +142,37 @@ class PhotoSyncViewModel(
                         schedule = schedule,
                     ),
                     resetEntries = resetEntries,
+                    allowOverlap = allowOverlap,
                 )
             }.onSuccess {
                 _state.value = _state.value.copy(saving = false, saved = true)
             }.onFailure { error ->
-                _state.value = _state.value.copy(
-                    saving = false,
-                    error = error.message ?: application.getString(filehub.android.R.string.photo_sync_save_failed),
-                )
+                if (error is SyncTargetOverlapException) {
+                    _state.value = _state.value.copy(saving = false, overlap = true)
+                } else {
+                    _state.value = _state.value.copy(
+                        saving = false,
+                        error = error.message
+                            ?: application.getString(filehub.android.R.string.photo_sync_save_failed),
+                    )
+                }
             }
+        }
+    }
+
+    fun clearLogs() {
+        sessionRepository.state.value.active?.id?.let { id ->
+            viewModelScope.launch { repository.logs.clear(id, SyncRunKind.PHOTO) }
+        }
+    }
+
+    fun dismissOverlap() {
+        _state.value = _state.value.copy(overlap = false)
+    }
+
+    fun requestStop(cancel: Boolean) {
+        sessionRepository.state.value.active?.id?.let { id ->
+            viewModelScope.launch { repository.requestStop(id, cancel) }
         }
     }
 

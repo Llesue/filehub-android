@@ -8,22 +8,30 @@ import android.text.format.Formatter
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -31,10 +39,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,56 +71,135 @@ fun TransfersScreen(
 ) {
     val items by viewModel.items.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
+    var kindFilter by rememberSaveable { mutableStateOf("all") }
+    var statusFilter by rememberSaveable { mutableStateOf("all") }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+
+    val visible = items.filter { item ->
+        val kindOk = when (kindFilter) {
+            "upload" -> item.kind == TransferKind.UPLOAD
+            "download" -> item.kind == TransferKind.DOWNLOAD
+            else -> true
+        }
+        val statusOk = when (statusFilter) {
+            "active" -> item.status == TransferStatus.RUNNING ||
+                item.status == TransferStatus.QUEUED
+            "completed" -> item.status == TransferStatus.COMPLETED
+            "failed" -> item.status == TransferStatus.FAILED ||
+                item.status == TransferStatus.CANCELLED
+            else -> true
+        }
+        kindOk && statusOk
+    }
+    val selectedItem = items.firstOrNull { it.id == selectedId }
 
     DetailScaffold(
         title = stringResource(R.string.transfers_title),
         onBack = onBack,
+        compact = true,
         actions = {
             TextButton(onClick = { confirmClear = true }) {
                 Text(stringResource(R.string.transfers_clear))
             }
         },
     ) { padding ->
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-        if (items.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.transfers_empty),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 4.dp,
-                    bottom = 24.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(items, key = { it.id }) { item ->
-                    TransferCard(
-                        item = item,
-                        onCancel = { viewModel.cancel(item) },
-                        onRetry = { viewModel.retry(item) },
-                        onRemove = { viewModel.remove(item) },
-                        onOpen = {
-                            openTransfer(context, item)
-                        },
+            val wide = maxWidth >= 720.dp
+            when {
+                items.isEmpty() -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.transfers_empty),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                wide -> Column(Modifier.fillMaxSize()) {
+                    TransferSummary(items, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    TransferFilters(
+                        kind = kindFilter,
+                        status = statusFilter,
+                        onKind = { kindFilter = it },
+                        onStatus = { statusFilter = it },
+                    )
+                    Row(Modifier.weight(1f).fillMaxWidth()) {
+                        LazyColumn(
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = 4.dp,
+                                bottom = 24.dp,
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(visible, key = { it.id }) { item ->
+                                TransferTableRow(
+                                    item = item,
+                                    selected = item.id == selectedId,
+                                    onClick = { selectedId = item.id },
+                                    onCancel = { viewModel.cancel(item) },
+                                    onRetry = { viewModel.retry(item) },
+                                    onOpen = { openTransfer(context, item) },
+                                )
+                            }
+                        }
+                        VerticalDivider()
+                        if (selectedItem == null) {
+                            Box(
+                                modifier = Modifier.width(320.dp).fillMaxHeight(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.transfer_select_empty),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(24.dp),
+                                )
+                            }
+                        } else {
+                            TransferDetailPanel(
+                                item = selectedItem,
+                                modifier = Modifier.width(320.dp).fillMaxHeight(),
+                                onCancel = { viewModel.cancel(selectedItem) },
+                                onRetry = { viewModel.retry(selectedItem) },
+                                onRemove = {
+                                    viewModel.remove(selectedItem)
+                                    selectedId = null
+                                },
+                                onOpen = { openTransfer(context, selectedItem) },
+                            )
+                        }
+                    }
+                }
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 4.dp,
+                        bottom = 24.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(items, key = { it.id }) { item ->
+                        TransferCard(
+                            item = item,
+                            onCancel = { viewModel.cancel(item) },
+                            onRetry = { viewModel.retry(item) },
+                            onRemove = { viewModel.remove(item) },
+                            onOpen = {
+                                openTransfer(context, item)
+                            },
+                        )
+                    }
+                }
             }
-        }
         }
     }
 
@@ -135,6 +224,244 @@ fun TransfersScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun TransferSummary(items: List<TransferItem>, modifier: Modifier = Modifier) {
+    val active = items.count {
+        it.status == TransferStatus.RUNNING || it.status == TransferStatus.QUEUED
+    }
+    val completed = items.count { it.status == TransferStatus.COMPLETED }
+    val failed = items.count {
+        it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
+    }
+    Text(
+        text = stringResource(R.string.transfers_summary, active, completed, failed),
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun TransferFilters(
+    kind: String,
+    status: String,
+    onKind: (String) -> Unit,
+    onStatus: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        listOf("all", "upload", "download").forEach { value ->
+            FilterChip(
+                selected = kind == value,
+                onClick = { onKind(value) },
+                label = {
+                    Text(
+                        when (value) {
+                            "upload" -> stringResource(R.string.transfer_upload)
+                            "download" -> stringResource(R.string.transfer_download)
+                            else -> stringResource(R.string.transfers_all_kinds)
+                        },
+                    )
+                },
+            )
+        }
+        listOf("all", "active", "completed", "failed").forEach { value ->
+            FilterChip(
+                selected = status == value,
+                onClick = { onStatus(value) },
+                label = {
+                    Text(
+                        when (value) {
+                            "active" -> stringResource(R.string.transfers_filter_active)
+                            "completed" -> stringResource(R.string.transfers_filter_completed)
+                            "failed" -> stringResource(R.string.transfers_filter_failed)
+                            else -> stringResource(R.string.transfers_all_status)
+                        },
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TransferTableRow(
+    item: TransferItem,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onCancel: () -> Unit,
+    onRetry: () -> Unit,
+    onOpen: () -> Unit,
+) {
+    val context = LocalContext.current
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (item.kind == TransferKind.UPLOAD) "↑" else "↓",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.width(24.dp),
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    FileNameText(
+                        name = item.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = statusLabel(item.status) + " · " +
+                            Formatter.formatShortFileSize(context, item.size),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (item.status == TransferStatus.FAILED) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+                when (item.status) {
+                    TransferStatus.QUEUED, TransferStatus.RUNNING ->
+                        TextButton(onClick = onCancel) {
+                            Text(stringResource(R.string.transfer_cancel))
+                        }
+                    TransferStatus.FAILED, TransferStatus.CANCELLED ->
+                        TextButton(onClick = onRetry) {
+                            Text(stringResource(R.string.transfer_retry))
+                        }
+                    TransferStatus.COMPLETED -> if (item.kind == TransferKind.DOWNLOAD &&
+                        item.localFile != null
+                    ) {
+                        TextButton(onClick = onOpen) {
+                            Text(stringResource(R.string.transfer_open))
+                        }
+                    }
+                }
+            }
+            if (item.status == TransferStatus.RUNNING || item.status == TransferStatus.QUEUED) {
+                Spacer(Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { item.progress },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransferDetailPanel(
+    item: TransferItem,
+    modifier: Modifier = Modifier,
+    onCancel: () -> Unit,
+    onRetry: () -> Unit,
+    onRemove: () -> Unit,
+    onOpen: () -> Unit,
+) {
+    val context = LocalContext.current
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.transfer_detail_title),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = item.name,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TransferFact(
+                stringResource(R.string.transfer_direction),
+                if (item.kind == TransferKind.UPLOAD) {
+                    stringResource(R.string.transfer_upload)
+                } else {
+                    stringResource(R.string.transfer_download)
+                },
+            )
+            TransferFact(stringResource(R.string.transfer_status), statusLabel(item.status))
+            TransferFact(
+                stringResource(R.string.transfer_size),
+                Formatter.formatShortFileSize(context, item.size),
+            )
+            item.localFile?.takeIf { it.isNotBlank() }?.let {
+                TransferFact(stringResource(R.string.transfer_local_path), it)
+            }
+        }
+        if (item.status == TransferStatus.RUNNING || item.status == TransferStatus.QUEUED) {
+            LinearProgressIndicator(
+                progress = { item.progress },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item.error?.let { error ->
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (item.status) {
+                TransferStatus.QUEUED, TransferStatus.RUNNING ->
+                    TextButton(onClick = onCancel) {
+                        Text(stringResource(R.string.transfer_cancel))
+                    }
+                TransferStatus.FAILED, TransferStatus.CANCELLED ->
+                    TextButton(onClick = onRetry) {
+                        Text(stringResource(R.string.transfer_retry))
+                    }
+                TransferStatus.COMPLETED -> if (item.kind == TransferKind.DOWNLOAD &&
+                    item.localFile != null
+                ) {
+                    TextButton(onClick = onOpen) {
+                        Text(stringResource(R.string.transfer_open))
+                    }
+                }
+            }
+            TextButton(onClick = onRemove) {
+                Text(stringResource(R.string.common_remove))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransferFact(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(text = value, style = MaterialTheme.typography.bodySmall)
     }
 }
 

@@ -86,7 +86,7 @@ fun DirectoryPickerDialog(
                         )
                     }
                     DropdownMenu(expanded = rootMenu, onDismissRequest = { rootMenu = false }) {
-                        state.roots.forEach { root ->
+                        state.roots.filter { it.online != false }.forEach { root ->
                             CompactDropdownMenuItem(
                                 text = {
                                     Text(
