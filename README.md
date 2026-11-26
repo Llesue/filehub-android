@@ -6,8 +6,6 @@
 
 It is built for people who run one or more FileHub instances. Manage every server from one phone, keep photos and folders backed up automatically, and use the same app on a phone, tablet or car head unit.
 
-Latest release: [v0.1.7](https://github.com/Llesue/filehub-android/releases/tag/v0.1.7)
-
 - Kotlin + Jetpack Compose (Material 3), `minSdk 26`, `compileSdk 37.1`, `targetSdk 36`
 - OkHttp + kotlinx.serialization, Room, WorkManager, Media3, Coil
 
@@ -106,7 +104,7 @@ Signing certificate SHA-256:
 - [`docs/sync-spec.md`](docs/sync-spec.md) — photo and folder sync design
 - [`docs/api-notes.md`](docs/api-notes.md) — API notes and contract quirks
 - [`docs/app-icon.svg`](docs/app-icon.svg) — source logo
-- [`docs/release-notes/v0.1.7.md`](docs/release-notes/v0.1.7.md) — latest release notes
+- [GitHub Releases](https://github.com/Llesue/filehub-android/releases) — release notes and APKs
 - [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Licenses

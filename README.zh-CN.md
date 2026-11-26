@@ -6,8 +6,6 @@
 
 它主要面向同时运行一个或多个 FileHub 实例的用户：在一台手机上管理所有服务器，自动备份相册和文件夹，并在手机、平板和车机上使用同一套客户端。
 
-最新版本：[v0.1.7](https://github.com/Llesue/filehub-android/releases/tag/v0.1.7)
-
 - Kotlin + Jetpack Compose（Material 3），`minSdk 26`、`compileSdk 37.1`、`targetSdk 36`
 - OkHttp + kotlinx.serialization、Room、WorkManager、Media3、Coil
 
@@ -105,7 +103,7 @@ Release 构建读取仓库根目录的 `keystore.properties`（已 gitignore）�
 - [`docs/sync-spec.md`](docs/sync-spec.md) — 相册/目录同步设计
 - [`docs/api-notes.md`](docs/api-notes.md) — 接口与字段说明
 - [`docs/app-icon.svg`](docs/app-icon.svg) — 图标源文件
-- [`docs/release-notes/v0.1.7.md`](docs/release-notes/v0.1.7.md) — 最新发布说明
+- [GitHub Releases](https://github.com/Llesue/filehub-android/releases) — 发布说明和 APK
 - [`CHANGELOG.md`](CHANGELOG.md)
 
 ## 许可证
