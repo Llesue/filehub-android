@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 enum class ServerConnectionStatus { Connecting, Success, Failed }
 
@@ -52,6 +54,27 @@ internal fun orderedAddresses(addresses: List<String>, baseUrl: String): List<St
         .mapNotNull { raw -> runCatching { FileHubApi.normalizeBaseUrl(raw) }.getOrNull() }
         .distinct()
 
+internal data class WorkingAddressUpdate(
+    val profiles: List<ServerProfile>,
+    val changed: Boolean,
+)
+
+/**
+ * Updates a profile inside the persisted list. Returns changed=false when the
+ * profile is absent, so a background session that was started without loading
+ * the persisted profiles can never replace them with an empty list.
+ */
+internal fun applyWorkingAddress(
+    profiles: List<ServerProfile>,
+    profileId: String,
+    updated: ServerProfile,
+): WorkingAddressUpdate {
+    val index = profiles.indexOfFirst { it.id == profileId }
+    if (index < 0) return WorkingAddressUpdate(profiles, false)
+    val next = profiles.toMutableList().also { it[index] = updated }
+    return WorkingAddressUpdate(next, true)
+}
+
 class SessionRepository(
     private val context: Context,
     private val store: ProfileStore,
@@ -63,24 +86,39 @@ class SessionRepository(
     private val _connection = MutableStateFlow<ServerConnection?>(null)
     val connection: StateFlow<ServerConnection?> = _connection.asStateFlow()
 
+    private val loadMutex = Mutex()
+
+    @Volatile
+    private var loaded = false
+
     private val probeClient = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(6, TimeUnit.SECONDS)
         .build()
 
-    suspend fun load() {
-        val stored = store.read()
-        val active = stored.profiles.firstOrNull { it.id == stored.activeId }
-        _state.update {
-            it.copy(
-                loading = false,
-                profiles = stored.profiles,
-                active = active,
-            )
+    suspend fun load() = ensureLoaded()
+
+    /**
+     * Loads the persisted profiles exactly once. Background workers can start
+     * the process without AppViewModel, so every operation that reads or writes
+     * profiles must call this before touching [SessionState.profiles].
+     */
+    suspend fun ensureLoaded() {
+        if (loaded) return
+        loadMutex.withLock {
+            if (loaded) return
+            val stored = store.read()
+            val active = stored.profiles.firstOrNull { it.id == stored.activeId }
+            _state.update {
+                it.copy(
+                    loading = false,
+                    profiles = stored.profiles,
+                    active = active,
+                )
+            }
+            loaded = true
         }
-        // Root probing is owned by connect(), so a cold start can show the
-        // per-address connection progress without probing twice.
     }
 
     suspend fun login(
@@ -90,6 +128,7 @@ class SessionRepository(
         newPassword: String? = null,
     ): Result<ServerProfile> =
         runCatching {
+            ensureLoaded()
             val normalized = addresses
                 .map { FileHubApi.normalizeBaseUrl(it) }
                 .distinct()
@@ -164,6 +203,7 @@ class SessionRepository(
      * callers refresh roots afterwards.
      */
     suspend fun activate(profileId: String) {
+        ensureLoaded()
         val profile = _state.value.profiles.firstOrNull { it.id == profileId } ?: return
         if (_state.value.active?.id == profileId) return
         store.setActive(profileId)
@@ -178,6 +218,7 @@ class SessionRepository(
      * page visible and shows per-address progress instead of blocking Browse.
      */
     suspend fun connect(profileId: String): Result<Unit> = runCatching {
+        ensureLoaded()
         val profile = _state.value.profiles.firstOrNull { it.id == profileId }
             ?: error(context.getString(R.string.server_missing))
         val token = store.readToken(profile.id)?.let(vault::decrypt)
@@ -365,6 +406,7 @@ class SessionRepository(
     }
 
     suspend fun moveProfile(from: Int, to: Int) {
+        ensureLoaded()
         val current = _state.value.profiles
         if (from !in current.indices || to !in current.indices || from == to) return
         val profiles = current.toMutableList().apply {
@@ -388,6 +430,7 @@ class SessionRepository(
         displayName: String,
         addresses: List<String>,
     ): Result<ServerProfile> = runCatching {
+        ensureLoaded()
         val current = _state.value.profiles.firstOrNull { it.id == profileId }
             ?: error(context.getString(R.string.server_missing))
         val normalized = addresses
@@ -413,11 +456,13 @@ class SessionRepository(
     }
 
     suspend fun refreshRoots() {
+        ensureLoaded()
         val active = _state.value.active ?: return
         refreshRoots(active)
     }
 
     suspend fun refreshRoots(profile: ServerProfile) {
+        ensureLoaded()
         val token = store.readToken(profile.id)?.let(vault::decrypt)
         if (token == null) {
             _state.update {
@@ -526,6 +571,7 @@ class SessionRepository(
     }
 
     suspend fun logout(removeProfile: Boolean) {
+        ensureLoaded()
         val active = _state.value.active ?: return
         val token = store.readToken(active.id)?.let(vault::decrypt)
         if (token != null) {
@@ -538,7 +584,9 @@ class SessionRepository(
         } else {
             _state.value.profiles
         }
-        if (removeProfile) store.saveProfiles(profiles)
+        if (removeProfile) {
+            if (profiles.isEmpty()) store.clearProfiles() else store.saveProfiles(profiles)
+        }
         store.setActive(null)
         _state.update {
             it.copy(
@@ -552,6 +600,7 @@ class SessionRepository(
     }
 
     suspend fun removeProfile(profileId: String) {
+        ensureLoaded()
         val active = _state.value.active
         if (active?.id == profileId) {
             logout(removeProfile = true)
@@ -559,7 +608,7 @@ class SessionRepository(
         }
         store.removeToken(profileId)
         val profiles = _state.value.profiles.filterNot { it.id == profileId }
-        store.saveProfiles(profiles)
+        if (profiles.isEmpty()) store.clearProfiles() else store.saveProfiles(profiles)
         _state.update {
             it.copy(
                 profiles = profiles,
@@ -577,21 +626,22 @@ class SessionRepository(
      * persisted profile so background workers stop using a dead address.
      */
     suspend fun workingBaseUrl(profile: ServerProfile, token: String): String? {
+        ensureLoaded()
         for (address in normalizedAddresses(profile)) {
             val api = FileHubApi(address, token, probeClient)
             val reachable = runCatching { api.roots() }.isSuccess
             if (!reachable) continue
             if (address != profile.baseUrl) {
                 val updated = profile.copy(baseUrl = address)
-                val profiles = _state.value.profiles.map {
-                    if (it.id == profile.id) updated else it
-                }
-                store.saveProfiles(profiles)
-                _state.update {
-                    it.copy(
-                        profiles = profiles,
-                        active = if (it.active?.id == profile.id) updated else it.active,
-                    )
+                val update = applyWorkingAddress(_state.value.profiles, profile.id, updated)
+                if (update.changed) {
+                    store.saveProfiles(update.profiles)
+                    _state.update {
+                        it.copy(
+                            profiles = update.profiles,
+                            active = if (it.active?.id == profile.id) updated else it.active,
+                        )
+                    }
                 }
             }
             return address

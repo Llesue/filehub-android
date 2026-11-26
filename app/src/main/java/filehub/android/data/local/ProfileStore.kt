@@ -1,6 +1,7 @@
 package filehub.android.data.local
 
 import android.content.Context
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -16,7 +17,10 @@ data class StoredProfiles(
     val activeId: String? = null,
 )
 
-class ProfileStore(private val context: Context) {
+class ProfileStore internal constructor(
+    private val dataStore: DataStore<Preferences>,
+) {
+    constructor(context: Context) : this(context.fileHubDataStore)
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -24,33 +28,48 @@ class ProfileStore(private val context: Context) {
     }
 
     suspend fun read(): StoredProfiles {
-        val prefs = context.fileHubDataStore.data.first()
+        val prefs = dataStore.data.first()
         val decoded = prefs[PROFILES]?.let { raw ->
-            runCatching { json.decodeFromString<List<ServerProfile>>(raw) }.getOrDefault(emptyList())
+            runCatching { json.decodeFromString<List<ServerProfile>>(raw) }
+                .onFailure { error ->
+                    System.err.println("ProfileStore: failed to decode profiles: ${error.message}")
+                }
+                .getOrDefault(emptyList())
         }.orEmpty()
         return StoredProfiles(decoded, prefs[ACTIVE_PROFILE])
     }
 
     suspend fun saveProfiles(profiles: List<ServerProfile>) {
+        // Explicit removal uses clearProfiles(). Refusing an empty list here
+        // keeps a background session that was started without load() from
+        // overwriting the persisted server list.
+        if (profiles.isEmpty()) {
+            System.err.println("ProfileStore: refusing to persist an empty profile list")
+            return
+        }
         val raw = json.encodeToString(profiles)
-        context.fileHubDataStore.edit { it[PROFILES] = raw }
+        dataStore.edit { it[PROFILES] = raw }
+    }
+
+    suspend fun clearProfiles() {
+        dataStore.edit { it.remove(PROFILES) }
     }
 
     suspend fun setActive(id: String?) {
-        context.fileHubDataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             if (id == null) prefs.remove(ACTIVE_PROFILE) else prefs[ACTIVE_PROFILE] = id
         }
     }
 
     suspend fun saveToken(profileId: String, encryptedToken: String) {
-        context.fileHubDataStore.edit { it[tokenKey(profileId)] = encryptedToken }
+        dataStore.edit { it[tokenKey(profileId)] = encryptedToken }
     }
 
     suspend fun readToken(profileId: String): String? =
-        context.fileHubDataStore.data.first()[tokenKey(profileId)]
+        dataStore.data.first()[tokenKey(profileId)]
 
     suspend fun removeToken(profileId: String) {
-        context.fileHubDataStore.edit { it.remove(tokenKey(profileId)) }
+        dataStore.edit { it.remove(tokenKey(profileId)) }
     }
 
     private fun tokenKey(profileId: String): Preferences.Key<String> =
