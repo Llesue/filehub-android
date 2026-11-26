@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.9 - 2026-11-26
+
+### Fixed
+
+- Android 13+ photo and folder sync now request notification permission, show a permission card when it is missing, and keep the foreground sync notification visible so manual sync continues after the app UI is closed.
+- Foreground promotion failures are logged as a warning instead of being silently ignored.
+
 ## v0.1.8 - 2026-11-26
 
 ### Added
