@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.1.8 - 2026-11-26
+
+### Added
+
+- Tablet and landscape server headers show the active server's favicon, with a letter/folder fallback when branding is missing or fails to load.
+- Remote directories in the tablet sidebar and landscape roots column show the remote user's avatar, matching the phone root cards.
+- Sync logs record each uploaded, skipped, failed and conflicting file for both photo and folder sync, including the skip reason and per-file uploads/downloads. The log keeps the newest 200 entries.
+- Each sync run ends with a multi-line briefing: total files/bytes, duration, and uploaded/downloaded/skipped/conflict/failure counts; zero-count lines are omitted.
+- The status card uses the same skipped/uploaded/downloaded/failed/conflict counts, hides zero counts, and no longer shows the queued hint while syncing.
+- In landscape/wide layouts the status card is compact so the log pane gets more vertical space, and log entries can expand for the briefing.
+- Photo sync now keeps MediaStore's full relative path in the remote layout (`DCIM/Camera`, `Pictures/WeiXin`) instead of flattening to the leaf album name; the album picker shows full paths.
+- Existing photo entries migrate their remote path on the next scan. Move existing remote album folders to the new layout before syncing; the app updates entries and skips the moved files.
+- Photo name conflicts are labelled as conflicts instead of a plain rename.
+
+### Fixed
+
+- Background sync no longer overwrites the persisted server list with an empty in-memory list when WorkManager starts the process without the UI; profile operations now load the persisted list before touching it.
+- Removing the last server uses an explicit clear path, and the profile store refuses accidental empty writes.
+- Profile decoding failures are logged instead of being silently treated as an empty server list.
+
 ## v0.1.7 - 2026-11-26
 
 ### Fixed
