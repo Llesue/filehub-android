@@ -409,6 +409,8 @@ fun ColumnBrowserScreen(
                                     (right?.level as? ColumnLevel.Entries)?.root?.id,
                                 enabled = !selectionLocked,
                                 dimmed = false,
+                                baseUrl = session.active?.baseUrl,
+                                imageLoader = imageLoader,
                                 onClick = { openRoot(root) },
                             )
                         }
@@ -449,6 +451,8 @@ fun ColumnBrowserScreen(
                                         selected = false,
                                         enabled = !selectionLocked,
                                         dimmed = true,
+                                        baseUrl = session.active?.baseUrl,
+                                        imageLoader = imageLoader,
                                         onClick = {
                                             Toast.makeText(
                                                 context,
@@ -580,30 +584,12 @@ private fun LandscapeServerHeader(
             .padding(start = 12.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
-            modifier = Modifier.size(28.dp),
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.primary,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                if (profile?.iconUrl != null && imageLoader != null) {
-                    AsyncImage(
-                        model = profile.iconUrl,
-                        imageLoader = imageLoader,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_file_folder),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-        }
+        ServerIcon(
+            profile = profile,
+            size = 28.dp,
+            corner = 8.dp,
+            imageLoader = imageLoader,
+        )
         Spacer(Modifier.width(9.dp))
         Text(
             text = profile?.displayName ?: stringResource(R.string.servers_empty_title),
@@ -720,6 +706,8 @@ internal fun RootColumn(
     roots: List<FileRoot>,
     selectedRootId: Long?,
     enabled: Boolean,
+    baseUrl: String? = null,
+    imageLoader: ImageLoader? = null,
     onSelect: (FileRoot) -> Unit,
     onScrollDirection: ((Int) -> Unit)? = null,
 ) {
@@ -747,6 +735,8 @@ internal fun RootColumn(
                 selected = root.id == selectedRootId,
                 enabled = enabled,
                 dimmed = false,
+                baseUrl = baseUrl,
+                imageLoader = imageLoader,
                 onClick = { onSelect(root) },
             )
         }
@@ -784,6 +774,8 @@ internal fun RootColumn(
                         selected = false,
                         enabled = enabled,
                         dimmed = true,
+                        baseUrl = baseUrl,
+                        imageLoader = imageLoader,
                         onClick = {
                             Toast.makeText(context, offlineHint, Toast.LENGTH_SHORT).show()
                         },
@@ -805,29 +797,64 @@ private fun RootColumnRow(
     selected: Boolean,
     enabled: Boolean,
     dimmed: Boolean,
+    baseUrl: String?,
+    imageLoader: ImageLoader?,
     onClick: () -> Unit,
 ) {
+    val tag: (@Composable () -> Unit)? = when {
+        root.isRemote && root.online == false -> {
+            { RootTag(stringResource(R.string.browse_root_offline), error = true) }
+        }
+        root.isRemote -> {
+            { RootTag(stringResource(R.string.browse_root_remote)) }
+        }
+        root.readOnly -> {
+            { RootTag(stringResource(R.string.browse_root_read_only)) }
+        }
+        else -> null
+    }
     ColumnRow(
         selected = selected,
         enabled = enabled,
         dimmed = dimmed,
         onClick = onClick,
         leading = {
-            Icon(
-                painter = painterResource(R.drawable.ic_file_folder),
-                contentDescription = null,
-                tint = fileIconColor(FileKind.Folder),
-                modifier = Modifier.size(20.dp),
+            RootAvatar(
+                root = root,
+                avatarUrl = remoteAvatarUrl(baseUrl, root),
+                imageLoader = imageLoader,
+                size = 24.dp,
             )
         },
         title = root.alias,
-        subtitle = when {
-            root.isRemote && root.online == false -> stringResource(R.string.browse_root_offline)
-            root.isRemote -> stringResource(R.string.browse_root_remote)
-            root.readOnly -> stringResource(R.string.browse_root_read_only)
-            else -> null
-        },
+        subtitle = null,
+        titleSuffix = tag,
     )
+}
+
+@Composable
+private fun RootTag(text: String, error: Boolean = false) {
+    Surface(
+        color = if (error) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        shape = RoundedCornerShape(6.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (error) {
+                MaterialTheme.colorScheme.onErrorContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
 }
 
 @Composable
@@ -883,6 +910,7 @@ private fun ColumnRow(
     leading: @Composable () -> Unit,
     title: String,
     subtitle: String?,
+    titleSuffix: (@Composable () -> Unit)? = null,
     dimmed: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -906,18 +934,25 @@ private fun ColumnRow(
         }
         Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                titleSuffix?.let { suffix ->
+                    Spacer(Modifier.width(6.dp))
+                    suffix()
+                }
+            }
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     text = subtitle,

@@ -476,68 +476,6 @@ private fun RootCard(
 }
 
 @Composable
-private fun RootAvatar(root: FileRoot, avatarUrl: String?, imageLoader: ImageLoader?) {
-    if (!root.isRemote) {
-        Icon(
-            painter = painterResource(R.drawable.ic_file_folder),
-            contentDescription = null,
-            tint = fileIconColor(FileKind.Folder),
-            modifier = Modifier.size(36.dp),
-        )
-        return
-    }
-    val name = root.remoteOwnerName?.takeIf { it.isNotBlank() } ?: root.alias
-    if (avatarUrl != null && imageLoader != null) {
-        SubcomposeAsyncImage(
-            model = avatarUrl,
-            imageLoader = imageLoader,
-            contentDescription = null,
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape),
-            contentScale = ContentScale.Crop,
-            loading = { InitialAvatar(name) },
-            error = { InitialAvatar(name) },
-        )
-    } else {
-        InitialAvatar(name)
-    }
-}
-
-@Composable
-private fun InitialAvatar(name: String) {
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(avatarColor(name)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = name.trim().take(1).uppercase().ifEmpty { "?" },
-            color = Color.White,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-        )
-    }
-}
-
-private fun avatarColor(name: String): Color {
-    var hash = 0
-    for (char in name) {
-        hash = (hash * 31 + char.code) % 360
-    }
-    return Color.hsl(hash.toFloat(), 0.45f, 0.52f)
-}
-
-private fun remoteAvatarUrl(baseUrl: String?, root: FileRoot): String? {
-    if (!root.isRemote || baseUrl.isNullOrBlank()) return null
-    if (root.remoteAvatarVersion <= 0) return null
-    val mountId = root.mountId ?: return null
-    return "${baseUrl.trimEnd('/')}/api/v1/remote/mounts/$mountId/avatar?v=${root.remoteAvatarVersion}"
-}
-
-@Composable
 private fun Badge(text: String) {
     StatusBadge(text = text, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

@@ -125,6 +125,7 @@ fun TabletBrowseScreen(
                     usage = usage,
                     serverVersion = serverVersion,
                     clientUpdate = clientUpdate,
+                    imageLoader = imageLoader,
                     onOpenRoot = { root ->
                         session.active?.let { profile -> filesViewModel.open(profile, root, "") }
                     },
@@ -215,20 +216,12 @@ private fun TabletTopBar(
                     .padding(start = 16.dp, end = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_file_folder),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
+                ServerIcon(
+                    profile = active,
+                    size = 28.dp,
+                    corner = 8.dp,
+                    imageLoader = imageLoader,
+                )
                 Spacer(Modifier.width(9.dp))
                 Text(
                     text = active?.displayName ?: stringResource(R.string.servers_empty_title),
@@ -426,6 +419,7 @@ private fun TabletSidebar(
     usage: UsageUiState,
     serverVersion: VersionDto?,
     clientUpdate: ClientUpdateUiState?,
+    imageLoader: coil3.ImageLoader?,
     onOpenRoot: (FileRoot) -> Unit,
     onShares: () -> Unit,
     width: Dp,
@@ -442,6 +436,8 @@ private fun TabletSidebar(
                     roots = session.roots,
                     selectedRootId = selectedRootId,
                     enabled = true,
+                    baseUrl = session.active?.baseUrl,
+                    imageLoader = imageLoader,
                     onSelect = onOpenRoot,
                 )
             }
