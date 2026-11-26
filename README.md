@@ -2,45 +2,82 @@
 
 [简体中文](README.zh-CN.md) | English
 
-Native Android client for [FileHub](https://github.com/Llesue/filehub).
+[FileHub](https://github.com/Llesue/filehub) is a self-hosted file manager: you run the server on your own NAS or Linux host and access your files from the web or a native client. This is the native Android client.
 
-Status: **v0.1.1 in development**. Latest published release: [v0.1.0](https://github.com/Llesue/filehub-android/releases/tag/v0.1.0).
+It is built for people who run one or more FileHub instances. Manage every server from one phone, keep photos and folders backed up automatically, and use the same app on a phone, tablet or car head unit.
+
+Latest release: [v0.1.7](https://github.com/Llesue/filehub-android/releases/tag/v0.1.7)
 
 - Kotlin + Jetpack Compose (Material 3), `minSdk 26`, `compileSdk 37.1`, `targetSdk 36`
-- OkHttp + kotlinx.serialization, Room, WorkManager, Media3 (background audio session), Coil
-- Builds run on a remote Linux host; local builds require a JDK and Android SDK
+- OkHttp + kotlinx.serialization, Room, WorkManager, Media3, Coil
+
+## Focus
+
+- **Multiple FileHub instances.** Add several servers, switch between them without logging out, and keep a separate device token, roots, sync settings and schedule for each one.
+- **Photo sync that behaves like a backup.** Pick albums, include videos, preserve capture time and GPS EXIF, hash content, verify uploads, skip unchanged files, and resolve conflicts without overwriting either side.
+- **Folder sync for any SAF folder.** Upload, download or sync both ways with a three-way baseline, per-file conflict handling and optional delete propagation.
+- **One app across devices.** The same build adapts to phone portrait, phone landscape, tablet and car head units, with layouts that use the available width instead of stretching a phone UI.
 
 ## Features
 
-- Multiple FileHub instances, password login → per-device API token (Android Keystore)
-- Multi-address failover; addresses are tried in the configured order (put LAN first)
-- Roots + remote mounts, compact file rows, folder sizes, cursor paging, thumbnails
-- File operations: create, rename, delete with confirmation code and countdown, copy/move, ZIP, with async job progress and cancel
-- Search across all roots / current root, with index status and one-tap indexing
-- Image preview with swipe-to-page, anchored pinch zoom, single-tap chrome toggle, original/preview switch, EXIF and download
-- Media3 video/audio preview; title and landscape button follow player controls
+### Servers and access
+
+- Multiple FileHub profiles with password login and a per-device API token stored in Android Keystore
+- Multiple addresses per server, tried strictly in the configured order, so a working LAN address is never skipped in favour of a public one
+- Prefilled re-authentication when a device token expires; the profile ID is preserved, so sync jobs and caches stay attached
+- Server version badges and per-profile "sign in again" state
+- Long-press drag to reorder server cards on phone, landscape and tablet
+
+### Files and previews
+
+- Local roots, remote mounts, folder sizes, cursor paging and thumbnails
+- Create, rename, delete with confirmation code and countdown, copy/move, ZIP packing and extraction, with background job progress and cancellation
+- Search across all roots or the current root, with index status and one-tap indexing
+- Image preview with paging, anchored pinch zoom, EXIF and original/preview switching
+- Video and audio playback through Media3, with a background audio session
+- PDF viewer with fit-page zoom and a page rail
 - Markdown preview with tables, task lists, strikethrough and links
-- Resumable background uploads/downloads, notifications, transfer center
-- Photo sync: album selection, videos, mtime, separate photo/video Wi-Fi policies
-- Folder sync: SAF folder, upload/download/two-way, three-way base state, conflicts kept without overwrite
-- Per-server sync configs; switching the active server does not stop other servers' schedules
-- Remote folder picker for sync target paths; typed paths still supported
-- Shares with password/expiry/read-only, QR, public share viewer
-- Theme and language override (`system` / 简体中文 / English), edge-to-edge UI
-- Adaptive launcher icon generated from [`docs/app-icon.svg`](docs/app-icon.svg)
+- Text preview and editor with syntax highlighting for JSON, XML, HTML, CSS, SQL and more
 
-## Background behavior
+### Sync
 
-Sync uses WorkManager periodic work (minimum 15 minutes, daily by default) with Wi-Fi/charging constraints.
-It does not require the app UI to be open, but Android/OEM restrictions still apply:
+- Photo sync: album selection, optional videos, capture-time preservation, separate photo/video Wi-Fi rules and charging-only mode
+- Incremental photo scans with MediaStore watermarks; unchanged files are skipped without per-file hash requests
+- SHA-256 content hashing, upload verification, same-name comparison and same-size cross-name dedupe
+- GPS EXIF preservation through `ACCESS_MEDIA_LOCATION` and `MediaStore.setRequireOriginal`
+- Folder sync: SAF folder selection, upload/download/two-way modes, three-way base state, conflicts kept as separate entries, and delete sync guarded by explicit confirmation
+- Per-file conflict page with keep-phone / keep-server resolution followed by an automatic re-sync
+- Sync run state, live step indicator, bounded log, notifications with stop/cancel/continue/retry and a privacy-safe lock-screen version
+- Schedule from 15 minutes to weekly, or manual only; each server has its own schedule
+- Periodic jobs rebuild themselves on app startup after an update or force-stop, and the settings screen shows the real schedule state and next run time
 
-- Force-stopping the app cancels background work until it is opened again.
-- Xiaomi/HyperOS may defer or block work; set battery usage to unrestricted, allow autostart and notifications.
-- Doze and app standby can delay periodic runs; this is best-effort, not an exact scheduler.
-- Manual sync respects the same Wi-Fi/charging settings as the configured schedule.
-- Opening the app after a missed interval enqueues a one-time catch-up run.
+### Sharing
 
-If the device token expires or the configured target location disappears, the affected sync is disabled until it is reconfigured.
+- Password, expiry and read-only controls
+- QR cards and stable links
+- Public share viewer inside the app
+- Stop and re-enable sharing without deleting the record; expired shares can be re-enabled with a new one-day window
+- Relative expiry labels and dimmed actions for stopped or expired shares
+
+### Devices and UI
+
+- Phone portrait: compact single-column cards and a bottom tab bar
+- Phone landscape: permanent left column for servers, roots, shares, quota and versions; content on the right
+- Tablet and car: wide two-pane shell with a root sidebar and an adaptive file browser
+- One server-card and server-picker layout across all modes
+- Adaptive file, root and share grids; centred, width-limited forms on wide screens
+- Theme override (system / light / dark), language override (system / 简体中文 / English), edge-to-edge layout and an adaptive launcher icon
+
+## Background behaviour
+
+Sync uses WorkManager periodic work with a minimum interval of 15 minutes. Jobs run without the app UI being open, subject to Android and OEM restrictions:
+
+- Periodic jobs are checked and rebuilt when the app starts, including after an update or force-stop.
+- The sync settings screen shows whether the job is scheduled, the next run time, and a rebuild action when it is missing.
+- Xiaomi/HyperOS may still defer or block background work; set battery usage to unrestricted and allow autostart and notifications.
+- Doze and app standby can delay a run; schedules are best-effort, not exact alarms.
+- Manual sync respects the same Wi-Fi and charging settings as the configured schedule.
+- A missing device token or target location disables the affected sync until it is reconfigured.
 
 ## Build
 
@@ -66,11 +103,10 @@ Signing certificate SHA-256:
 
 - [`PLAN.md`](PLAN.md) — scope, architecture, milestones
 - [`docs/ui-spec.md`](docs/ui-spec.md) — UI proposal
-- [`docs/sync-spec.md`](docs/sync-spec.md) — photo/directory sync design
-- [`docs/app-icon.svg`](docs/app-icon.svg) — source logo
+- [`docs/sync-spec.md`](docs/sync-spec.md) — photo and folder sync design
 - [`docs/api-notes.md`](docs/api-notes.md) — API notes and contract quirks
-- [`docs/release-notes/v0.1.0.md`](docs/release-notes/v0.1.0.md) — 0.1.0 release notes
-- [`docs/release-notes/v0.1.1.md`](docs/release-notes/v0.1.1.md) — 0.1.1 release notes
+- [`docs/app-icon.svg`](docs/app-icon.svg) — source logo
+- [`docs/release-notes/v0.1.7.md`](docs/release-notes/v0.1.7.md) — latest release notes
 - [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Licenses
