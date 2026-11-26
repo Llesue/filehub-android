@@ -28,22 +28,25 @@ class RemoteDirEnsurerTest {
 
     @Test
     fun existingDirectoryMakesNoMkdirRequest() = runBlocking {
+        server.enqueue(json("""{"name":"Phone","is_dir":true}"""))
+        server.enqueue(json("""{"name":"Photos","is_dir":true}"""))
         server.enqueue(json("""{"name":"微信","is_dir":true}"""))
 
         ensurer().ensure("Phone/Photos/微信")
 
-        assertEquals(1, server.requestCount)
-        val request = server.takeRequest()
-        assertTrue(request.path!!.startsWith("/api/v1/properties"))
+        assertEquals(3, server.requestCount)
+        repeat(3) {
+            assertTrue(server.takeRequest().path!!.startsWith("/api/v1/properties"))
+        }
     }
 
     @Test
     fun createsMissingSegmentsAndCachesThePath() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(404))   // full path
         server.enqueue(MockResponse().setResponseCode(404))   // Phone
         server.enqueue(json("""{"path":"ok"}"""))             // mkdir Phone
         server.enqueue(MockResponse().setResponseCode(404))   // Phone/Photos
         server.enqueue(json("""{"path":"ok"}"""))             // mkdir Phone/Photos
+        server.enqueue(MockResponse().setResponseCode(404))   // Phone/Photos/微信
         server.enqueue(json("""{"path":"ok"}"""))             // mkdir final
 
         val ensurer = ensurer()
@@ -56,11 +59,11 @@ class RemoteDirEnsurerTest {
 
     @Test
     fun treatsMkdirConflictAsExistingDirectory() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(404))   // full path
         server.enqueue(MockResponse().setResponseCode(404))   // Phone
         server.enqueue(MockResponse().setResponseCode(409))   // Phone exists
         server.enqueue(MockResponse().setResponseCode(404))   // Phone/Photos
         server.enqueue(MockResponse().setResponseCode(409))   // Phone/Photos exists
+        server.enqueue(MockResponse().setResponseCode(404))   // Phone/Photos/微信
         server.enqueue(MockResponse().setResponseCode(409))   // final exists
 
         val ensurer = ensurer()
@@ -73,7 +76,6 @@ class RemoteDirEnsurerTest {
 
     @Test
     fun permissionErrorsAreNotSwallowed() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(404))   // full path
         server.enqueue(MockResponse().setResponseCode(404))   // Phone
         server.enqueue(MockResponse().setResponseCode(403))   // mkdir denied
 
@@ -85,9 +87,9 @@ class RemoteDirEnsurerTest {
 
     @Test
     fun skipsParentsThatAlreadyExist() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(404))
         server.enqueue(json("""{"name":"Phone","is_dir":true}"""))
         server.enqueue(json("""{"name":"Photos","is_dir":true}"""))
+        server.enqueue(MockResponse().setResponseCode(404))
         server.enqueue(json("""{"path":"ok"}"""))
 
         ensurer().ensure("Phone/Photos/微信")

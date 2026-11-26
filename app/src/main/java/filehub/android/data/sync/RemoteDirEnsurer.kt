@@ -18,11 +18,9 @@ internal class RemoteDirEnsurer(
         val path = directory.trim('/').replace(Regex("/+"), "/")
         if (path.isEmpty() || path in known) return
 
-        if (exists(path)) {
-            known += path
-            return
-        }
-
+        // Always walk from the storage root. Probing the complete deep path
+        // first fails on servers that return 500 ("parent directory does not
+        // exist") instead of 404 when an intermediate directory is missing.
         var parent = ""
         for (segment in path.split('/')) {
             val current = if (parent.isEmpty()) segment else "$parent/$segment"
@@ -30,9 +28,7 @@ internal class RemoteDirEnsurer(
                 parent = current
                 continue
             }
-            if (current == path) {
-                mkdir(parent, segment)
-            } else if (!exists(current)) {
+            if (!exists(current)) {
                 mkdir(parent, segment)
             }
             known += current
@@ -44,7 +40,13 @@ internal class RemoteDirEnsurer(
         try {
             api.properties(rootId, path).isDir
         } catch (error: FileHubApiException) {
-            if (error.statusCode == 404) false else throw error
+            when {
+                error.statusCode == 404 -> false
+                error.statusCode == 500 &&
+                    error.message.contains("parent directory does not exist", ignoreCase = true) ->
+                    false
+                else -> throw error
+            }
         }
 
     private suspend fun mkdir(parent: String, name: String) {
@@ -52,7 +54,10 @@ internal class RemoteDirEnsurer(
             api.mkdir(rootId, parent, name)
         } catch (error: FileHubApiException) {
             // FileHub >= 0.2.2 reports an existing directory as 409; the race is harmless.
-            if (error.statusCode != 409) throw error
+            val existing = error.statusCode == 409 ||
+                (error.statusCode == 500 &&
+                    error.message.contains("already exists", ignoreCase = true))
+            if (!existing) throw error
         }
     }
 }
