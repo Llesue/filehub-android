@@ -11,7 +11,11 @@ import filehub.android.core.model.FileRoot
 import filehub.android.core.model.ServerProfile
 import filehub.android.data.sync.MediaBucket
 import filehub.android.data.sync.MediaScanner
+import androidx.work.WorkManager
 import filehub.android.data.sync.PhotoSyncConfigEntity
+import filehub.android.data.sync.PhotoSyncScheduler
+import filehub.android.data.sync.ScheduleStatus
+import filehub.android.data.sync.toScheduleStatus
 import filehub.android.data.SessionRepository
 import filehub.android.data.sync.PhotoSyncRepository
 import filehub.android.data.sync.SyncLogEntity
@@ -56,6 +60,26 @@ class PhotoSyncViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = null,
+        )
+
+    val scheduleStatus: StateFlow<ScheduleStatus> = sessionRepository.state
+        .map { it.active?.id }
+        .distinctUntilChanged()
+        .flatMapLatest { id ->
+            if (id == null) {
+                flowOf(ScheduleStatus())
+            } else {
+                WorkManager.getInstance(application)
+                    .getWorkInfosForUniqueWorkFlow(
+                        PhotoSyncScheduler.periodicWorkName(id),
+                    )
+                    .map { it.toScheduleStatus() }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ScheduleStatus(loading = true),
         )
 
     private val _state = MutableStateFlow(PhotoSyncUiState())
@@ -201,6 +225,12 @@ class PhotoSyncViewModel(
     fun setEnabled(enabled: Boolean) {
         sessionRepository.state.value.active?.id?.let { id ->
             viewModelScope.launch { repository.setEnabled(id, enabled) }
+        }
+    }
+
+    fun rebuildSchedule() {
+        sessionRepository.state.value.active?.id?.let { id ->
+            viewModelScope.launch { repository.reconcileSchedule(id) }
         }
     }
 

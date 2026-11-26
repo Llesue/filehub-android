@@ -196,6 +196,9 @@ interface FolderSyncDao {
     @Query("SELECT * FROM folder_sync_config WHERE profileId = :profileId")
     suspend fun config(profileId: String): FolderSyncConfigEntity?
 
+    @Query("SELECT * FROM folder_sync_config")
+    suspend fun configs(): List<FolderSyncConfigEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveConfig(config: FolderSyncConfigEntity)
 
@@ -289,6 +292,9 @@ interface PhotoSyncDao {
 
     @Query("SELECT * FROM photo_sync_config WHERE profileId = :profileId")
     suspend fun config(profileId: String): PhotoSyncConfigEntity?
+
+    @Query("SELECT * FROM photo_sync_config")
+    suspend fun configs(): List<PhotoSyncConfigEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveConfig(config: PhotoSyncConfigEntity)

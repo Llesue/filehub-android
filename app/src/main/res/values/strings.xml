@@ -688,6 +688,13 @@
     <string name="sync_action_cancel">Cancel run</string>
     <string name="sync_action_continue">Continue</string>
     <string name="sync_action_retry">Retry failed</string>
+    <string name="sync_schedule_manual">Manual only</string>
+    <string name="sync_schedule_scheduled">Scheduled · next at %1$s</string>
+    <string name="sync_schedule_scheduled_short">Scheduled</string>
+    <string name="sync_schedule_missing">Scheduled job is missing</string>
+    <string name="sync_schedule_cancelled">Scheduled job was cancelled</string>
+    <string name="sync_schedule_failed">Scheduled job failed</string>
+    <string name="sync_schedule_rebuild">Rebuild</string>
     <string name="sync_action_sync_now">Sync now</string>
     <string name="sync_action_daily">Daily sync</string>
     <string name="sync_action_full">Full sync</string>

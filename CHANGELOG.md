@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.7 - 2026-11-26
+
+### Fixed
+
+- Photo and folder sync rebuild their periodic WorkManager job on app startup when the job was lost or cancelled by an update, force-stop or system cleanup.
+- The sync settings screen shows the real WorkManager state, the next scheduled time, and a rebuild action instead of only showing the saved configuration.
+- Manual frequency no longer schedules a daily periodic job, and manual runs are not treated as overdue scheduled runs.
+- Saving only the schedule no longer resets the incremental-scan watermarks because album IDs are compared as sets and stored in sorted order.
+
 ## v0.1.6 - 2026-11-26
 
 ### Added

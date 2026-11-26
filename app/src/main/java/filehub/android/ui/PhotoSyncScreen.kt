@@ -91,6 +91,7 @@ fun PhotoSyncScreen(
     var remoteHint by remember { mutableStateOf(false) }
     var confirmFullSync by remember { mutableStateOf(false) }
 
+    val scheduleStatus by viewModel.scheduleStatus.collectAsStateWithLifecycle()
     val permissions = buildList {
         if (Build.VERSION.SDK_INT >= 33) {
             add(Manifest.permission.READ_MEDIA_IMAGES)
@@ -320,6 +321,13 @@ fun PhotoSyncScreen(
                                 )
                             }
                         }
+
+                        SyncScheduleStatusRow(
+                            enabled = masterEnabled,
+                            manual = (config?.schedule ?: schedule) == "manual",
+                            status = scheduleStatus,
+                            onRebuild = viewModel::rebuildSchedule,
+                        )
 
                         if (!hasPermission) {
                             Surface(

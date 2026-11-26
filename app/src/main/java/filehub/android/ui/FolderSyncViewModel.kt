@@ -10,7 +10,11 @@ import filehub.android.FileHubApplication
 import filehub.android.R
 import filehub.android.core.model.FileRoot
 import filehub.android.core.model.ServerProfile
+import androidx.work.WorkManager
 import filehub.android.data.sync.FolderSyncConfigEntity
+import filehub.android.data.sync.FolderSyncScheduler
+import filehub.android.data.sync.ScheduleStatus
+import filehub.android.data.sync.toScheduleStatus
 import filehub.android.data.sync.FolderSyncEntryEntity
 import filehub.android.data.SessionRepository
 import filehub.android.data.sync.FolderSyncRepository
@@ -54,6 +58,26 @@ class FolderSyncViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = null,
+        )
+
+    val scheduleStatus: StateFlow<ScheduleStatus> = sessionRepository.state
+        .map { it.active?.id }
+        .distinctUntilChanged()
+        .flatMapLatest { id ->
+            if (id == null) {
+                flowOf(ScheduleStatus())
+            } else {
+                WorkManager.getInstance(application)
+                    .getWorkInfosForUniqueWorkFlow(
+                        FolderSyncScheduler.periodicWorkName(id),
+                    )
+                    .map { it.toScheduleStatus() }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ScheduleStatus(loading = true),
         )
 
     private val _state = MutableStateFlow(FolderSyncUiState())
@@ -221,6 +245,12 @@ class FolderSyncViewModel(
                 repository.syncNow(id, fullScan = true)
                 _state.update { it.copy(queued = true) }
             }
+        }
+    }
+
+    fun rebuildSchedule() {
+        sessionRepository.state.value.active?.id?.let { id ->
+            viewModelScope.launch { repository.reconcileSchedule(id) }
         }
     }
 

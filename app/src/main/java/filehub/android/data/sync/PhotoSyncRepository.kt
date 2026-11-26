@@ -45,7 +45,8 @@ class PhotoSyncRepository(
                 previous.remotePath.trim('/') != config.remotePath.trim('/') ||
                 previous.albumSubfolders != config.albumSubfolders
             )
-        val albumsChanged = previous != null && previous.albumsJson != config.albumsJson
+        val albumsChanged = previous != null &&
+            decodeAlbums(previous.albumsJson) != decodeAlbums(config.albumsJson)
         val stored = if (previous == null || targetChanged || albumsChanged) {
             config.copy(
                 lastScanAt = 0,
@@ -74,6 +75,25 @@ class PhotoSyncRepository(
     }
 
     suspend fun updateConfig(config: PhotoSyncConfigEntity) = dao.saveConfig(config)
+
+    suspend fun reconcileSchedules() {
+        dao.configs().forEach { config ->
+            if (config.enabled) {
+                PhotoSyncScheduler.ensurePeriodic(context, config)
+            } else {
+                PhotoSyncScheduler.cancelPeriodic(context, config.profileId)
+            }
+        }
+    }
+
+    suspend fun reconcileSchedule(profileId: String) {
+        val config = dao.config(profileId) ?: return
+        if (config.enabled) {
+            PhotoSyncScheduler.ensurePeriodic(context, config)
+        } else {
+            PhotoSyncScheduler.cancelPeriodic(context, profileId)
+        }
+    }
 
     suspend fun updateScanState(
         profileId: String,
@@ -187,12 +207,15 @@ class PhotoSyncRepository(
     }
 
     fun selectedAlbums(config: PhotoSyncConfigEntity): Set<Long>? =
-        config.albumsJson?.let { raw ->
-            runCatching { Json.decodeFromString<List<Long>>(raw).toSet() }.getOrNull()
-        }
+        decodeAlbums(config.albumsJson)
 
     fun encodeAlbums(albums: Set<Long>?): String? =
-        albums?.let { Json.encodeToString(it.toList()) }
+        albums?.let { Json.encodeToString(it.sorted()) }
+
+    private fun decodeAlbums(raw: String?): Set<Long>? =
+        raw?.let { value ->
+            runCatching { Json.decodeFromString<List<Long>>(value).toSet() }.getOrNull()
+        }
 }
 
 object PhotoSyncScheduler {
@@ -202,22 +225,45 @@ object PhotoSyncScheduler {
     private fun wifiCatchUpName(profileId: String) = "photo-sync-wifi-$profileId"
 
     fun schedulePeriodic(context: Context, config: PhotoSyncConfigEntity) {
-        val interval = when (config.schedule) {
-            "15m" -> 15L
-            "hourly" -> 60L
-            "weekly" -> 7L * 24 * 60
-            else -> 24L * 60
+        val interval = scheduleIntervalMinutes(config.schedule)
+        if (interval == null || !config.enabled) {
+            cancelPeriodic(context, config.profileId)
+            return
         }
-        val request = PeriodicWorkRequestBuilder<PhotoSyncWorker>(interval, TimeUnit.MINUTES)
-            .setConstraints(constraints(config))
-            .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "periodic"))
-            .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            periodicName(config.profileId),
+            periodicWorkName(config.profileId),
             ExistingPeriodicWorkPolicy.UPDATE,
-            request,
+            periodicRequest(context, config, interval),
         )
     }
+
+    /** Startup reconciliation: update an existing schedule or rebuild it if missing. */
+    fun ensurePeriodic(context: Context, config: PhotoSyncConfigEntity) {
+        val interval = scheduleIntervalMinutes(config.schedule)
+        if (interval == null || !config.enabled) {
+            cancelPeriodic(context, config.profileId)
+            return
+        }
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            periodicWorkName(config.profileId),
+            ExistingPeriodicWorkPolicy.UPDATE,
+            periodicRequest(context, config, interval),
+        )
+    }
+
+    private fun periodicRequest(
+        context: Context,
+        config: PhotoSyncConfigEntity,
+        intervalMinutes: Long,
+    ) = PeriodicWorkRequestBuilder<PhotoSyncWorker>(
+        intervalMinutes,
+        TimeUnit.MINUTES,
+    )
+        .setConstraints(constraints(config))
+        .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "periodic"))
+        .build()
+
+    fun periodicWorkName(profileId: String): String = periodicName(profileId)
 
     fun enqueueNow(
         context: Context,

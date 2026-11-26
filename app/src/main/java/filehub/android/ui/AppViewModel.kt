@@ -29,6 +29,7 @@ import filehub.android.data.local.SettingsStore
 import filehub.android.data.media.ThumbnailLoaderFactory
 import filehub.android.data.sync.FolderSyncRepository
 import filehub.android.data.sync.PhotoSyncRepository
+import filehub.android.data.sync.isScheduleOverdue
 import filehub.android.data.api.FileHubApiException
 import filehub.android.data.api.PasswordChangeRequiredException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -391,30 +392,22 @@ class AppViewModel(
     }
 
     private suspend fun catchUpSyncs() {
+        photoSyncRepository.reconcileSchedules()
+        folderSyncRepository.reconcileSchedules()
         val profile = session.value.active ?: return
         val now = System.currentTimeMillis() / 1000
         photoSyncRepository.config(profile.id)?.let { config ->
-            if (config.enabled && isOverdue(config.lastRunAt, config.schedule, now)) {
+            if (config.enabled && isScheduleOverdue(config.lastRunAt, config.schedule, now)) {
                 photoSyncRepository.catchUp(profile.id)
             }
         }
         folderSyncRepository.config(profile.id)?.let { config ->
-            if (config.enabled && isOverdue(config.lastRunAt, config.schedule, now)) {
+            if (config.enabled && isScheduleOverdue(config.lastRunAt, config.schedule, now)) {
                 folderSyncRepository.catchUp(profile.id)
             }
         }
     }
 
-    private fun isOverdue(lastRunAt: Long?, schedule: String, now: Long): Boolean {
-        if (lastRunAt == null) return false
-        val interval = when (schedule) {
-            "15m" -> 15 * 60L
-            "hourly" -> 60 * 60L
-            "weekly" -> 7 * 24 * 60 * 60L
-            else -> 24 * 60 * 60L
-        }
-        return now - lastRunAt > interval
-    }
 
     fun updateProfile(profileId: String, displayName: String, addresses: List<String>) {
         viewModelScope.launch { repository.updateProfile(profileId, displayName, addresses) }

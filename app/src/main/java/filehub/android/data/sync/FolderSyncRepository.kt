@@ -67,6 +67,25 @@ class FolderSyncRepository(
 
     suspend fun updateConfig(config: FolderSyncConfigEntity) = dao.saveConfig(config)
 
+    suspend fun reconcileSchedules() {
+        dao.configs().forEach { config ->
+            if (config.enabled) {
+                FolderSyncScheduler.ensurePeriodic(context, config)
+            } else {
+                FolderSyncScheduler.cancelPeriodic(context, config.profileId)
+            }
+        }
+    }
+
+    suspend fun reconcileSchedule(profileId: String) {
+        val config = dao.config(profileId) ?: return
+        if (config.enabled) {
+            FolderSyncScheduler.ensurePeriodic(context, config)
+        } else {
+            FolderSyncScheduler.cancelPeriodic(context, profileId)
+        }
+    }
+
     suspend fun updateOutcome(
         profileId: String,
         lastRunAt: Long?,
@@ -234,22 +253,45 @@ object FolderSyncScheduler {
     private fun catchUpName(profileId: String) = "folder-sync-catchup-$profileId"
 
     fun schedulePeriodic(context: Context, config: FolderSyncConfigEntity) {
-        val interval = when (config.schedule) {
-            "15m" -> 15L
-            "hourly" -> 60L
-            "weekly" -> 7L * 24 * 60
-            else -> 24L * 60
+        val interval = scheduleIntervalMinutes(config.schedule)
+        if (interval == null || !config.enabled) {
+            cancelPeriodic(context, config.profileId)
+            return
         }
-        val request = PeriodicWorkRequestBuilder<FolderSyncWorker>(interval, TimeUnit.MINUTES)
-            .setConstraints(constraints(config))
-            .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "periodic"))
-            .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            periodicName(config.profileId),
+            periodicWorkName(config.profileId),
             ExistingPeriodicWorkPolicy.UPDATE,
-            request,
+            periodicRequest(context, config, interval),
         )
     }
+
+    /** Startup reconciliation: update an existing schedule or rebuild it if missing. */
+    fun ensurePeriodic(context: Context, config: FolderSyncConfigEntity) {
+        val interval = scheduleIntervalMinutes(config.schedule)
+        if (interval == null || !config.enabled) {
+            cancelPeriodic(context, config.profileId)
+            return
+        }
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            periodicWorkName(config.profileId),
+            ExistingPeriodicWorkPolicy.UPDATE,
+            periodicRequest(context, config, interval),
+        )
+    }
+
+    private fun periodicRequest(
+        context: Context,
+        config: FolderSyncConfigEntity,
+        intervalMinutes: Long,
+    ) = PeriodicWorkRequestBuilder<FolderSyncWorker>(
+        intervalMinutes,
+        TimeUnit.MINUTES,
+    )
+        .setConstraints(constraints(config))
+        .setInputData(workDataOf("profileId" to config.profileId, "trigger" to "periodic"))
+        .build()
+
+    fun periodicWorkName(profileId: String): String = periodicName(profileId)
 
     fun enqueueNow(
         context: Context,

@@ -64,6 +64,7 @@ fun FolderSyncScreen(
     onBack: () -> Unit,
     onOpenConflicts: () -> Unit,
 ) {
+    val scheduleStatus by viewModel.scheduleStatus.collectAsStateWithLifecycle()
     val folderPickerState by remoteFolderPicker.state.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -346,6 +347,13 @@ fun FolderSyncScreen(
                                 )
                             }
                         }
+
+                        SyncScheduleStatusRow(
+                            enabled = masterEnabled,
+                            manual = (config?.schedule ?: schedule) == "manual",
+                            status = scheduleStatus,
+                            onRebuild = viewModel::rebuildSchedule,
+                        )
 
                         Column(
                             modifier = Modifier.alpha(if (masterEnabled) 1f else 0.45f),

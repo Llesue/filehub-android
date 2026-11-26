@@ -1,5 +1,6 @@
 package filehub.android.ui
 
+import android.text.format.DateFormat
 import android.text.format.Formatter
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -54,6 +55,7 @@ import filehub.android.data.sync.SyncLogStore
 import filehub.android.data.sync.SyncPhase
 import filehub.android.data.sync.SyncRunEntity
 import filehub.android.data.sync.SyncRunKind
+import filehub.android.data.sync.ScheduleStatus
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -437,6 +439,63 @@ private fun currentActionLabel(action: String?): String? = when (action) {
     "conflict" -> stringResource(R.string.sync_action_conflict)
     "scan" -> stringResource(R.string.sync_action_scan)
     else -> null
+}
+
+@Composable
+internal fun SyncScheduleStatusRow(
+    enabled: Boolean,
+    manual: Boolean,
+    status: ScheduleStatus,
+    onRebuild: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (!enabled || status.loading) return
+    val context = LocalContext.current
+    val next = status.nextRunAt?.let { millis ->
+        DateFormat.getTimeFormat(context).format(Date(millis))
+    }
+    val warning = !manual && !status.scheduled
+    val text = when {
+        manual -> stringResource(R.string.sync_schedule_manual)
+        status.scheduled -> if (next != null) {
+            stringResource(R.string.sync_schedule_scheduled, next)
+        } else {
+            stringResource(R.string.sync_schedule_scheduled_short)
+        }
+        status.cancelled -> stringResource(R.string.sync_schedule_cancelled)
+        status.failed -> stringResource(R.string.sync_schedule_failed)
+        else -> stringResource(R.string.sync_schedule_missing)
+    }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = if (warning) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (warning) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.weight(1f),
+            )
+            if (warning) {
+                TextButton(onClick = onRebuild) {
+                    Text(stringResource(R.string.sync_schedule_rebuild))
+                }
+            }
+        }
+    }
 }
 
 @Composable

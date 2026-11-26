@@ -646,6 +646,13 @@
     <string name="sync_action_cancel">取消本轮</string>
     <string name="sync_action_continue">继续</string>
     <string name="sync_action_retry">重试失败项</string>
+    <string name="sync_schedule_manual">仅手动运行</string>
+    <string name="sync_schedule_scheduled">已排定 · 下次约 %1$s</string>
+    <string name="sync_schedule_scheduled_short">定时任务已排定</string>
+    <string name="sync_schedule_missing">定时任务未排定</string>
+    <string name="sync_schedule_cancelled">定时任务已取消</string>
+    <string name="sync_schedule_failed">定时任务已失败</string>
+    <string name="sync_schedule_rebuild">重建</string>
     <string name="sync_action_sync_now">立即同步</string>
     <string name="sync_action_daily">日常同步</string>
     <string name="sync_action_full">全量同步</string>
