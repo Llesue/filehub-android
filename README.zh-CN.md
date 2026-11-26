@@ -96,16 +96,6 @@ Release 构建读取仓库根目录的 `keystore.properties`（已 gitignore）�
 签名证书 SHA-256：
 `F3:FB:0B:7C:94:43:79:1F:0C:A2:B2:B8:E4:2F:91:B0:09:23:7E:6F:B2:B0:95:F3:21:41:82:3B:0D:B1:7E:71`
 
-## 文档
-
-- [`PLAN.md`](PLAN.md) — 范围、架构、里程碑
-- [`docs/ui-spec.md`](docs/ui-spec.md) — UI 方案
-- [`docs/sync-spec.md`](docs/sync-spec.md) — 相册/目录同步设计
-- [`docs/api-notes.md`](docs/api-notes.md) — 接口与字段说明
-- [`docs/app-icon.svg`](docs/app-icon.svg) — 图标源文件
-- [GitHub Releases](https://github.com/Llesue/filehub-android/releases) — 发布说明和 APK
-- [`CHANGELOG.md`](CHANGELOG.md)
-
 ## 许可证
 
 - 内置 **JetBrains Mono** 字体：SIL Open Font License 1.1，见 `licenses/JetBrainsMono-OFL.txt`。

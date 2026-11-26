@@ -97,16 +97,6 @@ Keystore and password backups must be kept outside Git.
 Signing certificate SHA-256:
 `F3:FB:0B:7C:94:43:79:1F:0C:A2:B2:B8:E4:2F:91:B0:09:23:7E:6F:B2:B0:95:F3:21:41:82:3B:0D:B1:7E:71`
 
-## Docs
-
-- [`PLAN.md`](PLAN.md) — scope, architecture, milestones
-- [`docs/ui-spec.md`](docs/ui-spec.md) — UI proposal
-- [`docs/sync-spec.md`](docs/sync-spec.md) — photo and folder sync design
-- [`docs/api-notes.md`](docs/api-notes.md) — API notes and contract quirks
-- [`docs/app-icon.svg`](docs/app-icon.svg) — source logo
-- [GitHub Releases](https://github.com/Llesue/filehub-android/releases) — release notes and APKs
-- [`CHANGELOG.md`](CHANGELOG.md)
-
 ## Licenses
 
 - Bundled **JetBrains Mono** font: SIL Open Font License 1.1, see `licenses/JetBrainsMono-OFL.txt`.
