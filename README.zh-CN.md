@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-[FileHub](https://github.com/Llesue/filehub) 是一个自托管文件管理器：服务端跑在自己的 NAS 或 Linux 主机上，通过网页或原生客户端访问文件。本项目是 FileHub 的原生 Android 客户端。
+[FileHub](https://github.com/Llesue/filehub) 是一个自托管文件管理器：服务端跑在自己的 Linux 或 Windows 机器上，通过网页或原生客户端访问文件。本项目是 FileHub 的原生 Android 客户端。
 
 它主要面向同时运行一个或多个 FileHub 实例的用户：在一台手机上管理所有服务器，自动备份相册和文件夹，并在手机、平板和车机上使用同一套客户端。
 

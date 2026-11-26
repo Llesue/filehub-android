@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md) | English
 
-[FileHub](https://github.com/Llesue/filehub) is a self-hosted file manager: you run the server on your own NAS or Linux host and access your files from the web or a native client. This is the native Android client.
+[FileHub](https://github.com/Llesue/filehub) is a self-hosted file manager: you run the server on your own Linux or Windows machine and access your files from the web or a native client. This is the native Android client.
 
 It is built for people who run one or more FileHub instances. Manage every server from one phone, keep photos and folders backed up automatically, and use the same app on a phone, tablet or car head unit.
 
