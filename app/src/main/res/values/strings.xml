@@ -200,6 +200,10 @@
     <string name="photo_sync_location_missing">Location permission is off: photo backups will not keep GPS metadata.</string>
     <string name="photo_sync_location_button">Allow location metadata</string>
     <string name="photo_sync_location_log">Location permission is not granted; this backup omits GPS metadata.</string>
+    <string name="sync_notification_permission_title">Enable sync notifications</string>
+    <string name="sync_notification_permission_body">Foreground sync needs notification permission so it can continue after you close the app.</string>
+    <string name="sync_notification_permission_button">Allow notifications</string>
+    <string name="sync_log_foreground_failed">Foreground sync notification unavailable; the sync will continue but the system may stop it sooner.</string>
     <string name="photo_sync_select_all">Select all</string>
     <string name="photo_sync_no_albums">No albums found</string>
     <string name="photo_sync_schedule_manual">Manual</string>

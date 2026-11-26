@@ -200,6 +200,10 @@
     <string name="photo_sync_location_missing">未授予位置信息权限：相册备份不会保留照片的 GPS 定位。</string>
     <string name="photo_sync_location_button">允许保留定位信息</string>
     <string name="photo_sync_location_log">未授予位置信息权限，本次备份不包含 GPS 定位信息。</string>
+    <string name="sync_notification_permission_title">开启同步通知</string>
+    <string name="sync_notification_permission_body">前台同步需要通知权限；授予后关闭 App 也能继续同步。</string>
+    <string name="sync_notification_permission_button">允许通知</string>
+    <string name="sync_log_foreground_failed">前台同步通知不可用；同步会继续，但系统可能更早停止。</string>
     <string name="photo_sync_select_all">全选</string>
     <string name="photo_sync_no_albums">没有找到相册</string>
     <string name="photo_sync_schedule_manual">手动</string>

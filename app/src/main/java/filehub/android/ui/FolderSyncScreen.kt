@@ -98,6 +98,15 @@ fun FolderSyncScreen(
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { permissionVersion++ }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { permissionVersion++ }
+    val hasNotificationPermission = Build.VERSION.SDK_INT < 33 || remember(permissionVersion, context) {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
     val hasLocationPermission = remember(permissionVersion, context) {
         Build.VERSION.SDK_INT < 29 || MediaStreams.hasLocationPermission(context) ||
             ContextCompat.checkSelfPermission(
@@ -300,6 +309,43 @@ fun FolderSyncScreen(
                                         },
                                     ) {
                                         Text(stringResource(R.string.photo_sync_location_button))
+                                    }
+                                }
+                            }
+                        }
+                        if (!hasNotificationPermission) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.sync_notification_permission_title,
+                                        ),
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = stringResource(
+                                            R.string.sync_notification_permission_body,
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            notificationPermissionLauncher.launch(
+                                                Manifest.permission.POST_NOTIFICATIONS,
+                                            )
+                                        },
+                                    ) {
+                                        Text(
+                                            stringResource(
+                                                R.string.sync_notification_permission_button,
+                                            ),
+                                        )
                                     }
                                 }
                             }

@@ -91,6 +91,7 @@ fun PhotoSyncScreen(
     var showLogs by remember { mutableStateOf(false) }
     var remoteHint by remember { mutableStateOf(false) }
     var confirmFullSync by remember { mutableStateOf(false) }
+    var permissionVersion by remember { mutableStateOf(0) }
 
     val scheduleStatus by viewModel.scheduleStatus.collectAsStateWithLifecycle()
     val permissions = buildList {
@@ -101,30 +102,47 @@ fun PhotoSyncScreen(
             add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
         if (Build.VERSION.SDK_INT >= 29) add(Manifest.permission.ACCESS_MEDIA_LOCATION)
+        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
     }.toTypedArray()
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
+        permissionVersion++
         if (result.values.any { it }) viewModel.refreshBuckets(includeVideos)
     }
-    val imagePermission = if (Build.VERSION.SDK_INT >= 33) {
-        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) ==
-            PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) ==
-            PackageManager.PERMISSION_GRANTED
-    } else {
-        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) ==
-            PackageManager.PERMISSION_GRANTED
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { permissionVersion++ }
+    val imagePermission = remember(permissionVersion, context) {
+        if (Build.VERSION.SDK_INT >= 33) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) ==
+                PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+                ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                PackageManager.PERMISSION_GRANTED
+        }
     }
     val hasPermission = imagePermission &&
         (!includeVideos || Build.VERSION.SDK_INT < 33 ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) ==
             PackageManager.PERMISSION_GRANTED)
-    val hasLocationPermission = Build.VERSION.SDK_INT < 29 ||
+    val hasLocationPermission = remember(permissionVersion, context) {
+        Build.VERSION.SDK_INT < 29 ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_MEDIA_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED
+    }
+    val hasNotificationPermission = Build.VERSION.SDK_INT < 33 || remember(permissionVersion, context) {
         ContextCompat.checkSelfPermission(
             context,
-            Manifest.permission.ACCESS_MEDIA_LOCATION,
+            Manifest.permission.POST_NOTIFICATIONS,
         ) == PackageManager.PERMISSION_GRANTED
+    }
 
     LaunchedEffect(config, initialized) {
         val existing = config
@@ -368,6 +386,44 @@ fun PhotoSyncScreen(
                                         },
                                     ) {
                                         Text(stringResource(R.string.photo_sync_location_button))
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!hasNotificationPermission) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.sync_notification_permission_title,
+                                        ),
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = stringResource(
+                                            R.string.sync_notification_permission_body,
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            notificationPermissionLauncher.launch(
+                                                Manifest.permission.POST_NOTIFICATIONS,
+                                            )
+                                        },
+                                    ) {
+                                        Text(
+                                            stringResource(
+                                                R.string.sync_notification_permission_button,
+                                            ),
+                                        )
                                     }
                                 }
                             }

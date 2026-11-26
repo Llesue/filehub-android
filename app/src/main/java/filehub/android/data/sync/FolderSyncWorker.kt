@@ -156,6 +156,12 @@ class FolderSyncWorker(
             throw error
         } catch (_: Exception) {
             // Checkpointing still works without foreground promotion.
+            repo.logs.log(
+                profileId,
+                SyncRunKind.FOLDER,
+                applicationContext.getString(R.string.sync_log_foreground_failed),
+                SyncLogStore.LEVEL_WARN,
+            )
         }
 
         val (profile, token) = app.container.profileAndToken(config.profileId)
