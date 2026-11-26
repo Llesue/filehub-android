@@ -2,13 +2,16 @@ package filehub.android.data.sync
 
 import android.content.ContentUris
 import android.content.Context
+import android.database.Cursor
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 
 data class MediaBucket(
     val id: Long,
     val name: String,
     val count: Int,
+    val relativePath: String = "",
 )
 
 data class MediaPhoto(
@@ -16,6 +19,7 @@ data class MediaPhoto(
     val uri: Uri,
     val bucketId: Long,
     val album: String,
+    val relativePath: String = "",
     val name: String,
     val size: Long,
     val mtime: Long,
@@ -29,11 +33,14 @@ object MediaScanner {
 
     fun buckets(context: Context, includeVideos: Boolean): List<MediaBucket> {
         val counts = linkedMapOf<Long, MutableMap<String, Int>>()
+        val paths = linkedMapOf<Long, MutableMap<String, Int>>()
         fun scan(collection: Uri) {
+            val relativeColumn = relativePathColumn()
             val projection = arrayOf(
                 MediaStore.Images.ImageColumns.BUCKET_ID,
                 MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME,
                 MediaStore.MediaColumns._ID,
+                relativeColumn,
             )
             runCatching {
                 context.contentResolver.query(
@@ -45,12 +52,17 @@ object MediaScanner {
                 )?.use { cursor ->
                     val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.ImageColumns.BUCKET_ID)
                     val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME)
+                    val relativeIndex = cursor.getColumnIndexOrThrow(relativeColumn)
+                    val fromData = relativeColumn == MediaStore.MediaColumns.DATA
                     while (cursor.moveToNext()) {
                         val id = if (cursor.isNull(idIndex)) 0L else cursor.getLong(idIndex)
                         val name = cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }
                             ?: AlbumNames.DEFAULT_ALBUM
+                        val relative = relativePathAt(cursor, relativeIndex, name, fromData)
                         val names = counts.getOrPut(id) { mutableMapOf() }
                         names[name] = (names[name] ?: 0) + 1
+                        val bucketPaths = paths.getOrPut(id) { mutableMapOf() }
+                        bucketPaths[relative] = (bucketPaths[relative] ?: 0) + 1
                     }
                 }
             }
@@ -59,13 +71,46 @@ object MediaScanner {
         if (includeVideos) scan(MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
         return counts
             .map { (id, names) ->
+                val name = AlbumNames.canonical(names) ?: AlbumNames.DEFAULT_ALBUM
                 MediaBucket(
                     id = id,
-                    name = AlbumNames.canonical(names) ?: AlbumNames.DEFAULT_ALBUM,
+                    name = name,
                     count = names.values.sum(),
+                    relativePath = AlbumNames.canonical(paths[id].orEmpty()) ?: name,
                 )
             }
-            .sortedWith(compareBy({ it.name.lowercase() }, { it.name }, { it.id }))
+            .sortedWith(
+                compareBy(
+                    { it.relativePath.lowercase() },
+                    { it.relativePath },
+                    { it.name.lowercase() },
+                    { it.id },
+                ),
+            )
+    }
+
+    private fun relativePathColumn(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.MediaColumns.RELATIVE_PATH
+        } else {
+            MediaStore.MediaColumns.DATA
+        }
+
+    private fun relativePathAt(
+        cursor: Cursor,
+        index: Int,
+        fallback: String,
+        fromData: Boolean,
+    ): String {
+        val raw = if (cursor.isNull(index)) "" else cursor.getString(index).orEmpty()
+        val value = if (fromData) {
+            raw.substringAfter("/storage/emulated/0/", raw)
+                .substringAfter("/sdcard/", raw)
+                .substringBeforeLast('/', "")
+        } else {
+            raw.trim('/')
+        }
+        return value.trim('/').ifBlank { fallback }
     }
 
     fun photoFromEntry(context: Context, entry: PhotoSyncEntryEntity): MediaPhoto? {
@@ -89,6 +134,7 @@ object MediaScanner {
             uri = uri,
             bucketId = entry.bucketId,
             album = entry.album,
+            relativePath = entry.relativePath,
             name = entry.name,
             size = entry.size,
             mtime = entry.mtime,
@@ -106,6 +152,7 @@ object MediaScanner {
     ): Result<List<MediaPhoto>> = runCatching {
         val result = mutableListOf<MediaPhoto>()
         fun scan(collection: Uri, isVideo: Boolean) {
+            val relativeColumn = relativePathColumn()
             val projection = arrayOf(
                 MediaStore.MediaColumns._ID,
                 MediaStore.MediaColumns.DISPLAY_NAME,
@@ -116,6 +163,7 @@ object MediaScanner {
                 MediaStore.Images.ImageColumns.BUCKET_ID,
                 MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME,
                 MediaStore.MediaColumns.MIME_TYPE,
+                relativeColumn,
             )
             val selection = buildList {
                 if (modifiedAfter != null && modifiedAfter > 0) {
@@ -145,6 +193,8 @@ object MediaScanner {
                     val bucketIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.ImageColumns.BUCKET_ID)
                     val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME)
                     val mimeIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+                    val relativeIndex = cursor.getColumnIndexOrThrow(relativeColumn)
+                    val fromData = relativeColumn == MediaStore.MediaColumns.DATA
                     while (cursor.moveToNext()) {
                         val bucket = if (cursor.isNull(bucketIndex)) 0L else cursor.getLong(bucketIndex)
                         val id = cursor.getLong(idIndex)
@@ -157,6 +207,7 @@ object MediaScanner {
                         val mtime = taken.takeIf { it > 0 } ?: added.takeIf { it > 0 } ?: modified
                         val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() }
                             ?: AlbumNames.DEFAULT_ALBUM
+                        val relative = relativePathAt(cursor, relativeIndex, album, fromData)
                         val mime = cursor.getString(mimeIndex)
                             ?: if (isVideo) "video/*" else "image/*"
                         result += MediaPhoto(
@@ -164,6 +215,7 @@ object MediaScanner {
                             uri = ContentUris.withAppendedId(collection, id),
                             bucketId = bucket,
                             album = album,
+                            relativePath = relative,
                             name = name,
                             size = size,
                             mtime = mtime,
@@ -178,9 +230,17 @@ object MediaScanner {
         // One bucket id can report several case variants; use the same canonical name
         // as the album picker and filter only afterwards so both stay consistent.
         val canonical = AlbumNames.canonicalByBucket(result.map { it.bucketId to it.album })
+        val canonicalPaths = AlbumNames.canonicalByBucket(
+            result.map { it.bucketId to it.relativePath },
+        )
         result
             .asSequence()
-            .map { photo -> photo.copy(album = canonical[photo.bucketId] ?: photo.album) }
+            .map { photo ->
+                photo.copy(
+                    album = canonical[photo.bucketId] ?: photo.album,
+                    relativePath = canonicalPaths[photo.bucketId] ?: photo.relativePath,
+                )
+            }
             .filter { selectedAlbums == null || it.bucketId in selectedAlbums }
             .distinctBy { it.localId }
             .toList()

@@ -246,7 +246,6 @@ fun FolderSyncScreen(
                             enabled = masterEnabled,
                             run = run,
                             lastError = state.error ?: config?.lastError,
-                            queued = state.queued,
                             logs = logs,
                             wide = wide,
                             onSyncNow = viewModel::syncNow,

@@ -446,6 +446,9 @@ class FolderSyncWorker(
         var created = 0
         var updated = 0
         var deleted = 0
+        var uploaded = 0
+        var downloaded = 0
+        var skippedFiles = 0
         var bytesDone = 0L
         var lastNotifyAt = 0L
         var lastNotifyBytes = 0L
@@ -473,6 +476,9 @@ class FolderSyncWorker(
                 run,
                 processed = done + failed + conflicts,
                 succeeded = done,
+                uploaded = uploaded,
+                downloaded = downloaded,
+                skipped = skippedFiles,
                 failed = failed,
                 conflicts = conflicts,
                 created = created,
@@ -565,6 +571,12 @@ class FolderSyncWorker(
             try {
                 when (action) {
                     Action.REMOVE -> {
+                        repo.logs.log(
+                            profileId,
+                            SyncRunKind.FOLDER,
+                            applicationContext.getString(R.string.sync_log_skipped, path),
+                        )
+                        skippedFiles += 1
                         repo.deleteEntry(profileId, path)
                         entries.remove(path)
                         done += 1
@@ -600,6 +612,12 @@ class FolderSyncWorker(
                                 conflict = entry.conflict,
                             )
                         }
+                        repo.logs.log(
+                            profileId,
+                            SyncRunKind.FOLDER,
+                            applicationContext.getString(R.string.sync_log_skipped, path),
+                        )
+                        skippedFiles += 1
                         done += 1
                         publish(path, null, bytesDone, true, action = "skip")
                     }
@@ -658,6 +676,13 @@ class FolderSyncWorker(
                             hashVersion = localVersion,
                             onBytes = { bytes -> publish(path, "upload", baseBytes + bytes, false) },
                         )
+                        repo.logs.log(
+                            profileId,
+                            SyncRunKind.FOLDER,
+                            applicationContext.getString(R.string.sync_log_uploaded, path),
+                            SyncLogStore.LEVEL_SUCCESS,
+                        )
+                        uploaded += 1
                         entries[path] = local.toEntry(
                             profileId, config, remote,
                             sha256 = localHash, hashSize = local.size, hashMtime = local.mtime,
@@ -677,6 +702,13 @@ class FolderSyncWorker(
                             repo = repo,
                             onBytes = { bytes -> publish(path, "download", baseBytes + bytes, false) },
                         )
+                        repo.logs.log(
+                            profileId,
+                            SyncRunKind.FOLDER,
+                            applicationContext.getString(R.string.sync_log_downloaded, path),
+                            SyncLogStore.LEVEL_SUCCESS,
+                        )
+                        downloaded += 1
                         done += 1
                         if (entry == null) created += 1 else updated += 1
                     }
@@ -800,6 +832,9 @@ class FolderSyncWorker(
             created,
             updated,
             deleted,
+            uploaded,
+            downloaded,
+            skippedFiles,
             bytesDone,
         )
     }
@@ -1277,6 +1312,9 @@ class FolderSyncWorker(
         created: Int,
         updated: Int,
         deleted: Int,
+        uploaded: Int,
+        downloaded: Int,
+        skippedFiles: Int,
         bytesDone: Long,
     ): Result {
         val result = buildString {
@@ -1292,15 +1330,36 @@ class FolderSyncWorker(
             null
         }
         repo.updateOutcome(config.profileId, now(), result, error)
+        val total = run.total.takeIf { it > 0 } ?: (done + failed + conflicts)
+        val brief = buildList {
+            add(
+                applicationContext.getString(
+                    R.string.sync_brief_total,
+                    total,
+                    android.text.format.Formatter.formatShortFileSize(applicationContext, bytesDone),
+                ),
+            )
+            add(applicationContext.getString(R.string.sync_brief_duration, durationText(run.startedAt)))
+            if (uploaded > 0) {
+                add(applicationContext.getString(R.string.sync_brief_uploaded, uploaded))
+            }
+            if (downloaded > 0) {
+                add(applicationContext.getString(R.string.sync_brief_downloaded, downloaded))
+            }
+            if (skippedFiles > 0) {
+                add(applicationContext.getString(R.string.sync_brief_skipped, skippedFiles))
+            }
+            if (conflicts > 0) {
+                add(applicationContext.getString(R.string.sync_brief_conflicts, conflicts))
+            }
+            if (failed > 0) {
+                add(applicationContext.getString(R.string.sync_brief_failed, failed))
+            }
+        }.joinToString("\n")
         repo.logs.log(
             config.profileId,
             SyncRunKind.FOLDER,
-            applicationContext.getString(
-                R.string.sync_log_finished_folder,
-                done,
-                failed,
-                conflicts,
-            ),
+            brief,
             when {
                 failed > 0 -> SyncLogStore.LEVEL_ERROR
                 conflicts > 0 -> SyncLogStore.LEVEL_WARN
@@ -1316,6 +1375,9 @@ class FolderSyncWorker(
             phase = if (conflicts > 0 && failed == 0) SyncPhase.CONFLICTS_PENDING else phase,
             processed = done + failed + conflicts,
             succeeded = done,
+            uploaded = uploaded,
+            downloaded = downloaded,
+            skipped = skippedFiles,
             failed = failed,
             conflicts = conflicts,
             created = created,
@@ -1536,6 +1598,18 @@ class FolderSyncWorker(
         )
 
     private fun now(): Long = System.currentTimeMillis() / 1000
+
+    private fun durationText(startedAt: Long): String {
+        val total = (now() - startedAt).coerceAtLeast(0)
+        val hours = total / 3600
+        val minutes = (total % 3600) / 60
+        val seconds = total % 60
+        return if (hours > 0) {
+            "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+        } else {
+            "$minutes:${seconds.toString().padStart(2, '0')}"
+        }
+    }
 
     private data class RemoteNode(
         val relativePath: String,

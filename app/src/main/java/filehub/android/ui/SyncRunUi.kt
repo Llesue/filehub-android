@@ -135,7 +135,6 @@ internal fun SyncStatusPanel(
     enabled: Boolean,
     run: SyncRunEntity?,
     lastError: String?,
-    queued: Boolean,
     logs: List<SyncLogEntity>,
     wide: Boolean,
     onSyncNow: () -> Unit,
@@ -159,7 +158,7 @@ internal fun SyncStatusPanel(
             enabled = enabled,
             run = run,
             lastError = lastError,
-            queued = queued,
+            compact = wide,
             onSyncNow = onSyncNow,
             onStop = onStop,
             onCancel = onCancel,
@@ -168,7 +167,7 @@ internal fun SyncStatusPanel(
             extra = extra,
         )
         if (wide) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
             SyncLogList(
                 logs = logs,
                 onClear = onClearLogs,
@@ -188,7 +187,7 @@ internal fun SyncRunStatusCard(
     enabled: Boolean,
     run: SyncRunEntity?,
     lastError: String?,
-    queued: Boolean,
+    compact: Boolean = false,
     onSyncNow: () -> Unit,
     onStop: () -> Unit,
     onCancel: () -> Unit,
@@ -213,8 +212,8 @@ internal fun SyncRunStatusCard(
         ),
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(if (compact) 8.dp else 12.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -272,7 +271,9 @@ internal fun SyncRunStatusCard(
                 }
             }
 
-            SyncPhaseStepper(kind = kind, phase = phase)
+            if (!compact) {
+                SyncPhaseStepper(kind = kind, phase = phase)
+            }
 
             when {
                 phase == SyncPhase.PREPARING || phase == SyncPhase.SCANNING ||
@@ -288,7 +289,12 @@ internal fun SyncRunStatusCard(
                 )
             }
 
-            if (run != null && (active || phase == SyncPhase.PARTIAL)) {
+            if (run != null &&
+                phase != SyncPhase.IDLE &&
+                phase != SyncPhase.DISABLED &&
+                phase != SyncPhase.QUEUED &&
+                phase != SyncPhase.WAITING
+            ) {
                 if (run.bytesTotal > 0) {
                     Text(
                         text = stringResource(
@@ -301,8 +307,9 @@ internal fun SyncRunStatusCard(
                     )
                 }
                 val counts = buildList {
-                    if (run.succeeded > 0) add(stringResource(R.string.sync_counts_success, run.succeeded))
                     if (run.skipped > 0) add(stringResource(R.string.sync_counts_skipped, run.skipped))
+                    if (run.uploaded > 0) add(stringResource(R.string.sync_counts_uploaded, run.uploaded))
+                    if (run.downloaded > 0) add(stringResource(R.string.sync_counts_downloaded, run.downloaded))
                     if (run.failed > 0) add(stringResource(R.string.sync_counts_failed, run.failed))
                     if (run.conflicts > 0) add(stringResource(R.string.sync_counts_conflicts, run.conflicts))
                 }
@@ -348,13 +355,6 @@ internal fun SyncRunStatusCard(
                     color = MaterialTheme.colorScheme.error,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (queued) {
-                Text(
-                    text = stringResource(R.string.sync_queued_hint),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             extra()
@@ -566,7 +566,7 @@ internal fun SyncLogList(
                                 SyncLogStore.LEVEL_SUCCESS -> FileHubFileGreen
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
-                            maxLines = 1,
+                            maxLines = if (entry.message.contains('\n')) 16 else 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )

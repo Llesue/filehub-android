@@ -314,7 +314,7 @@ class PhotoSyncWorker(
                 SyncRunKind.PHOTO,
                 applicationContext.getString(R.string.sync_log_no_changes),
             )
-            return finishCompleted(repo, run, config, 0, 0, skipped, 0)
+            return finishCompleted(repo, run, config, 0, 0, skipped, 0, 0, 0, 0)
         }
         repo.runs.progress(
             run,
@@ -329,6 +329,9 @@ class PhotoSyncWorker(
         var done = 0
         var failed = 0
         var alreadyOnServer = 0
+        var uploaded = 0
+        var skippedFiles = 0
+        var renamed = 0
         var bytesDone = 0L
         var lastNotifyAt = 0L
         var lastNotifyBytes = 0L
@@ -351,6 +354,9 @@ class PhotoSyncWorker(
                 bytesDone = bytes,
                 processed = done + failed,
                 succeeded = done,
+                uploaded = uploaded,
+                downloaded = 0,
+                skipped = skippedFiles,
                 failed = failed,
                 currentItem = item,
                 currentAction = action,
@@ -406,10 +412,26 @@ class PhotoSyncWorker(
             }
 
             val currentItem = "${photo.album}/${photo.name}"
-            val existing = entries[photo.signature]
+            var existing = entries[photo.signature]
             val baseBytes = bytesDone
             try {
                 val remoteDir = remoteDir(config, photo)
+                val oldEntry = existing
+                if (oldEntry != null &&
+                    oldEntry.relativePath.isBlank() &&
+                    photo.relativePath.isNotBlank()
+                ) {
+                    val remoteName = oldEntry.remotePath.substringAfterLast('/')
+                    val newPath = if (remoteDir.isEmpty()) remoteName else "$remoteDir/$remoteName"
+                    if (newPath != oldEntry.remotePath) {
+                        val updated = oldEntry.copy(
+                            relativePath = photo.relativePath,
+                            remotePath = newPath,
+                        )
+                        existing = updated
+                        repo.saveEntry(updated)
+                    }
+                }
                 remoteDirs.ensure(remoteDir)
                 val hashVersion = MediaStreams.hashVersion(applicationContext, photo.uri)
                 // Fast path: an unchanged entry whose remote file is still
@@ -428,6 +450,15 @@ class PhotoSyncWorker(
                         remoteNamesFor(api, config.rootId, remoteDir, remoteNames)
                     }.getOrNull()
                     if (savedName.isNotBlank() && names?.get(savedName) == photo.size) {
+                        repo.logs.log(
+                            profileId,
+                            SyncRunKind.PHOTO,
+                            applicationContext.getString(
+                                R.string.sync_log_skipped_unchanged,
+                                "${photo.album}/${photo.name}",
+                            ),
+                        )
+                        skippedFiles += 1
                         done += 1
                         alreadyOnServer += 1
                         bytesDone = baseBytes + photo.size
@@ -466,6 +497,14 @@ class PhotoSyncWorker(
                     hashSupported = hashSupported,
                 )
                 if (target.alreadyExists) {
+                    repo.logs.log(
+                        profileId,
+                        SyncRunKind.PHOTO,
+                        applicationContext.getString(
+                            R.string.sync_log_skipped_existing,
+                            "${photo.album}/${photo.name}",
+                        ),
+                    )
                     repo.saveEntry(
                         entry(
                             profileId, photo, remoteDir, target.name, STATUS_DONE,
@@ -478,6 +517,7 @@ class PhotoSyncWorker(
                             },
                         ),
                     )
+                    skippedFiles += 1
                     done += 1
                     alreadyOnServer += 1
                     bytesDone = baseBytes + photo.size
@@ -508,10 +548,12 @@ class PhotoSyncWorker(
                             profileId,
                             SyncRunKind.PHOTO,
                             applicationContext.getString(
-                                R.string.sync_log_same_content,
+                                R.string.sync_log_skipped_same_content,
+                                "${photo.album}/${photo.name}",
                                 sameContent,
                             ),
                         )
+                        skippedFiles += 1
                         done += 1
                         alreadyOnServer += 1
                         bytesDone = baseBytes + photo.size
@@ -520,6 +562,7 @@ class PhotoSyncWorker(
                     }
                 }
                 if (target.name != photo.name) {
+                    renamed += 1
                     repo.logs.log(
                         profileId,
                         SyncRunKind.PHOTO,
@@ -560,6 +603,16 @@ class PhotoSyncWorker(
                         )
                     },
                 )
+                repo.logs.log(
+                    profileId,
+                    SyncRunKind.PHOTO,
+                    applicationContext.getString(
+                        R.string.sync_log_uploaded,
+                        "${photo.album}/${photo.name}",
+                    ),
+                    SyncLogStore.LEVEL_SUCCESS,
+                )
+                uploaded += 1
                 done += 1
             } catch (error: CancellationException) {
                 throw error
@@ -669,7 +722,18 @@ class PhotoSyncWorker(
                 applicationContext.getString(R.string.sync_log_existing, alreadyOnServer),
             )
         }
-        return finishCompleted(repo, run, config, done, failed, skipped, bytesDone)
+        return finishCompleted(
+            repo,
+            run,
+            config,
+            done,
+            failed,
+            skipped,
+            uploaded,
+            skippedFiles,
+            renamed,
+            bytesDone,
+        )
     }
 
     private suspend fun uploadPhotoWithRoot(
@@ -915,12 +979,13 @@ class PhotoSyncWorker(
 
     private fun remoteDir(config: PhotoSyncConfigEntity, photo: MediaPhoto): String {
         val base = config.remotePath.trim('/')
-        val album = if (config.albumSubfolders) sanitize(photo.album) else ""
+        val album = if (config.albumSubfolders) {
+            photoAlbumRelativePath(photo.relativePath, photo.album)
+        } else {
+            ""
+        }
         return listOf(base, album).filter { it.isNotEmpty() }.joinToString("/")
     }
-
-    private fun sanitize(value: String): String =
-        value.replace(Regex("[/\\\\\\p{Cntrl}]"), "_").trim().ifEmpty { AlbumNames.DEFAULT_ALBUM }
 
     private fun entry(
         profileId: String,
@@ -942,6 +1007,7 @@ class PhotoSyncWorker(
         localId = photo.localId,
         bucketId = photo.bucketId,
         album = photo.album,
+        relativePath = photo.relativePath,
         name = photo.name,
         size = photo.size,
         mtime = photo.mtime,
@@ -976,6 +1042,9 @@ class PhotoSyncWorker(
         done: Int,
         failed: Int,
         skipped: Int,
+        uploaded: Int,
+        skippedFiles: Int,
+        renamed: Int,
         bytesDone: Long,
     ): Result {
         val result = buildString {
@@ -991,24 +1060,49 @@ class PhotoSyncWorker(
             null
         }
         repo.updateOutcome(config.profileId, now(), result, error)
+        val total = run.total.takeIf { it > 0 } ?: (done + failed + skipped)
+        val brief = buildList {
+            add(
+                applicationContext.getString(
+                    R.string.sync_brief_total,
+                    total,
+                    android.text.format.Formatter.formatShortFileSize(applicationContext, bytesDone),
+                ),
+            )
+            add(applicationContext.getString(R.string.sync_brief_duration, durationText(run.startedAt)))
+            if (uploaded > 0) {
+                add(applicationContext.getString(R.string.sync_brief_uploaded, uploaded))
+            }
+            if (skippedFiles > 0) {
+                add(applicationContext.getString(R.string.sync_brief_skipped, skippedFiles))
+            }
+            if (renamed > 0) {
+                add(applicationContext.getString(R.string.sync_brief_conflicts, renamed))
+            }
+            if (failed > 0) {
+                add(applicationContext.getString(R.string.sync_brief_failed, failed))
+            }
+        }.joinToString("\n")
         repo.logs.log(
             config.profileId,
             SyncRunKind.PHOTO,
-            applicationContext.getString(
-                R.string.sync_log_finished,
-                done,
-                failed,
-                skipped,
-            ),
-            if (failed > 0) SyncLogStore.LEVEL_ERROR else SyncLogStore.LEVEL_SUCCESS,
+            brief,
+            when {
+                failed > 0 -> SyncLogStore.LEVEL_ERROR
+                renamed > 0 -> SyncLogStore.LEVEL_WARN
+                else -> SyncLogStore.LEVEL_SUCCESS
+            },
         )
         repo.runs.finish(
             run,
             if (failed > 0) SyncPhase.PARTIAL else SyncPhase.COMPLETED,
             processed = done + failed,
             succeeded = done,
-            skipped = skipped,
+            uploaded = uploaded,
+            downloaded = 0,
+            skipped = skippedFiles,
             failed = failed,
+            conflicts = renamed,
             bytesDone = bytesDone,
         )
         PhotoSyncNotifications.finished(
@@ -1222,6 +1316,18 @@ class PhotoSyncWorker(
     }
 
     private fun now(): Long = System.currentTimeMillis() / 1000
+
+    private fun durationText(startedAt: Long): String {
+        val total = (now() - startedAt).coerceAtLeast(0)
+        val hours = total / 3600
+        val minutes = (total % 3600) / 60
+        val seconds = total % 60
+        return if (hours > 0) {
+            "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+        } else {
+            "$minutes:${seconds.toString().padStart(2, '0')}"
+        }
+    }
 
     private data class RemoteTarget(
         val name: String,

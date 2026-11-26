@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -266,7 +267,6 @@ fun PhotoSyncScreen(
                             enabled = masterEnabled,
                             run = run,
                             lastError = state.error ?: config?.lastError,
-                            queued = state.queued,
                             logs = logs,
                             wide = wide,
                             onSyncNow = viewModel::syncNow,
@@ -559,9 +559,11 @@ fun PhotoSyncScreen(
                                                 },
                                             )
                                             Text(
-                                                text = bucket.name,
+                                                text = bucket.relativePath.ifBlank { bucket.name },
                                                 modifier = Modifier.weight(1f),
                                                 style = MaterialTheme.typography.bodyMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                             Text(
                                                 text = bucket.count.toString(),

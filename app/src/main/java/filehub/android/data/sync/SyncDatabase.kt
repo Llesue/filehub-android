@@ -48,6 +48,7 @@ data class PhotoSyncEntryEntity(
     val localId: Long,
     val bucketId: Long,
     val album: String,
+    val relativePath: String = "",
     val name: String,
     val size: Long,
     val mtime: Long,
@@ -409,7 +410,7 @@ interface SyncLogDao {
         SyncRunEntity::class,
         SyncLogEntity::class,
     ],
-    version = 11,
+    version = 13,
     exportSchema = false,
 )
 abstract class SyncDatabase : RoomDatabase() {
@@ -421,6 +422,28 @@ abstract class SyncDatabase : RoomDatabase() {
     abstract fun syncLogDao(): SyncLogDao
 
     companion object {
+        /** Adds per-category transfer counts for the status card. */
+        val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE sync_runs ADD COLUMN uploaded INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE sync_runs ADD COLUMN downloaded INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
+        /** Stores the full MediaStore relative path used for the remote layout. */
+        val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE photo_sync_entries ADD COLUMN relativePath " +
+                        "TEXT NOT NULL DEFAULT ''",
+                )
+            }
+        }
+
         /** Adds incremental-scan watermarks and the current sync action. */
         val MIGRATION_10_11: Migration = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {

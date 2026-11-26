@@ -62,6 +62,8 @@ class AppContainer(context: Context) {
             SyncDatabase.MIGRATION_8_9,
             SyncDatabase.MIGRATION_9_10,
             SyncDatabase.MIGRATION_10_11,
+            SyncDatabase.MIGRATION_11_12,
+            SyncDatabase.MIGRATION_12_13,
         )
         .fallbackToDestructiveMigration()
         .build()
