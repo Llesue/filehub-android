@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.10 - 2026-11-26
+
+### Fixed
+
+- Remote photo directories are now created top-down from the storage root. A missing intermediate folder (`DCIM`, `Music`) no longer surfaces as `parent directory does not exist`, so nested album paths such as `DCIM/Camera` and `Music/MV` upload correctly.
+
 ## v0.1.9 - 2026-11-26
 
 ### Fixed
