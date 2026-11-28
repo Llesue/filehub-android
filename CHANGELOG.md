@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.12 - 2026-11-29
+
+### Added
+
+- Image and video previews have a delete action in the top bar with the existing confirmation flow. Deleting advances to the next item, falls back to the previous one, or closes the preview; the action is hidden on read-only roots.
+
+### Fixed
+
+- Video switching clears the loading spinner as soon as the player is ready or playing, including when Media3 does not emit a new first-frame event for a playlist transition. The 15-second safety timeout no longer reports “cannot play” while the video is actually playing.
+- Avatar requests use per-profile, per-user cache keys, so switching accounts on the same server no longer shows the previous user's avatar. Re-authentication also rebuilds the image loader when the token changes.
+
 ## v0.1.11 - 2026-11-28
 
 ### Added
