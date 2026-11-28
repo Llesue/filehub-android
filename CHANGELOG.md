@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.1.11 - 2026-11-28
+
+### Added
+
+- App lock with fingerprint, face or the device screen lock. It locks on cold start and after one minute in the background; enabling and disabling both require authentication. The lock screen never renders server names, file names or thumbnails.
+- Video preview uses a playlist for the current folder: swipe up for the next video and down for the previous one, and the player's previous/next buttons now switch videos. The current frame slides out and the next one slides in after its first frame; the next five seconds are preloaded and a spinner shows while waiting. Music stays paused for the whole preview and resumes only when it closes.
+- Video playback continues to the next file when the current one ends and stops on the last file. Files whose resolution or codec the device cannot decode show a clear message instead of a black screen; swiping after an error rebuilds the playlist at the next item instead of leaving a spinner stuck.
+- File details show the complete, untruncated file name and an absolute `yyyy-MM-dd HH:mm:ss` modified time instead of a relative label.
+- Image and video previews keep the underlying file list at the current item, so closing the preview returns to the matching list position.
+- File browsing defaults to newest-first (`Modified` descending) in list mode. Switching between list and grid always returns to the top, while each directory keeps its own sort, view and scroll state. Existing rows that still use the old name-ascending default are migrated.
+
+### Changed
+
+- File properties and details are now consistently labelled “Details” in both the overflow menu and preview menus.
+- File type icons now use the FileHub web client's 24dp stroke set for all 22 categories, with new App, Library, Installer, Shortcut and Config file kinds and the web light/dark colour tokens.
+
+### Fixed
+
+- The wide/tablet, landscape and compact browsers no longer flash “No servers yet” or “Add a server” while the saved profiles are still loading; they show a loading state first.
+
 ## v0.1.10 - 2026-11-26
 
 ### Fixed
