@@ -1537,6 +1537,8 @@ fun FileBrowserScreen(
             },
             onShare = { viewModel.openShare(entry) },
             onDetails = { viewModel.showDetails(entry) },
+            canDelete = state.root?.readOnly != true,
+            onDelete = { viewModel.requestDeletePreview(entry) },
             onVideoEnded = {},
             onClose = {
                 val wasVideo = state.previewEntry?.kind == FileKind.Video

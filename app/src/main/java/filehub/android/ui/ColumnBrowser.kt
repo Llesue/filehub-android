@@ -582,6 +582,7 @@ private fun LandscapeServerHeader(
     onOpenServers: () -> Unit,
     onOpenMy: (() -> Unit)?,
 ) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -636,7 +637,9 @@ private fun LandscapeServerHeader(
                     )
                     if (avatarUrl != null && imageLoader != null) {
                         AsyncImage(
-                            model = avatarUrl,
+                            model = profile?.let {
+                                avatarImageRequest(context, it, avatarUrl)
+                            } ?: avatarUrl,
                             imageLoader = imageLoader,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,

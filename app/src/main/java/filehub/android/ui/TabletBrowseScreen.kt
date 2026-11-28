@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -197,6 +198,7 @@ private fun TabletTopBar(
     compact: Boolean,
 ) {
     val active = session.active
+    val context = LocalContext.current
     val canSearch = files.root != null && files.root.isRemote != true
     val canUpload = files.root != null && !files.readOnly
     Surface(
@@ -366,7 +368,9 @@ private fun TabletTopBar(
                         )
                         if (avatarUrl != null && imageLoader != null) {
                             coil3.compose.AsyncImage(
-                                model = avatarUrl,
+                                model = active?.let {
+                                    avatarImageRequest(context, it, avatarUrl)
+                                } ?: avatarUrl,
                                 imageLoader = imageLoader,
                                 contentDescription = null,
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,

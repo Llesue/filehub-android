@@ -185,6 +185,7 @@ class FilesViewModel(
     private var listOffset = 0
     private var gridIndex = 0
     private var gridOffset = 0
+    private var previewDeleteTarget: FileEntry? = null
 
     init {
         viewModelScope.launch {
@@ -525,11 +526,17 @@ class FilesViewModel(
         requestDelete(current.entries.filter { it.name in current.selected })
     }
 
+    fun requestDeletePreview(entry: FileEntry) {
+        requestDelete(listOf(entry))
+        previewDeleteTarget = entry
+    }
+
     fun requestDelete(entries: List<FileEntry>) {
         val current = _state.value
         val profile = current.profile ?: return
         val root = current.root ?: return
         if (entries.isEmpty()) return
+        previewDeleteTarget = null
         val paths = entries.map { entry ->
             if (current.path.isEmpty()) entry.name else "${current.path}/${entry.name}"
         }
@@ -564,6 +571,8 @@ class FilesViewModel(
         viewModelScope.launch {
             runCatching { repository.deleteConfirm(profile, preview.token, confirmCode) }
                 .onSuccess {
+                    val target = previewDeleteTarget
+                    previewDeleteTarget = null
                     _state.update {
                         it.copy(
                             operationLoading = false,
@@ -572,6 +581,7 @@ class FilesViewModel(
                             operationError = null,
                         )
                     }
+                    if (target != null) removePreviewEntry(target)
                     refresh()
                 }
                 .onFailure { error ->
@@ -583,7 +593,47 @@ class FilesViewModel(
     }
 
     fun dismissDeletePreview() {
+        previewDeleteTarget = null
         _state.update { it.copy(deletePreview = null, operationError = null) }
+    }
+
+    private fun removePreviewEntry(target: FileEntry) {
+        val current = _state.value
+        val matches = { entry: FileEntry ->
+            entry.name == target.name && entry.modified == target.modified
+        }
+        val currentEntry = current.previewEntry
+        if (currentEntry == null || !matches(currentEntry)) {
+            _state.update {
+                it.copy(
+                    previewImages = it.previewImages.filterNot(matches),
+                    previewVideos = it.previewVideos.filterNot(matches),
+                )
+            }
+            return
+        }
+        val isVideo = currentEntry.kind == FileKind.Video
+        val entries = if (isVideo) current.previewVideos else current.previewImages
+        val index = entries.indexOfFirst(matches).coerceAtLeast(0)
+        val remaining = entries.filterNot(matches)
+        if (remaining.isEmpty()) {
+            closePreview()
+            return
+        }
+        val next = remaining[index.coerceIn(0, remaining.lastIndex)]
+        _state.update {
+            it.copy(
+                previewEntry = next,
+                previewImages = if (isVideo) it.previewImages else remaining,
+                previewVideos = if (isVideo) remaining else it.previewVideos,
+                previewMediaReady = it.previewMediaReady + 1,
+                previewAsText = false,
+                textPreview = null,
+                pdfPreviewFile = null,
+                previewLoading = false,
+                previewError = null,
+            )
+        }
     }
 
     fun createFolder(name: String) {

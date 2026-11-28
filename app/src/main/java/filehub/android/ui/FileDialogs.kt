@@ -74,6 +74,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -153,6 +154,7 @@ import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
 import io.noties.markwon.ext.tasklist.TaskListPlugin
 import io.noties.markwon.linkify.LinkifyPlugin
+import filehub.android.ui.theme.FileHubDangerDark
 import filehub.android.ui.theme.FileHubLightboxCenter
 import filehub.android.ui.theme.FileHubLightboxEdge
 import java.io.File
@@ -470,6 +472,8 @@ fun PreviewDialog(
     onDownload: () -> Unit,
     onShare: () -> Unit,
     onDetails: () -> Unit,
+    canDelete: Boolean = false,
+    onDelete: () -> Unit = {},
     onVideoEnded: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -641,6 +645,8 @@ fun PreviewDialog(
                         entry = currentEntry,
                         contentColor = contentColor,
                         showDetails = entry.kind == FileKind.Image,
+                        showDelete = canDelete &&
+                            (entry.kind == FileKind.Image || entry.kind == FileKind.Video),
                         showOrientation = entry.kind == FileKind.Video && activity != null,
                         showEdit = onEdit != null && (
                             entry.kind == FileKind.Text ||
@@ -650,6 +656,7 @@ fun PreviewDialog(
                             ),
                         onEdit = onEdit ?: {},
                         onDetails = onLongPress,
+                        onDelete = onDelete,
                         onToggleOrientation = {
                             activity?.requestedOrientation = if (landscape) {
                                 ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -787,10 +794,12 @@ fun PreviewDialog(
                                 entry = entry,
                                 contentColor = contentColor,
                                 showDetails = false,
+                                showDelete = false,
                                 showOrientation = false,
                                 showEdit = false,
                                 onEdit = {},
                                 onDetails = onLongPress,
+                                onDelete = {},
                                 onToggleOrientation = {},
                                 onClose = onClose,
                                 scrim = entry.kind == FileKind.Pdf,
@@ -808,10 +817,12 @@ private fun PreviewTopBar(
     entry: FileEntry,
     contentColor: Color,
     showDetails: Boolean,
+    showDelete: Boolean,
     showOrientation: Boolean,
     showEdit: Boolean,
     onEdit: () -> Unit,
     onDetails: () -> Unit,
+    onDelete: () -> Unit,
     onToggleOrientation: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
@@ -874,6 +885,15 @@ private fun PreviewTopBar(
                     Icons.Filled.MoreVert,
                     contentDescription = stringResource(R.string.file_details),
                     tint = contentColor,
+                )
+            }
+        }
+        if (showDelete) {
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = stringResource(R.string.selection_delete),
+                    tint = FileHubDangerDark,
                 )
             }
         }
@@ -1162,6 +1182,16 @@ private fun VideoPlaylistPreview(
     var playerFailed by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(false) }
 
+    val finishBuffering: () -> Unit = {
+        buffering = false
+        playerFailed = false
+        val view = playerView
+        if (pendingDirection != 0) {
+            view?.slideIn(fromTop = pendingDirection > 0)
+            pendingDirection = 0
+        }
+    }
+
     DisposableEffect(player) {
         onDispose { player?.release() }
     }
@@ -1173,16 +1203,19 @@ private fun VideoPlaylistPreview(
                 playerFailed = false
                 buffering = true
                 videos.getOrNull(index)?.let(currentOnVideoChanged)
+                if (exo.playbackState == Player.STATE_READY) finishBuffering()
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) finishBuffering()
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) finishBuffering()
             }
 
             override fun onRenderedFirstFrame() {
-                buffering = false
-                playerFailed = false
-                val view = playerView ?: return
-                if (pendingDirection != 0) {
-                    view.slideIn(fromTop = pendingDirection > 0)
-                    pendingDirection = 0
-                }
+                finishBuffering()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -1218,10 +1251,14 @@ private fun VideoPlaylistPreview(
         if (!buffering) return@LaunchedEffect
         delay(15_000)
         if (buffering) {
-            pendingDirection = 0
-            buffering = false
-            playerFailed = true
-            playerView?.resetTransition()
+            if (exo.isPlaying) {
+                finishBuffering()
+            } else {
+                pendingDirection = 0
+                buffering = false
+                playerFailed = true
+                playerView?.resetTransition()
+            }
         }
     }
 

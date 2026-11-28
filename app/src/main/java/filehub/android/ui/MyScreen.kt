@@ -98,6 +98,7 @@ fun MyScreen(
     showVersion: Boolean = true,
 ) {
     val profile = state.active
+    val context = LocalContext.current
     val avatarUrl = profile?.avatarVersion?.takeIf { it > 0 }?.let { version ->
         "${profile.baseUrl.trimEnd('/')}/api/v1/me/avatar?v=$version"
     }
@@ -224,7 +225,7 @@ fun MyScreen(
                         )
                         if (avatarUrl != null && imageLoader != null) {
                             AsyncImage(
-                                model = avatarUrl,
+                                model = avatarImageRequest(context, profile, avatarUrl),
                                 imageLoader = imageLoader,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,

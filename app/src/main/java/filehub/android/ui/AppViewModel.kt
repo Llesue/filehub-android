@@ -137,11 +137,18 @@ class AppViewModel(
         }
         viewModelScope.launch {
             var loadedProfileId: String? = null
+            var loadedToken: String? = null
             repository.state.collect { state ->
                 val profile = state.active
-                if (profile?.id == loadedProfileId && _imageLoader.value != null) return@collect
-                loadedProfileId = profile?.id
                 val token = profile?.let { repository.tokenFor(it) }
+                if (profile?.id == loadedProfileId &&
+                    token == loadedToken &&
+                    _imageLoader.value != null
+                ) {
+                    return@collect
+                }
+                loadedProfileId = profile?.id
+                loadedToken = token
                 _imageLoader.value = if (profile != null && token != null) {
                     thumbnailLoaderFactory.get(profile.id, token)
                 } else {
