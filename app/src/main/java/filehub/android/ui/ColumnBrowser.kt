@@ -93,8 +93,8 @@ data class ColumnSnapshot(
     val title: String = "",
     val entries: List<FileEntry> = emptyList(),
     val nextCursor: String? = null,
-    val sort: FileSort = FileSort.Name,
-    val order: SortOrder = SortOrder.Asc,
+    val sort: FileSort = FileSort.Modified,
+    val order: SortOrder = SortOrder.Desc,
     val view: BrowserViewMode = BrowserViewMode.List,
 )
 
@@ -324,6 +324,7 @@ fun ColumnBrowserScreen(
         !entry.isDir && (
             entry.kind == FileKind.Text ||
                 entry.kind == FileKind.Code ||
+                entry.kind == FileKind.Config ||
                 entry.isMarkdown ||
                 files.previewAsText
             )
@@ -369,6 +370,9 @@ fun ColumnBrowserScreen(
     val leftListState = rememberLazyListState()
     var offlineExpanded by remember { mutableStateOf(false) }
     val offlineHint = stringResource(R.string.browse_root_offline_toast)
+    val rootsHint = stringResource(
+        if (session.loading) R.string.server_loading else R.string.column_no_roots,
+    )
     val context = LocalContext.current
     val onlineRoots = session.roots.filter { it.online != false }
     val offlineRoots = session.roots.filter { it.online == false }
@@ -392,6 +396,7 @@ fun ColumnBrowserScreen(
                 item(key = "landscape-server") {
                     LandscapeServerHeader(
                         profile = session.active,
+                        loading = session.loading,
                         imageLoader = imageLoader,
                         onOpenServers = { onOpenServerPicker?.invoke() },
                         onOpenMy = onOpenMy,
@@ -466,7 +471,7 @@ fun ColumnBrowserScreen(
                         }
                         if (onlineRoots.isEmpty() && offlineRoots.isEmpty()) {
                             item(key = "empty-roots") {
-                                ColumnHint(stringResource(R.string.column_no_roots))
+                                ColumnHint(rootsHint)
                             }
                         }
                     }
@@ -497,7 +502,7 @@ fun ColumnBrowserScreen(
                         }
                     }
                     null -> item(key = "no-level") {
-                        ColumnHint(stringResource(R.string.column_no_roots))
+                        ColumnHint(rootsHint)
                     }
                 }
                 item(key = "landscape-share") {
@@ -572,6 +577,7 @@ fun ColumnBrowserScreen(
 @Composable
 private fun LandscapeServerHeader(
     profile: ServerProfile?,
+    loading: Boolean,
     imageLoader: ImageLoader?,
     onOpenServers: () -> Unit,
     onOpenMy: (() -> Unit)?,
@@ -592,7 +598,9 @@ private fun LandscapeServerHeader(
         )
         Spacer(Modifier.width(9.dp))
         Text(
-            text = profile?.displayName ?: stringResource(R.string.servers_empty_title),
+            text = profile?.displayName ?: stringResource(
+                if (loading) R.string.server_loading else R.string.servers_empty_title,
+            ),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,

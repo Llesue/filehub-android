@@ -96,6 +96,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -139,6 +140,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import android.view.View
+import android.view.ViewConfiguration
+import android.view.MotionEvent
+import kotlin.math.abs
 import android.text.method.ScrollingMovementMethod
 import android.widget.TextView
 import coil3.ImageLoader
@@ -155,6 +159,8 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -440,6 +446,7 @@ private fun expiryLabel(days: Int?): String = when (days) {
 fun PreviewDialog(
     entry: FileEntry,
     imageEntries: List<FileEntry>,
+    videoEntries: List<FileEntry> = emptyList(),
     session: Long,
     imageLoader: ImageLoader?,
     imageUrlFor: (FileEntry) -> String?,
@@ -593,6 +600,7 @@ fun PreviewDialog(
                 PreviewBody(
                     entry = entry,
                     pages = pages,
+                    videoEntries = videoEntries,
                     pagerState = pagerState,
                     imageLoader = imageLoader,
                     imageUrlFor = imageUrlFor,
@@ -613,6 +621,7 @@ fun PreviewDialog(
                     onImageTap = { imageFullscreen = !imageFullscreen },
                     onImageDoubleTapZoomIn = { imageFullscreen = true },
                     onControlsVisibilityChanged = { controlsVisible = it },
+                    onVideoChanged = onPageChanged,
                     onVideoEnded = onVideoEnded,
                     useLightboxBackdrop = lightboxBackdrop,
                     modifier = Modifier.fillMaxSize(),
@@ -636,6 +645,7 @@ fun PreviewDialog(
                         showEdit = onEdit != null && (
                             entry.kind == FileKind.Text ||
                                 entry.kind == FileKind.Code ||
+                                entry.kind == FileKind.Config ||
                                 entry.isMarkdown
                             ),
                         onEdit = onEdit ?: {},
@@ -711,6 +721,7 @@ fun PreviewDialog(
                 val textMode = previewAsText ||
                     entry.kind == FileKind.Text ||
                     entry.kind == FileKind.Code ||
+                    entry.kind == FileKind.Config ||
                     entry.isMarkdown
                 if (textMode) {
                     TextPreviewScaffold(
@@ -736,6 +747,7 @@ fun PreviewDialog(
                         PreviewBody(
                             entry = entry,
                             pages = pages,
+                            videoEntries = videoEntries,
                             pagerState = pagerState,
                             imageLoader = imageLoader,
                             imageUrlFor = imageUrlFor,
@@ -756,6 +768,7 @@ fun PreviewDialog(
                             onImageTap = {},
                             onImageDoubleTapZoomIn = {},
                             onControlsVisibilityChanged = {},
+                            onVideoChanged = {},
                             onVideoEnded = onVideoEnded,
                             pdfFullWidth = pdfFullWidth,
                             onPdfScrollDirection = { direction ->
@@ -872,6 +885,7 @@ private fun PreviewTopBar(
 private fun PreviewBody(
     entry: FileEntry,
     pages: List<FileEntry>,
+    videoEntries: List<FileEntry>,
     pagerState: androidx.compose.foundation.pager.PagerState,
     imageLoader: ImageLoader?,
     imageUrlFor: (FileEntry) -> String?,
@@ -892,6 +906,7 @@ private fun PreviewBody(
     onImageTap: () -> Unit,
     onImageDoubleTapZoomIn: () -> Unit,
     onControlsVisibilityChanged: (Boolean) -> Unit,
+    onVideoChanged: (FileEntry) -> Unit,
     onVideoEnded: () -> Unit,
     pdfFullWidth: Boolean = false,
     onPdfScrollDirection: ((Int) -> Unit)? = null,
@@ -1029,54 +1044,70 @@ private fun PreviewBody(
                 }
             }
             (entry.kind == FileKind.Video || entry.kind == FileKind.Audio) && downloadUrlFor(entry) != null -> {
-                val url = downloadUrlFor(entry).orEmpty()
-                val player = remember(url, mediaReady) { playerFactory() }
-                DisposableEffect(player) {
-                    val listener = object : Player.Listener {
-                        override fun onPlaybackStateChanged(playbackState: Int) {
-                            if (playbackState == Player.STATE_ENDED) onVideoEnded()
-                        }
-                    }
-                    player?.addListener(listener)
-                    onDispose {
-                        player?.removeListener(listener)
-                        player?.release()
-                    }
-                }
-                LaunchedEffect(player, url) {
-                    if (player != null) {
-                        player.setMediaItem(MediaItem.fromUri(url))
-                        player.prepare()
-                        player.playWhenReady = true
-                    }
-                }
-                if (player != null) {
-                    AndroidView(
-                        factory = { context ->
-                            PlayerView(context).apply {
-                                useController = true
-                                controllerAutoShow = false
-                                controllerShowTimeoutMs = 3500
-                                setControllerVisibilityListener(
-                                    object : PlayerView.ControllerVisibilityListener {
-                                        override fun onVisibilityChanged(visibility: Int) {
-                                            onControlsVisibilityChanged(visibility == View.VISIBLE)
-                                        }
-                                    },
-                                )
-                                this.player = player
-                                hideController()
-                            }
-                        },
-                        update = { it.player = player },
-                        modifier = Modifier.fillMaxSize(),
+                if (entry.kind == FileKind.Video && videoEntries.isNotEmpty()) {
+                    VideoPlaylistPreview(
+                        entry = entry,
+                        videos = videoEntries,
+                        mediaReady = mediaReady,
+                        playerFactory = playerFactory,
+                        downloadUrlFor = downloadUrlFor,
+                        contentColor = contentColor,
+                        onControlsVisibilityChanged = onControlsVisibilityChanged,
+                        onVideoChanged = onVideoChanged,
                     )
                 } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(text = stringResource(R.string.preview_unsupported), color = contentColor)
+                    val url = downloadUrlFor(entry).orEmpty()
+                    val player = remember(url, mediaReady) { playerFactory() }
+                    DisposableEffect(player) {
+                        val listener = object : Player.Listener {
+                            override fun onPlaybackStateChanged(playbackState: Int) {
+                                if (playbackState == Player.STATE_ENDED) onVideoEnded()
+                            }
+                        }
+                        player?.addListener(listener)
+                        onDispose {
+                            player?.removeListener(listener)
+                            player?.release()
+                        }
+                    }
+                    LaunchedEffect(player, url) {
+                        if (player != null) {
+                            player.setMediaItem(MediaItem.fromUri(url))
+                            player.prepare()
+                            player.playWhenReady = true
+                        }
+                    }
+                    if (player != null) {
+                        AndroidView(
+                            factory = { context ->
+                                PlayerView(context).apply {
+                                    useController = true
+                                    controllerAutoShow = false
+                                    controllerShowTimeoutMs = 3500
+                                    setControllerVisibilityListener(
+                                        object : PlayerView.ControllerVisibilityListener {
+                                            override fun onVisibilityChanged(visibility: Int) {
+                                                onControlsVisibilityChanged(visibility == View.VISIBLE)
+                                            }
+                                        },
+                                    )
+                                    this.player = player
+                                    hideController()
+                                }
+                            },
+                            update = { it.player = player },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.preview_unsupported),
+                                color = contentColor,
+                            )
+                        }
                     }
                 }
             }
@@ -1092,6 +1123,265 @@ private fun PreviewBody(
                 )
             }
         }
+    }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun VideoPlaylistPreview(
+    entry: FileEntry,
+    videos: List<FileEntry>,
+    mediaReady: Int,
+    playerFactory: () -> ExoPlayer?,
+    downloadUrlFor: (FileEntry) -> String?,
+    contentColor: Color,
+    onControlsVisibilityChanged: (Boolean) -> Unit,
+    onVideoChanged: (FileEntry) -> Unit,
+) {
+    val videoKeys = remember(videos) { videos.map { it.name to it.modified } }
+    val items = remember(videoKeys, mediaReady) {
+        videos.mapNotNull { video ->
+            val url = downloadUrlFor(video) ?: return@mapNotNull null
+            MediaItem.Builder()
+                .setMediaId(video.name)
+                .setUri(url)
+                .setMediaMetadata(
+                    MediaMetadata.Builder().setTitle(video.name).build(),
+                )
+                .build()
+        }
+    }
+    val initialIndex = videos.indexOfFirst {
+        it.name == entry.name && it.modified == entry.modified
+    }.coerceAtLeast(0)
+    val player = remember(items, mediaReady) { playerFactory() }
+    val currentOnVideoChanged by rememberUpdatedState(onVideoChanged)
+    val currentOnControls by rememberUpdatedState(onControlsVisibilityChanged)
+    var playerView by remember { mutableStateOf<SwipePlayerView?>(null) }
+    var pendingDirection by remember { mutableIntStateOf(0) }
+    var playerFailed by remember { mutableStateOf(false) }
+    var buffering by remember { mutableStateOf(false) }
+
+    DisposableEffect(player) {
+        onDispose { player?.release() }
+    }
+    DisposableEffect(player, videos) {
+        val exo = player ?: return@DisposableEffect onDispose {}
+        val listener = object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val index = exo.currentMediaItemIndex
+                playerFailed = false
+                buffering = true
+                videos.getOrNull(index)?.let(currentOnVideoChanged)
+            }
+
+            override fun onRenderedFirstFrame() {
+                buffering = false
+                playerFailed = false
+                val view = playerView ?: return
+                if (pendingDirection != 0) {
+                    view.slideIn(fromTop = pendingDirection > 0)
+                    pendingDirection = 0
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                pendingDirection = 0
+                buffering = false
+                playerFailed = true
+                playerView?.resetTransition()
+            }
+        }
+        exo.addListener(listener)
+        onDispose { exo.removeListener(listener) }
+    }
+    LaunchedEffect(player, items) {
+        if (player != null && items.isNotEmpty()) {
+            playerFailed = false
+            buffering = true
+            player.preloadConfiguration = ExoPlayer.PreloadConfiguration(5_000_000L)
+            player.setMediaItems(items, initialIndex.coerceIn(0, items.lastIndex), 0)
+            player.prepare()
+            player.playWhenReady = true
+        }
+    }
+
+    val exo = player
+    if (exo == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(text = stringResource(R.string.preview_unsupported), color = contentColor)
+        }
+        return
+    }
+
+    LaunchedEffect(buffering) {
+        if (!buffering) return@LaunchedEffect
+        delay(15_000)
+        if (buffering) {
+            pendingDirection = 0
+            buffering = false
+            playerFailed = true
+            playerView?.resetTransition()
+        }
+    }
+
+    val animateSwitch: (Boolean) -> Unit = { up ->
+        val hasTarget = if (up) exo.hasNextMediaItem() else exo.hasPreviousMediaItem()
+        if (hasTarget && pendingDirection == 0) {
+            pendingDirection = if (up) -1 else 1
+            buffering = true
+            val wasFailed = playerFailed
+            playerFailed = false
+            val action = {
+                if (wasFailed) {
+                    val current = videos.indexOfFirst {
+                        it.name == entry.name && it.modified == entry.modified
+                    }.takeIf { it >= 0 } ?: exo.currentMediaItemIndex.coerceAtLeast(0)
+                    val target = (current + if (up) 1 else -1)
+                        .coerceIn(0, items.lastIndex)
+                    exo.setMediaItems(items, target, 0)
+                    exo.prepare()
+                } else {
+                    if (up) exo.seekToNextMediaItem() else exo.seekToPreviousMediaItem()
+                }
+                exo.playWhenReady = true
+            }
+            val view = playerView
+            if (view != null) {
+                view.slideOut(up = up, onEnd = action)
+            } else {
+                action()
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { context ->
+                SwipePlayerView(context).apply {
+                    useController = true
+                    controllerAutoShow = false
+                    controllerShowTimeoutMs = 3500
+                    setKeepContentOnPlayerReset(true)
+                    setShowPreviousButton(true)
+                    setShowNextButton(true)
+                    setControllerVisibilityListener(
+                        object : PlayerView.ControllerVisibilityListener {
+                            override fun onVisibilityChanged(visibility: Int) {
+                                currentOnControls(visibility == View.VISIBLE)
+                            }
+                        },
+                    )
+                    onSwipeUp = { animateSwitch(true) }
+                    onSwipeDown = { animateSwitch(false) }
+                    playerView = this
+                    this.player = exo
+                    hideController()
+                }
+            },
+            update = { view ->
+                playerView = view
+                view.player = exo
+                view.onSwipeUp = { animateSwitch(true) }
+                view.onSwipeDown = { animateSwitch(false) }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (buffering) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(color = contentColor)
+            }
+        }
+        if (playerFailed) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.video_playback_failed),
+                    color = contentColor,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+private class SwipePlayerView(context: Context) : PlayerView(context) {
+    var onSwipeUp: (() -> Unit)? = null
+    var onSwipeDown: (() -> Unit)? = null
+
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop
+    private val threshold = 72f * resources.displayMetrics.density
+    private var downX = 0f
+    private var downY = 0f
+    private var swiping = false
+
+    fun slideOut(up: Boolean, onEnd: () -> Unit) {
+        animate().cancel()
+        val distance = (if (up) -1f else 1f) * travelDistance()
+        animate()
+            .translationY(distance)
+            .alpha(0.2f)
+            .setDuration(140L)
+            .withEndAction(onEnd)
+            .start()
+    }
+
+    fun slideIn(fromTop: Boolean) {
+        animate().cancel()
+        translationY = (if (fromTop) -1f else 1f) * travelDistance()
+        alpha = 0.2f
+        animate()
+            .translationY(0f)
+            .alpha(1f)
+            .setDuration(180L)
+            .start()
+    }
+
+    fun resetTransition() {
+        animate().cancel()
+        translationY = 0f
+        alpha = 1f
+    }
+
+    private fun travelDistance(): Float =
+        if (height > 0) height.toFloat() else resources.displayMetrics.heightPixels.toFloat()
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
+                swiping = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.x - downX
+                val dy = event.y - downY
+                if (!swiping && abs(dy) > slop && abs(dy) > abs(dx) * 1.2f) {
+                    swiping = true
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (swiping) {
+                    val dy = event.y - downY
+                    when {
+                        dy <= -threshold -> onSwipeUp?.invoke()
+                        dy >= threshold -> onSwipeDown?.invoke()
+                    }
+                    swiping = false
+                    return true
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> swiping = false
+        }
+        return super.onTouchEvent(event)
     }
 }
 

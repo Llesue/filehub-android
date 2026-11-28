@@ -316,6 +316,7 @@ fun FileBrowserScreen(
         !entry.isDir && (
             entry.kind == FileKind.Text ||
                 entry.kind == FileKind.Code ||
+                entry.kind == FileKind.Config ||
                 entry.isMarkdown ||
                 state.previewAsText
             )
@@ -784,6 +785,39 @@ fun FileBrowserScreen(
                 target.view == BrowserViewMode.Grid && state.view == BrowserViewMode.Grid -> {
                     gridState.scrollToItem(index, target.offset.coerceAtLeast(0))
                     viewModel.consumeRestore()
+                }
+            }
+        }
+
+        LaunchedEffect(
+            state.previewEntry?.name,
+            state.previewEntry?.modified,
+            state.view,
+            state.entries.size,
+        ) {
+            val preview = state.previewEntry ?: return@LaunchedEffect
+            if (preview.kind != FileKind.Image && preview.kind != FileKind.Video) {
+                return@LaunchedEffect
+            }
+            val index = state.entries.indexOfFirst {
+                it.name == preview.name && it.modified == preview.modified
+            }
+            if (index < 0) return@LaunchedEffect
+            when {
+                state.view == BrowserViewMode.List && tabletMode -> {
+                    if (tabletListState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+                        tabletListState.scrollToItem(index)
+                    }
+                }
+                state.view == BrowserViewMode.List -> {
+                    if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+                        listState.scrollToItem(index)
+                    }
+                }
+                else -> {
+                    if (gridState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+                        gridState.scrollToItem(index)
+                    }
                 }
             }
         }
@@ -1473,6 +1507,7 @@ fun FileBrowserScreen(
         PreviewDialog(
             entry = entry,
             imageEntries = state.previewImages,
+            videoEntries = state.previewVideos,
             session = state.previewSession,
             imageLoader = imageLoader,
             imageUrlFor = viewModel::previewImageUrl,
@@ -1502,7 +1537,7 @@ fun FileBrowserScreen(
             },
             onShare = { viewModel.openShare(entry) },
             onDetails = { viewModel.showDetails(entry) },
-            onVideoEnded = onResumeAudio,
+            onVideoEnded = {},
             onClose = {
                 val wasVideo = state.previewEntry?.kind == FileKind.Video
                 viewModel.closePreview()
@@ -2132,10 +2167,16 @@ private fun FileDetailsDialog(
     } else {
         Formatter.formatShortFileSize(context, entry.size)
     }
-    val modified = relativeTimeText(entry.modified)
+    val modified = absoluteTimeText(entry.modified)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { FileNameText(entry.name) },
+        title = {
+            Text(
+                text = entry.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 DetailRow(stringResource(R.string.file_type), fileKindLabel(entry.kind))

@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Locale
+import java.util.TimeZone
 
 class TimeFormatTest {
     private val now = 1_700_000_000_000L
@@ -55,6 +57,17 @@ class TimeFormatTest {
         assertEquals(1, relativeTimeOf(now, now - 365L * 86_400_000).amount)
         assertEquals(3, relativeTimeOf(now, now - 3 * 365L * 86_400_000).amount)
         assertEquals(10, relativeTimeOf(now, now - 10 * 365L * 86_400_000).amount)
+    }
+
+    @Test
+    fun absoluteTimeUsesRequestedTimeZone() {
+        val shanghai = TimeZone.getTimeZone("Asia/Shanghai")
+        assertEquals(
+            "2023-11-15 06:13:20",
+            absoluteTimeText(1_700_000_000L, shanghai, Locale.US),
+        )
+        assertEquals("—", absoluteTimeText(null, shanghai, Locale.US))
+        assertEquals("—", absoluteTimeText(0L, shanghai, Locale.US))
     }
 
     @Test

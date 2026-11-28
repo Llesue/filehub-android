@@ -60,6 +60,9 @@ import androidx.compose.ui.semantics.semantics
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
 import android.text.format.Formatter
+import android.widget.Toast
+import androidx.compose.material3.Switch
+import androidx.compose.ui.platform.LocalContext
 import filehub.android.BuildConfig
 import filehub.android.R
 import filehub.android.data.SessionState
@@ -86,6 +89,8 @@ fun MyScreen(
     onThemeChange: (String) -> Unit,
     language: String,
     onLanguageChange: (String) -> Unit,
+    appLockEnabled: Boolean? = null,
+    onAppLockChange: (Boolean) -> Unit = {},
     onOpenDrawer: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
@@ -120,7 +125,9 @@ fun MyScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = stringResource(R.string.browse_no_server_body),
+                    text = stringResource(
+                        if (state.loading) R.string.server_loading else R.string.browse_no_server_body,
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -301,6 +308,12 @@ fun MyScreen(
                     onLanguageChange = onLanguageChange,
                 )
             }
+            val securityCard: @Composable () -> Unit = {
+                AppLockCard(
+                    enabled = appLockEnabled,
+                    onEnabledChange = onAppLockChange,
+                )
+            }
             val actions: @Composable () -> Unit = {
                 ActionGrid(
                     onTransfers = onTransfers,
@@ -327,6 +340,7 @@ fun MyScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         appearanceCard()
+                        securityCard()
                         actions()
                     }
                 }
@@ -334,6 +348,7 @@ fun MyScreen(
                 serverCard()
                 if (showVersion) versionCard()
                 appearanceCard()
+                securityCard()
                 actions()
             }
 
@@ -630,6 +645,59 @@ private fun VersionRow(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun AppLockCard(
+    enabled: Boolean?,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findAppLockActivity() }
+    val available = remember(context) { canUseAppLock(context) }
+    val enableTitle = stringResource(R.string.app_lock_enable_title)
+    val disableTitle = stringResource(R.string.app_lock_disable_title)
+    val promptSubtitle = stringResource(R.string.app_lock_prompt_subtitle)
+    val failed = stringResource(R.string.app_lock_failed)
+    InfoCard(title = stringResource(R.string.security), spacing = 4.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.app_lock),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = stringResource(
+                        if (available) R.string.app_lock_desc else R.string.app_lock_unavailable,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.size(12.dp))
+            Switch(
+                checked = enabled == true,
+                enabled = available && enabled != null,
+                onCheckedChange = { checked ->
+                    val host = activity
+                    if (host == null) {
+                        Toast.makeText(context, failed, Toast.LENGTH_SHORT).show()
+                        return@Switch
+                    }
+                    promptAppLock(
+                        activity = host,
+                        title = if (checked) enableTitle else disableTitle,
+                        subtitle = promptSubtitle,
+                        onSuccess = { onEnabledChange(checked) },
+                        onFailure = {
+                            Toast.makeText(context, failed, Toast.LENGTH_SHORT).show()
+                        },
+                    )
+                },
+            )
         }
     }
 }

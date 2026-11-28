@@ -6,6 +6,7 @@
     <string name="tab_browse">浏览</string>
     <string name="tab_my">我的</string>
 
+    <string name="server_loading">正在加载…</string>
     <string name="servers_empty_title">还没有服务器</string>
     <string name="servers_empty_body">添加你的第一个 FileHub 实例，之后可以在多个服务器之间切换。</string>
     <string name="server_picker_title">选择服务器</string>
@@ -72,7 +73,7 @@
     <string name="file_read_only">只读</string>
     <string name="file_read_only_reason">此位置为只读。</string>
     <string name="file_login_required">设备授权已过期，请重新登录。</string>
-    <string name="file_details">属性</string>
+    <string name="file_details">详情</string>
     <string name="file_name">名称</string>
     <string name="file_type">类型</string>
     <string name="file_size">大小</string>
@@ -102,6 +103,11 @@
     <string name="file_type_label_archive">压缩包</string>
     <string name="file_type_label_code">代码</string>
     <string name="file_type_label_apk">安卓安装包</string>
+    <string name="file_type_label_installer">安装包</string>
+    <string name="file_type_label_app">应用</string>
+    <string name="file_type_label_library">库文件</string>
+    <string name="file_type_label_shortcut">快捷方式</string>
+    <string name="file_type_label_config">配置文件</string>
     <string name="file_type_label_ebook">电子书</string>
     <string name="file_type_label_font">字体</string>
     <string name="file_type_label_disk_image">磁盘镜像</string>
@@ -135,8 +141,9 @@
     <string name="preview_loading">正在加载预览…</string>
     <string name="preview_zoom_reset">还原缩放</string>
     <string name="preview_unsupported">该类型暂不支持预览。</string>
+    <string name="video_playback_failed">无法播放此视频，可能是设备不支持该分辨率或编码。</string>
     <string name="preview_text">文本预览</string>
-    <string name="selection_properties">属性</string>
+    <string name="selection_properties">详情</string>
     <string name="search_title">搜索</string>
     <string name="search_hint">搜索文件名…</string>
     <string name="search_all">全部位置</string>
@@ -316,6 +323,18 @@
     <string name="extract">解压 ZIP</string>
     <string name="archive_name">压缩包名称</string>
     <string name="appearance">外观</string>
+    <string name="security">安全</string>
+    <string name="app_lock">应用锁</string>
+    <string name="app_lock_desc">打开或回到 App 时验证身份</string>
+    <string name="app_lock_unavailable">此设备不支持生物识别或锁屏密码</string>
+    <string name="app_lock_title">FileHub 已锁定</string>
+    <string name="app_lock_body">解锁后查看服务器和文件</string>
+    <string name="app_lock_unlock">解锁</string>
+    <string name="app_lock_prompt_title">解锁 FileHub</string>
+    <string name="app_lock_prompt_subtitle">验证身份以继续</string>
+    <string name="app_lock_enable_title">开启应用锁</string>
+    <string name="app_lock_disable_title">关闭应用锁</string>
+    <string name="app_lock_failed">验证失败，请重试</string>
     <string name="theme">主题</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">浅色</string>
@@ -549,7 +568,7 @@
     <string name="preview_open_as_text">以文本方式打开</string>
     <string name="preview_download">下载</string>
     <string name="preview_share">分享</string>
-    <string name="preview_details">属性</string>
+    <string name="preview_details">详情</string>
     <string name="preview_copy_all">复制全文</string>
     <string name="preview_copied">已复制</string>
     <string name="preview_reload">重新加载</string>

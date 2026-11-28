@@ -103,8 +103,8 @@ data class FileBrowserState(
     val readOnly: Boolean = false,
     val readOnlyReason: String? = null,
     val stale: Boolean = false,
-    val sort: FileSort = FileSort.Name,
-    val order: SortOrder = SortOrder.Asc,
+    val sort: FileSort = FileSort.Modified,
+    val order: SortOrder = SortOrder.Desc,
     val view: BrowserViewMode = BrowserViewMode.List,
     val restore: ScrollRestore? = null,
     val error: String? = null,
@@ -117,6 +117,7 @@ data class FileBrowserState(
     val previewEntry: FileEntry? = null,
     val previewImages: List<FileEntry> = emptyList(),
     val previewImagesPinned: Boolean = false,
+    val previewVideos: List<FileEntry> = emptyList(),
     val previewSession: Long = 0,
     val previewAsText: Boolean = false,
     val textPreview: TextFileDto? = null,
@@ -621,6 +622,7 @@ class FilesViewModel(
         }
         val needsText = entry.kind == FileKind.Text ||
             entry.kind == FileKind.Code ||
+            entry.kind == FileKind.Config ||
             entry.isMarkdown
         val needsPdf = entry.kind == FileKind.Pdf
         val needsMedia = entry.kind == FileKind.Video || entry.kind == FileKind.Audio
@@ -630,11 +632,17 @@ class FilesViewModel(
             else -> current.entries.filter { it.kind == FileKind.Image }
                 .ifEmpty { listOf(entry) }
         }
+        val videos = when {
+            entry.kind != FileKind.Video -> emptyList()
+            else -> current.entries.filter { it.kind == FileKind.Video }
+                .ifEmpty { listOf(entry) }
+        }
         _state.update {
             it.copy(
                 previewEntry = entry,
                 previewImages = images,
                 previewImagesPinned = pinImages,
+                previewVideos = videos,
                 previewSession = it.previewSession + 1,
                 previewAsText = false,
                 textPreview = null,
@@ -701,6 +709,7 @@ class FilesViewModel(
                 previewEntry = entry,
                 previewImages = emptyList(),
                 previewImagesPinned = true,
+                previewVideos = emptyList(),
                 previewSession = it.previewSession + 1,
                 previewAsText = true,
                 textPreview = null,
@@ -773,6 +782,8 @@ class FilesViewModel(
             it.copy(
                 previewEntry = null,
                 previewImages = emptyList(),
+                previewImagesPinned = false,
+                previewVideos = emptyList(),
                 textPreview = null,
                 previewLoading = false,
                 previewError = null,
@@ -789,6 +800,7 @@ class FilesViewModel(
             FileKind.Pdf,
             FileKind.Text,
             FileKind.Code,
+            FileKind.Config,
             -> true
             else -> false
         }
@@ -816,6 +828,7 @@ class FilesViewModel(
                 previewEntry = null,
                 previewImages = emptyList(),
                 previewImagesPinned = false,
+                previewVideos = emptyList(),
                 previewAsText = false,
                 textPreview = null,
                 previewEncoding = null,
@@ -916,12 +929,11 @@ class FilesViewModel(
     fun setView(view: BrowserViewMode) {
         val current = _state.value
         if (current.view == view) return
-        val target = if (view == BrowserViewMode.List) {
-            ScrollRestore(view, listIndex, listOffset)
-        } else {
-            ScrollRestore(view, gridIndex, gridOffset)
-        }
-        _state.update { it.copy(view = view, restore = target) }
+        listIndex = 0
+        listOffset = 0
+        gridIndex = 0
+        gridOffset = 0
+        _state.update { it.copy(view = view, restore = ScrollRestore(view, 0, 0)) }
         persistCurrentState()
     }
 
@@ -1691,6 +1703,22 @@ class FilesViewModel(
                     } else {
                         it.previewImages
                     }
+                    val previewVideos = if (
+                        !append && cursor == null &&
+                        previewEntry?.kind == FileKind.Video && it.previewVideos.size <= 1
+                    ) {
+                        val videos = listing.entries.filter { entry -> entry.kind == FileKind.Video }
+                        if (videos.any { entry ->
+                                entry.name == previewEntry.name && entry.modified == previewEntry.modified
+                            }
+                        ) {
+                            videos
+                        } else {
+                            it.previewVideos
+                        }
+                    } else {
+                        it.previewVideos
+                    }
                     it.copy(
                         path = path,
                         entries = if (append) it.entries + listing.entries else listing.entries,
@@ -1703,6 +1731,7 @@ class FilesViewModel(
                         loginRequired = false,
                         error = null,
                         previewImages = previewImages,
+                        previewVideos = previewVideos,
                     )
                 }
             }.onFailure { error ->

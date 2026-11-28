@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -144,6 +145,7 @@ fun TabletBrowseScreen(
                         .fillMaxHeight(),
                 ) {
                     when {
+                        active == null && session.loading -> TabletLoading()
                         active == null -> TabletEmpty(
                             title = stringResource(R.string.browse_no_server_title),
                             body = stringResource(R.string.browse_no_server_body),
@@ -224,7 +226,9 @@ private fun TabletTopBar(
                 )
                 Spacer(Modifier.width(9.dp))
                 Text(
-                    text = active?.displayName ?: stringResource(R.string.servers_empty_title),
+                    text = active?.displayName ?: stringResource(
+                        if (session.loading) R.string.server_loading else R.string.servers_empty_title,
+                    ),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -432,14 +436,20 @@ private fun TabletSidebar(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.weight(1f)) {
-                RootColumn(
-                    roots = session.roots,
-                    selectedRootId = selectedRootId,
-                    enabled = true,
-                    baseUrl = session.active?.baseUrl,
-                    imageLoader = imageLoader,
-                    onSelect = onOpenRoot,
-                )
+                if (session.loading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    RootColumn(
+                        roots = session.roots,
+                        selectedRootId = selectedRootId,
+                        enabled = true,
+                        baseUrl = session.active?.baseUrl,
+                        imageLoader = imageLoader,
+                        onSelect = onOpenRoot,
+                    )
+                }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
             Row(
@@ -468,6 +478,13 @@ private fun TabletSidebar(
                 clientUpdate = clientUpdate,
             )
         }
+    }
+}
+
+@Composable
+private fun TabletLoading() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator()
     }
 }
 

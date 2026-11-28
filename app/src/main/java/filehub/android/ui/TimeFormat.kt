@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import filehub.android.R
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.abs
 
 enum class RelativeUnit {
@@ -46,6 +50,17 @@ fun relativeTimeOf(nowMs: Long, targetMs: Long): RelativeTime {
         diff < YEAR_MS -> RelativeTime(diff / MONTH_MS, RelativeUnit.Months, future)
         else -> RelativeTime(diff / YEAR_MS, RelativeUnit.Years, future)
     }
+}
+
+fun absoluteTimeText(
+    epochSeconds: Long?,
+    timeZone: TimeZone = TimeZone.getDefault(),
+    locale: Locale = Locale.getDefault(),
+): String {
+    if (epochSeconds == null || epochSeconds <= 0) return "—"
+    val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", locale)
+    formatter.timeZone = timeZone
+    return formatter.format(Date(epochSeconds * 1000L))
 }
 
 fun relativeTimeText(context: Context, epochSeconds: Long?): String {

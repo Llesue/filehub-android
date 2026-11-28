@@ -1,5 +1,25 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FF000000" android:pathData="M6,2 L14,2 L19,7 L19,22 L6,22 Z M13,4 L13,8 L17,8 Z" />
-    <path android:fillColor="#FFFFFFFF" android:pathData="M9,12 L16,12 L16,13.2 L9,13.2 Z M9,14.8 L16,14.8 L16,16 L9,16 Z M9,17.6 L16,17.6 L16,18.8 L9,18.8 Z M11.3,12 L12.5,12 L12.5,18.8 L11.3,18.8 Z" />
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path
+        android:pathData="M6 3h7l5 5v13H6z"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M13 3v5h5"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M9 12h6M9 15h6M9 18h6M12 12v6"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent" />
 </vector>

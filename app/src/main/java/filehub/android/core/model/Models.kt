@@ -75,6 +75,11 @@ enum class FileKind {
     Archive,
     Code,
     Apk,
+    Installer,
+    App,
+    Library,
+    Shortcut,
+    Config,
     Ebook,
     Font,
     DiskImage,
@@ -190,9 +195,7 @@ data class PublicShareMeta(
 )
 
 private val KNOWN_CODE_NAMES = setOf("dockerfile", "makefile", "cmakelists.txt", "rakefile")
-private val KNOWN_TEXT_NAMES = setOf(
-    "license", "licence", "readme", "changelog", ".gitignore", ".gitattributes", ".env",
-)
+private val KNOWN_TEXT_NAMES = setOf("license", "licence", "readme")
 
 internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKind {
     if (isDir) return FileKind.Folder
@@ -203,20 +206,37 @@ internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKin
     if (lowerName in KNOWN_TEXT_NAMES) return FileKind.Text
     return when {
         mime == "application/vnd.android.package-archive" || ext == "apk" -> FileKind.Apk
+        ext in setOf("msi", "msix", "appx", "msu", "pkg", "deb", "rpm") -> FileKind.Installer
+        ext in setOf("exe", "com", "scr") -> FileKind.App
+        ext in setOf("dll", "sys", "drv", "ocx", "so", "dylib") -> FileKind.Library
+        ext in setOf("lnk", "url", "webloc", "desktop") -> FileKind.Shortcut
+        ext in setOf("inf", "ini", "cfg", "conf", "env", "reg", "properties") -> FileKind.Config
         mime.startsWith("image/") -> FileKind.Image
-        ext in setOf("jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "heic", "heif", "jxl") -> FileKind.Image
+        ext in setOf(
+            "jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff",
+            "heic", "heif", "jxl", "svg", "icns", "exr", "hdr", "tga", "cr2", "nef",
+            "arw", "dng",
+        ) -> FileKind.Image
         mime.startsWith("video/") -> FileKind.Video
-        ext in setOf("mp4", "mov", "mkv", "webm", "avi", "m4v", "mpg", "mpeg", "3gp", "wmv", "flv") -> FileKind.Video
+        ext in setOf(
+            "mp4", "mov", "mkv", "webm", "avi", "m4v", "mpg", "mpeg", "m2ts", "mts",
+            "wmv", "flv", "3gp", "ogv", "vob", "asf", "f4v", "rm", "rmvb",
+        ) -> FileKind.Video
         mime.startsWith("audio/") -> FileKind.Audio
-        ext in setOf("mp3", "wav", "flac", "aac", "ogg", "m4a", "opus", "oga", "wma", "aiff", "amr") -> FileKind.Audio
-        mime == "application/pdf" || ext == "pdf" -> FileKind.Pdf
+        ext in setOf(
+            "mp3", "wav", "flac", "aac", "ogg", "m4a", "opus", "oga", "wma", "aiff",
+            "amr", "ape", "m4b",
+        ) -> FileKind.Audio
+        mime == "application/pdf" || ext in setOf("pdf", "ofd") -> FileKind.Pdf
         ext in setOf("epub", "mobi", "azw", "azw3", "fb2", "djvu") -> FileKind.Ebook
-        ext in setOf("ttf", "otf", "woff", "woff2", "eot") -> FileKind.Font
-        ext in setOf("iso", "img", "dmg", "vhd", "vhdx", "vmdk") -> FileKind.DiskImage
-        ext in setOf("psd", "ai", "xcf", "sketch", "fig", "afdesign", "afphoto") -> FileKind.Design
+        ext in setOf("ttf", "otf", "fon", "woff", "woff2", "eot") -> FileKind.Font
+        ext in setOf("iso", "img", "dmg", "vhd", "vhdx", "vmdk", "wim", "esd") -> FileKind.DiskImage
+        ext in setOf(
+            "psd", "ai", "xd", "sketch", "fig", "eps", "xcf", "afdesign", "afphoto",
+        ) -> FileKind.Design
         ext == "torrent" -> FileKind.Torrent
         ext in setOf("doc", "docx", "rtf", "odt", "docm", "dotm", "dotx", "wps", "caj") -> FileKind.Document
-        ext in setOf("xls", "xlsx", "xlsb", "xlsm", "csv", "tsv", "ods", "et") -> FileKind.Sheet
+        ext in setOf("xls", "xlsx", "xlsb", "xlsm", "xltm", "xltx", "csv", "tsv", "ods", "et") -> FileKind.Sheet
         ext in setOf("ppt", "pptx", "pptm", "potm", "potx", "ppsx", "odp", "dps", "key") -> FileKind.Slide
         ext in setOf("db", "sqlite", "sqlite3", "mdb", "accdb") -> FileKind.Database
         mime.startsWith("application/msword") -> FileKind.Document
@@ -225,12 +245,15 @@ internal fun detectKind(name: String, mimeType: String, isDir: Boolean): FileKin
         mime.startsWith("application/vnd.openxmlformats-officedocument.spreadsheetml") -> FileKind.Sheet
         mime.startsWith("application/vnd.ms-powerpoint") -> FileKind.Slide
         mime.startsWith("application/vnd.openxmlformats-officedocument.presentationml") -> FileKind.Slide
-        ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "cab", "tgz", "aab") -> FileKind.Archive
+        ext in setOf(
+            "zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "cab", "tgz", "tbz2",
+            "txz", "aab",
+        ) -> FileKind.Archive
         ext in setOf(
             "kt", "kts", "java", "rs", "go", "py", "js", "ts", "tsx", "jsx",
             "c", "h", "cpp", "hpp", "cs", "rb", "php", "sh", "zsh", "sql",
-            "json", "yaml", "yml", "toml", "xml", "ini", "conf", "cfg",
-            "properties", "env", "bat", "cmd", "ps1", "psm1", "vbs", "reg", "ahk",
+            "json", "yaml", "yml", "toml", "xml", "bat", "cmd", "ps1", "psm1",
+            "vbs", "wsf", "ahk", "css", "html", "vue", "svelte", "lua", "mjs", "cjs",
         ) -> FileKind.Code
         mime.startsWith("text/") -> FileKind.Text
         ext in setOf("md", "markdown", "txt", "log", "csv", "srt", "ass", "ssa", "vtt", "sub") -> FileKind.Text

@@ -45,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -54,6 +55,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.SystemClock
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
@@ -65,6 +67,9 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -135,6 +140,8 @@ fun FileHubApp(viewModel: AppViewModel) {
     var myModal by remember { mutableStateOf(false) }
     var serverModal by remember { mutableStateOf(false) }
     val session by viewModel.session.collectAsStateWithLifecycle()
+    val appLockEnabled by viewModel.appLockEnabled.collectAsStateWithLifecycle()
+    val appUnlocked by viewModel.appUnlocked.collectAsStateWithLifecycle()
     val browserState by filesViewModel.state.collectAsStateWithLifecycle()
     val connection by viewModel.connection.collectAsStateWithLifecycle()
     val usage by viewModel.usage.collectAsStateWithLifecycle()
@@ -171,6 +178,7 @@ fun FileHubApp(viewModel: AppViewModel) {
         !entry.isDir && (
             entry.kind == filehub.android.core.model.FileKind.Text ||
                 entry.kind == filehub.android.core.model.FileKind.Code ||
+                entry.kind == filehub.android.core.model.FileKind.Config ||
                 entry.isMarkdown ||
                 browserState.previewAsText
             )
@@ -198,7 +206,40 @@ fun FileHubApp(viewModel: AppViewModel) {
         viewModel.clearSessionError()
     }
 
-    LaunchedEffect(notificationDestination) {
+    var previousAppLock by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(appLockEnabled) {
+        val current = appLockEnabled ?: return@LaunchedEffect
+        when {
+            !current -> viewModel.setAppUnlocked(true)
+            previousAppLock == false -> viewModel.setAppUnlocked(true)
+        }
+        previousAppLock = current
+    }
+
+    val lockEnabledNow by rememberUpdatedState(appLockEnabled)
+    var backgroundedAt by remember { mutableStateOf(0L) }
+    DisposableEffect(Unit) {
+        val owner = ProcessLifecycleOwner.get()
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> backgroundedAt = SystemClock.elapsedRealtime()
+                Lifecycle.Event.ON_START -> {
+                    if (lockEnabledNow == true &&
+                        shouldRelock(backgroundedAt, SystemClock.elapsedRealtime())
+                    ) {
+                        viewModel.setAppUnlocked(false)
+                    }
+                    backgroundedAt = 0L
+                }
+                else -> Unit
+            }
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(notificationDestination, appLockEnabled, appUnlocked) {
+        if (appLockEnabled != false && !appUnlocked) return@LaunchedEffect
         val destination = notificationDestination ?: return@LaunchedEffect
         NotificationNavigator.destination.value = null
         destination.profileId?.let(viewModel::activateProfile)
@@ -232,6 +273,17 @@ fun FileHubApp(viewModel: AppViewModel) {
         if (viewModel.connection.value?.profileId == current.profileId) {
             if (tab == MainTab.Servers) tab = MainTab.Browse
             viewModel.clearConnection()
+        }
+    }
+
+    when {
+        appLockEnabled == null -> {
+            AppLockLoading()
+            return
+        }
+        appLockEnabled == true && !appUnlocked -> {
+            AppLockScreen(onUnlocked = { viewModel.setAppUnlocked(true) })
+            return
         }
     }
 
@@ -322,6 +374,8 @@ fun FileHubApp(viewModel: AppViewModel) {
                         onThemeChange = viewModel::setTheme,
                         language = language,
                         onLanguageChange = onLanguageChange,
+                        appLockEnabled = appLockEnabled,
+                        onAppLockChange = viewModel::setAppLockEnabled,
                         onOpenDrawer = drawerAction,
                         onBack = if (mode == ShellMode.Landscape) {
                             { tab = MainTab.Browse }
@@ -430,6 +484,8 @@ fun FileHubApp(viewModel: AppViewModel) {
                         language = language,
                         onThemeChange = viewModel::setTheme,
                         onLanguageChange = onLanguageChange,
+                        appLockEnabled = appLockEnabled,
+                        onAppLockChange = viewModel::setAppLockEnabled,
                         onClose = { myModal = false },
                         onLogout = viewModel::logout,
                         onRefresh = viewModel::refreshRoots,

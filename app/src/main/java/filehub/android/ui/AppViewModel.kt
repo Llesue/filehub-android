@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -91,6 +92,16 @@ class AppViewModel(
         started = kotlinx.coroutines.flow.SharingStarted.Eagerly,
         initialValue = "system",
     )
+    val appLockEnabled: StateFlow<Boolean?> = settingsStore.appLockEnabled
+        .map<Boolean, Boolean?> { it }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = null,
+        )
+
+    private val _appUnlocked = MutableStateFlow(false)
+    val appUnlocked: StateFlow<Boolean> = _appUnlocked.asStateFlow()
 
     private val _usage = MutableStateFlow(UsageUiState())
     val usage: StateFlow<UsageUiState> = _usage.asStateFlow()
@@ -415,6 +426,14 @@ class AppViewModel(
 
     fun setTheme(value: String) {
         viewModelScope.launch { settingsStore.setTheme(value) }
+    }
+
+    fun setAppLockEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setAppLockEnabled(enabled) }
+    }
+
+    fun setAppUnlocked(value: Boolean) {
+        _appUnlocked.value = value
     }
 
     fun clearSessionError() {

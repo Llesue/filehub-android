@@ -17,8 +17,8 @@
 ### 非目标（v1）
 
 - 全盘/后台自动扫描（只同步用户显式选择的相册/文件夹）。
-- 重命名检测（改名按删+增；P1）。
-- 同步回收站/历史版本（P1；删除同步默认关）。
+- 重命名检测（改名按删+增）。
+- 同步回收站/历史版本（删除同步默认关）。
 - 双向同步的自动合并（冲突一律列出，人工解决）。
 - 服务器端 mtime 之外的元数据（EXIF 写入、相册封面等）。
 
@@ -82,7 +82,7 @@ uploadId?, lastSyncedAt, error?, conflict?
 
 - 相册：`MediaStore.Images`/`Video` 按 bucket 查询；字段 `_ID, DISPLAY_NAME, SIZE, DATE_TAKEN, DATE_ADDED, RELATIVE_PATH, MIME_TYPE`。
 - 目录：SAF tree 递归；`DocumentFile` 的 name/size/lastModified；相对路径规范化（统一 `/`，拒绝 `..`）。
-- 过滤：隐藏文件（`.` 开头）、`.filehub-sync-trash`、临时文件（`.part`, `~$` 等）、用户自定义 glob（P1）。
+- 过滤：隐藏文件（`.` 开头）、`.filehub-sync-trash`、临时文件（`.part`, `~$` 等）。
 - 单次扫描先产出 `LocalSnapshot: Map<relativePath, LocalFile>`；不在此阶段读文件内容。
 
 ### 4.2 远端
@@ -179,7 +179,7 @@ uploadId?, lastSyncedAt, error?, conflict?
 | 两个都保留 | 本地重命名为 `name (local-YYYYMMDD-HHMMSS).ext`，上传；远端原文件下载为原名；任一步失败则回滚标记 |
 | 跳过 | 保留冲突状态，下轮仍显示，不重试传输 |
 
-- 批量解决 P1；v1 逐文件。
+- 冲突逐文件解决；不自动批量处理。
 - "两个都保留"需要 SAF rename；失败时回退"复制到 cache → 新建 → 删除旧文件"，仍失败则只保留冲突状态并提示。
 - 冲突不做自动"较新者胜"——不能信任设备/服务器时钟。
 
@@ -204,7 +204,6 @@ uploadId?, lastSyncedAt, error?, conflict?
   - 任一方已改 → 冲突，不删。
 - 删除远端是永久删除（FileHub 无回收站）；开启开关时二次确认，并提示"改名会按删+增处理"。
 - 批量删除失败：单文件失败记录，不阻塞；下轮重试。
-- P1：同步回收站（远端移到 `.filehub-sync-trash/`）。
 
 ---
 
@@ -366,6 +365,4 @@ uploadId?, lastSyncedAt, error?, conflict?
 ## 14. 待对齐
 
 1. FileHub 0.2.1 的 `mtime` 字段位置（`POST /uploads` vs `complete`）与校验范围。
-2. 是否需要同步回收站（删除远端前移动）——建议 P1。
-3. 双向"两个都保留"的 SAF rename 失败回退细节。
-4. 重命名检测（P1）是否用 size+mtime 启发式。
+2. 双向"两个都保留"的 SAF rename 失败回退细节。

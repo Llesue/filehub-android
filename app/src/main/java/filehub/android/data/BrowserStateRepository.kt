@@ -19,8 +19,8 @@ data class BrowserState(
 ) {
     companion object {
         val Default = BrowserState(
-            sort = FileSort.Name,
-            order = SortOrder.Asc,
+            sort = FileSort.Modified,
+            order = SortOrder.Desc,
             view = BrowserViewMode.List,
             listIndex = 0,
             listOffset = 0,
@@ -35,9 +35,9 @@ class BrowserStateRepository(private val dao: BrowserStateDao) {
         withContext(Dispatchers.IO) {
             val row = dao.get(profileId, rootId, path) ?: return@withContext null
             val sort = runCatching { FileSort.entries.first { it.apiValue == row.sort } }
-                .getOrDefault(FileSort.Name)
+                .getOrDefault(FileSort.Modified)
             val order = runCatching { SortOrder.entries.first { it.apiValue == row.order } }
-                .getOrDefault(SortOrder.Asc)
+                .getOrDefault(SortOrder.Desc)
             val view = runCatching { BrowserViewMode.entries.first { it.storageValue == row.view } }
                 .getOrDefault(BrowserViewMode.List)
             BrowserState(

@@ -410,7 +410,7 @@ interface SyncLogDao {
         SyncRunEntity::class,
         SyncLogEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class SyncDatabase : RoomDatabase() {
@@ -422,6 +422,17 @@ abstract class SyncDatabase : RoomDatabase() {
     abstract fun syncLogDao(): SyncLogDao
 
     companion object {
+        /** Moves old default browser states to newest-first without touching custom sorts. */
+        val MIGRATION_13_14: Migration = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "UPDATE browser_state SET sort = 'modified', \"order\" = 'desc', " +
+                        "listIndex = 0, listOffset = 0, gridIndex = 0, gridOffset = 0 " +
+                        "WHERE sort = 'name' AND \"order\" = 'asc'",
+                )
+            }
+        }
+
         /** Adds per-category transfer counts for the status card. */
         val MIGRATION_12_13: Migration = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {

@@ -6,6 +6,7 @@
     <string name="tab_browse">Browse</string>
     <string name="tab_my">Me</string>
 
+    <string name="server_loading">Loading…</string>
     <string name="servers_empty_title">No servers yet</string>
     <string name="servers_empty_body">Add your first FileHub instance, then switch between servers from here.</string>
     <string name="server_picker_title">Select server</string>
@@ -72,7 +73,7 @@
     <string name="file_read_only">Read-only</string>
     <string name="file_read_only_reason">This location is read-only.</string>
     <string name="file_login_required">Device token expired. Sign in again.</string>
-    <string name="file_details">Properties</string>
+    <string name="file_details">Details</string>
     <string name="file_name">Name</string>
     <string name="file_type">Type</string>
     <string name="file_size">Size</string>
@@ -102,6 +103,11 @@
     <string name="file_type_label_archive">Archive</string>
     <string name="file_type_label_code">Code</string>
     <string name="file_type_label_apk">Android package</string>
+    <string name="file_type_label_installer">Installer</string>
+    <string name="file_type_label_app">App</string>
+    <string name="file_type_label_library">Library</string>
+    <string name="file_type_label_shortcut">Shortcut</string>
+    <string name="file_type_label_config">Config</string>
     <string name="file_type_label_ebook">E-book</string>
     <string name="file_type_label_font">Font</string>
     <string name="file_type_label_disk_image">Disk image</string>
@@ -135,8 +141,9 @@
     <string name="preview_loading">Loading preview…</string>
     <string name="preview_zoom_reset">Reset zoom</string>
     <string name="preview_unsupported">Preview is not available for this file yet.</string>
+    <string name="video_playback_failed">Cannot play this video. The device may not support its resolution or codec.</string>
     <string name="preview_text">Text preview</string>
-    <string name="selection_properties">Properties</string>
+    <string name="selection_properties">Details</string>
     <string name="search_title">Search</string>
     <string name="search_hint">Search filenames…</string>
     <string name="search_all">All locations</string>
@@ -321,6 +328,18 @@
     <string name="extract">Extract ZIP</string>
     <string name="archive_name">Archive name</string>
     <string name="appearance">Appearance</string>
+    <string name="security">Security</string>
+    <string name="app_lock">App lock</string>
+    <string name="app_lock_desc">Require authentication when opening or returning to the app</string>
+    <string name="app_lock_unavailable">Biometrics or screen lock are unavailable on this device</string>
+    <string name="app_lock_title">FileHub is locked</string>
+    <string name="app_lock_body">Unlock to view servers and files</string>
+    <string name="app_lock_unlock">Unlock</string>
+    <string name="app_lock_prompt_title">Unlock FileHub</string>
+    <string name="app_lock_prompt_subtitle">Verify your identity to continue</string>
+    <string name="app_lock_enable_title">Enable app lock</string>
+    <string name="app_lock_disable_title">Disable app lock</string>
+    <string name="app_lock_failed">Authentication failed. Try again.</string>
     <string name="theme">Theme</string>
     <string name="theme_system">Follow system</string>
     <string name="theme_light">Light</string>
@@ -591,7 +610,7 @@
     <string name="preview_open_as_text">Open as text</string>
     <string name="preview_download">Download</string>
     <string name="preview_share">Share</string>
-    <string name="preview_details">Properties</string>
+    <string name="preview_details">Details</string>
     <string name="preview_copy_all">Copy all</string>
     <string name="preview_copied">Copied</string>
     <string name="preview_reload">Reload</string>
